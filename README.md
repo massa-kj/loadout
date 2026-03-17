@@ -88,3 +88,13 @@ Core does not embed tool-specific logic.
 **Plan** — a deterministic list of actions computed from profile vs state.
 
 **State** — the authoritative record of what the system has installed and how to remove it.
+
+## Documentation
+
+Design documents are in [`docs/`](docs/README.md).
+
+| | |
+|---|---|
+| [Architecture](docs/architecture/README.md) | System design principles, execution model, and architectural boundaries |
+| [Guides](docs/guides/README.md) | How to use the system and how to implement features or backends |
+| [Specifications](docs/specs/README.md) | Formal specifications such as state schema and execution contracts |
