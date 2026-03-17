@@ -1,0 +1,24 @@
+# .dockerignore for tests/environment/linux/docker test environment
+#
+# This file is used by tests/environment/linux/docker/Dockerfile for integration testing.
+# It excludes files that should not be copied into the test container.
+#
+# Note: Docker requires .dockerignore at the build context root.
+
+# Version control
+.git
+.gitignore
+
+# Local development files
+*.swp
+*.swo
+*~
+
+# Build artifacts
+*.log
+
+# Temporary files
+tmp/
+
+# State files (should be initialized fresh in container)
+state
