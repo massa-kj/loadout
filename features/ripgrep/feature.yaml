@@ -1,0 +1,11 @@
+spec_version: 1
+description: ripgrep
+depends: []
+
+requires:
+  - name: package_manager
+
+resources:
+  - kind: package
+    id: pkg:ripgrep
+    name: ripgrep

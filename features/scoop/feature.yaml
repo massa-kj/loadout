@@ -1,0 +1,7 @@
+spec_version: 1
+mode: script
+description: Scoop package manager for Windows
+depends: []
+
+provides:
+  - name: package_manager

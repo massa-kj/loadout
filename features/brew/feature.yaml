@@ -1,0 +1,9 @@
+spec_version: 1
+mode: script
+description: |
+  Homebrew package manager for Linux and WSL
+  .profile settings must be manuaally removed if Homebrew is uninstalled
+depends: []
+
+provides:
+  - name: package_manager

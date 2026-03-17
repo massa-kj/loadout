@@ -1,0 +1,9 @@
+spec_version: 1
+mode: script
+description: npm global packages for Node.js development
+depends:
+  - node
+packages:
+  - name: typescript
+  - name: typescript-language-server
+  - name: eslint

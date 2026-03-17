@@ -1,0 +1,4 @@
+depends:
+  - scoop
+  - powershell
+  - vcredist

@@ -1,0 +1,13 @@
+spec_version: 1
+mode: script
+description: Rust toolchain with rust-analyzer language server
+depends: []
+
+requires:
+  - name: runtime_manager
+
+runtimes:
+  # version resolved from profile config (LOADOUT_FEATURE_CONFIG_VERSION)
+  - name: rust
+  - name: rust-analyzer
+    version: "2025-05-26"

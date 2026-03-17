@@ -1,0 +1,13 @@
+spec_version: 1
+description: Polyglot runtime version manager
+depends: []
+
+provides:
+  - name: runtime_manager
+  - name: package_manager
+
+resources:
+
+  - kind: package
+    id: pkg:mise
+    name: mise

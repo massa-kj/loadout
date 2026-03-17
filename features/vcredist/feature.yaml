@@ -1,0 +1,7 @@
+spec_version: 1
+mode: script
+description: Visual C++ Redistributable runtime libraries (Windows)
+depends: []
+
+packages:
+  - vcredist2022

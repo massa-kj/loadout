@@ -1,0 +1,18 @@
+spec_version: 1
+mode: declarative
+description: Sample declarative feature demonstrating package + fs resource kinds
+depends: []
+
+resources:
+  # Package resource: managed by policy-resolved backend
+  - kind: package
+    id: package:jq
+    name: jq
+
+  # FS resource: creates a marker file at ~/.config/loadout/test-declarative
+  - kind: fs
+    id: fs:test-declarative-marker
+    source: files/marker
+    path: ~/.config/loadout/test-declarative
+    entry_type: file
+    op: link

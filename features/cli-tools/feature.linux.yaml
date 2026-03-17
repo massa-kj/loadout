@@ -1,0 +1,12 @@
+depends: []
+
+resources:
+  - kind: package
+    id: pkg:fd
+    name: fd
+  - kind: package
+    id: pkg:ghq
+    name: ghq
+  - kind: package
+    id: pkg:unzip
+    name: unzip
