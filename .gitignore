@@ -1,0 +1,6 @@
+# Rust build output
+/target/
+
+# Test environment artifacts
+tests/environment/windows/logs/
+tests/environment/windows/sandbox/loadout.wsb
