@@ -1,0 +1,13 @@
+policy: "test.linux.apt"
+
+package:
+  default_backend: apt
+  overrides: {}
+
+runtime:
+  default_backend: mise
+  overrides: {}
+
+fs:
+  # Disable backups inside test containers — no need to preserve originals.
+  backup: false

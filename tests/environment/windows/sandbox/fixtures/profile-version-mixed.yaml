@@ -1,0 +1,8 @@
+# Mixed profile: versioned (node) and non-versioned (git, scoop, powershell) features.
+# Verifies: versioned features record runtime.version; non-versioned do not.
+# Used by: version_mixed scenario
+features:
+  scoop: {}
+  mise: {}
+  node:
+    version: "20"

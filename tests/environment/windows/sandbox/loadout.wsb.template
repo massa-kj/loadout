@@ -1,0 +1,25 @@
+<Configuration>
+  <MappedFolders>
+    <!-- loadout repo (ReadOnly) -->
+    <MappedFolder>
+      <HostFolder>__LOADOUT_ROOT__</HostFolder>
+      <SandboxFolder>C:\host-loadout</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+
+    <!-- logs (ReadWrite) -->
+    <MappedFolder>
+      <HostFolder>__LOGS_ROOT__</HostFolder>
+      <SandboxFolder>C:\logs</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+
+  <LogonCommand>
+    <Command>__LOGON_COMMAND__</Command>
+  </LogonCommand>
+
+  <Networking>Enable</Networking>
+  <VGpu>Disable</VGpu>
+  <MemoryInMB>4096</MemoryInMB>
+</Configuration>

@@ -1,0 +1,13 @@
+policy: "test.windows"
+
+package:
+  default_backend: scoop
+  overrides: {}
+
+runtime:
+  default_backend: mise
+  overrides: {}
+
+fs:
+  # Disable backups inside Sandbox — no need to preserve originals.
+  backup: false

@@ -1,0 +1,8 @@
+# Broader feature set: used for the initial install phase in the uninstall scenario.
+# Includes brew as the package_manager provider and tmux as the tracked extra feature
+# so that partial uninstall has something meaningful to remove.
+# Used by: uninstall scenario (first apply)
+features:
+  brew: {}
+  fzf: {}
+  ripgrep: {}
