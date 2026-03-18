@@ -127,5 +127,9 @@ fn find_powershell() -> &'static str {
         .map(|o| o.status.success())
         .unwrap_or(false);
 
-    if available { "pwsh" } else { "powershell" }
+    if available {
+        "pwsh"
+    } else {
+        "powershell"
+    }
 }
