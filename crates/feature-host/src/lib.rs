@@ -147,7 +147,9 @@ fn execute_script(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .map_err(|e| FeatureHostError::SpawnFailed { reason: e.to_string() })?;
+        .map_err(|e| FeatureHostError::SpawnFailed {
+            reason: e.to_string(),
+        })?;
 
     if output.status.success() {
         Ok(FeatureOutput {
@@ -251,7 +253,11 @@ mod tests {
     #[test]
     fn install_script_nonzero_exit_returns_error() {
         let tmp = tempfile::tempdir().unwrap();
-        write_ok_script(tmp.path(), "install.sh", "echo 'install failed' >&2\nexit 2");
+        write_ok_script(
+            tmp.path(),
+            "install.sh",
+            "echo 'install failed' >&2\nexit 2",
+        );
         let meta = make_meta(tmp.path().to_str().unwrap());
         let dirs = make_dirs(&tmp);
 
@@ -342,10 +348,22 @@ mod tests {
         };
 
         let out = run_install(&meta, &make_feature_id("core/git"), &dirs).unwrap();
-        assert!(out.stdout.contains("core/git"), "LOADOUT_FEATURE_ID missing");
-        assert!(out.stdout.contains("/tmp/cfg/loadout"), "LOADOUT_CONFIG_HOME missing");
-        assert!(out.stdout.contains("/tmp/data/loadout"), "LOADOUT_DATA_HOME missing");
-        assert!(out.stdout.contains("/tmp/state/loadout"), "LOADOUT_STATE_HOME missing");
+        assert!(
+            out.stdout.contains("core/git"),
+            "LOADOUT_FEATURE_ID missing"
+        );
+        assert!(
+            out.stdout.contains("/tmp/cfg/loadout"),
+            "LOADOUT_CONFIG_HOME missing"
+        );
+        assert!(
+            out.stdout.contains("/tmp/data/loadout"),
+            "LOADOUT_DATA_HOME missing"
+        );
+        assert!(
+            out.stdout.contains("/tmp/state/loadout"),
+            "LOADOUT_STATE_HOME missing"
+        );
     }
 
     // --- FeatureHostError display -------------------------------------------
@@ -353,10 +371,19 @@ mod tests {
     #[test]
     fn error_messages_are_nonempty() {
         let errors: &[FeatureHostError] = &[
-            FeatureHostError::ScriptNotFound { path: "/tmp/install.sh".to_string() },
-            FeatureHostError::SourceDirNotFound { path: "/tmp/feat".to_string() },
-            FeatureHostError::SpawnFailed { reason: "no sh".to_string() },
-            FeatureHostError::ScriptFailed { exit_code: 1, stderr: "boom".to_string() },
+            FeatureHostError::ScriptNotFound {
+                path: "/tmp/install.sh".to_string(),
+            },
+            FeatureHostError::SourceDirNotFound {
+                path: "/tmp/feat".to_string(),
+            },
+            FeatureHostError::SpawnFailed {
+                reason: "no sh".to_string(),
+            },
+            FeatureHostError::ScriptFailed {
+                exit_code: 1,
+                stderr: "boom".to_string(),
+            },
         ];
         for e in errors {
             assert!(!e.to_string().is_empty(), "empty message: {e:?}");

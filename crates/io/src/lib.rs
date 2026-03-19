@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Serialize};
 use thiserror::Error;
 
 /// Errors returned by I/O operations.
@@ -86,7 +86,8 @@ pub fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), IoE
         make_dirs(parent)?;
     }
 
-    let serialized = serde_json::to_string_pretty(value).map_err(|e| IoError::Serialize { source: e })?;
+    let serialized =
+        serde_json::to_string_pretty(value).map_err(|e| IoError::Serialize { source: e })?;
 
     let tmp_path = path.with_extension(format!(
         "{}.tmp",
@@ -217,7 +218,10 @@ mod tests {
 
         // Tmp file must be cleaned up after success.
         let tmp = path.with_extension("json.tmp");
-        assert!(!tmp.exists(), "tmp file should not remain after atomic write");
+        assert!(
+            !tmp.exists(),
+            "tmp file should not remain after atomic write"
+        );
     }
 
     // --- copy_file ---

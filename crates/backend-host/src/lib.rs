@@ -123,7 +123,9 @@ pub struct BackendRegistry {
 impl BackendRegistry {
     /// Create an empty registry.
     pub fn new() -> Self {
-        Self { backends: HashMap::new() }
+        Self {
+            backends: HashMap::new(),
+        }
     }
 
     /// Register a backend under the given canonical ID.
@@ -140,7 +142,9 @@ impl BackendRegistry {
         self.backends
             .get(id.as_str())
             .map(|b| b.as_ref())
-            .ok_or_else(|| BackendError::UnknownBackend { id: id.as_str().to_string() })
+            .ok_or_else(|| BackendError::UnknownBackend {
+                id: id.as_str().to_string(),
+            })
     }
 }
 
@@ -228,7 +232,12 @@ impl ScriptBackend {
             }
         }
 
-        Ok(Self { backend_dir, apply_script, remove_script, status_script })
+        Ok(Self {
+            backend_dir,
+            apply_script,
+            remove_script,
+            status_script,
+        })
     }
 
     /// Return the backend directory path (used for diagnostics).
@@ -257,7 +266,9 @@ impl Backend for ScriptBackend {
             "installed" => Ok(ResourceState::Installed),
             "not_installed" => Ok(ResourceState::NotInstalled),
             "unknown" => Ok(ResourceState::Unknown),
-            other => Err(BackendError::UnrecognisedStatus { output: other.to_string() }),
+            other => Err(BackendError::UnrecognisedStatus {
+                output: other.to_string(),
+            }),
         }
     }
 }
@@ -291,14 +302,19 @@ fn run_script(script: &std::path::Path, json: &str) -> Result<(), BackendError> 
         .stdout(Stdio::inherit())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| BackendError::SpawnFailed { reason: e.to_string() })?;
+        .map_err(|e| BackendError::SpawnFailed {
+            reason: e.to_string(),
+        })?;
 
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(json.as_bytes());
     }
 
-    let output = child.wait_with_output()
-        .map_err(|e| BackendError::SpawnFailed { reason: e.to_string() })?;
+    let output = child
+        .wait_with_output()
+        .map_err(|e| BackendError::SpawnFailed {
+            reason: e.to_string(),
+        })?;
 
     if output.status.success() {
         Ok(())
@@ -318,14 +334,19 @@ fn run_script_with_output(script: &std::path::Path, json: &str) -> Result<String
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| BackendError::SpawnFailed { reason: e.to_string() })?;
+        .map_err(|e| BackendError::SpawnFailed {
+            reason: e.to_string(),
+        })?;
 
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(json.as_bytes());
     }
 
-    let output = child.wait_with_output()
-        .map_err(|e| BackendError::SpawnFailed { reason: e.to_string() })?;
+    let output = child
+        .wait_with_output()
+        .map_err(|e| BackendError::SpawnFailed {
+            reason: e.to_string(),
+        })?;
 
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -385,10 +406,16 @@ mod tests {
 
     impl Backend for AlwaysFailBackend {
         fn apply(&self, _r: &DesiredResource) -> Result<(), BackendError> {
-            Err(BackendError::ScriptFailed { exit_code: 1, stderr: "fail".to_string() })
+            Err(BackendError::ScriptFailed {
+                exit_code: 1,
+                stderr: "fail".to_string(),
+            })
         }
         fn remove(&self, _r: &DesiredResource) -> Result<(), BackendError> {
-            Err(BackendError::ScriptFailed { exit_code: 1, stderr: "fail".to_string() })
+            Err(BackendError::ScriptFailed {
+                exit_code: 1,
+                stderr: "fail".to_string(),
+            })
         }
         fn status(&self, _r: &DesiredResource) -> Result<ResourceState, BackendError> {
             Ok(ResourceState::NotInstalled)
@@ -475,8 +502,14 @@ mod tests {
     #[test]
     fn mock_backend_status_variants() {
         let r = package_resource("git", "core/brew");
-        assert_eq!(AlwaysOkBackend.status(&r).unwrap(), ResourceState::Installed);
-        assert_eq!(AlwaysFailBackend.status(&r).unwrap(), ResourceState::NotInstalled);
+        assert_eq!(
+            AlwaysOkBackend.status(&r).unwrap(),
+            ResourceState::Installed
+        );
+        assert_eq!(
+            AlwaysFailBackend.status(&r).unwrap(),
+            ResourceState::NotInstalled
+        );
     }
 
     // --- ScriptBackend::load tests ------------------------------------------
@@ -506,7 +539,10 @@ mod tests {
     fn script_backend_load_unsupported_api_version() {
         let dir = make_script_backend_dir(99, &["apply.sh", "remove.sh", "status.sh"]);
         let err = ScriptBackend::load(dir.path().to_path_buf()).unwrap_err();
-        assert!(matches!(err, BackendError::UnsupportedApiVersion { version: 99, .. }));
+        assert!(matches!(
+            err,
+            BackendError::UnsupportedApiVersion { version: 99, .. }
+        ));
     }
 
     #[test]
@@ -522,15 +558,36 @@ mod tests {
     #[test]
     fn backend_error_messages_are_nonempty() {
         let errors: &[BackendError] = &[
-            BackendError::UnknownBackend { id: "core/brew".to_string() },
-            BackendError::DirNotFound { path: "/tmp/x".to_string() },
-            BackendError::ScriptNotFound { path: "/tmp/apply.sh".to_string() },
-            BackendError::InvalidMeta { path: "/tmp/backend.yaml".to_string(), reason: "bad".to_string() },
-            BackendError::UnsupportedApiVersion { version: 2, path: "/tmp".to_string() },
-            BackendError::ScriptFailed { exit_code: 1, stderr: "oops".to_string() },
-            BackendError::SpawnFailed { reason: "no sh".to_string() },
-            BackendError::UnrecognisedStatus { output: "??".to_string() },
-            BackendError::NotSupported { kind: "runtime".to_string() },
+            BackendError::UnknownBackend {
+                id: "core/brew".to_string(),
+            },
+            BackendError::DirNotFound {
+                path: "/tmp/x".to_string(),
+            },
+            BackendError::ScriptNotFound {
+                path: "/tmp/apply.sh".to_string(),
+            },
+            BackendError::InvalidMeta {
+                path: "/tmp/backend.yaml".to_string(),
+                reason: "bad".to_string(),
+            },
+            BackendError::UnsupportedApiVersion {
+                version: 2,
+                path: "/tmp".to_string(),
+            },
+            BackendError::ScriptFailed {
+                exit_code: 1,
+                stderr: "oops".to_string(),
+            },
+            BackendError::SpawnFailed {
+                reason: "no sh".to_string(),
+            },
+            BackendError::UnrecognisedStatus {
+                output: "??".to_string(),
+            },
+            BackendError::NotSupported {
+                kind: "runtime".to_string(),
+            },
         ];
         for e in errors {
             assert!(!e.to_string().is_empty(), "empty error message for {e:?}");

@@ -7,8 +7,8 @@
 //!
 //! See: `docs/specs/algorithms/resolver.md`
 
-use std::collections::{HashMap, HashSet};
 use model::{CanonicalFeatureId, FeatureIndex, ResolvedFeatureOrder};
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 /// Errors produced by the resolver.
@@ -20,11 +20,17 @@ pub enum ResolverError {
 
     /// An explicit `dep.depends` entry points to a feature not in the desired set.
     #[error("feature '{dependent}' depends on '{dependency}', but '{dependency}' is not in the desired set")]
-    MissingDependency { dependent: String, dependency: String },
+    MissingDependency {
+        dependent: String,
+        dependency: String,
+    },
 
     /// A `dep.requires` capability has no provider in the desired set.
     #[error("feature '{requirer}' requires capability '{capability}', but no provider is in the desired set")]
-    MissingCapabilityProvider { requirer: String, capability: String },
+    MissingCapabilityProvider {
+        requirer: String,
+        capability: String,
+    },
 
     /// A dependency cycle was detected.
     #[error("dependency cycle detected: {cycle}")]
@@ -52,7 +58,9 @@ pub fn resolve(
     // Validate all desired features exist in the index.
     for id in desired_features {
         if !feature_index.features.contains_key(id.as_str()) {
-            return Err(ResolverError::FeatureNotFound { id: id.as_str().into() });
+            return Err(ResolverError::FeatureNotFound {
+                id: id.as_str().into(),
+            });
         }
     }
 
@@ -124,10 +132,16 @@ pub fn resolve(
     // State per node:
     //   White (not visited) → Gray (in current DFS path) → Black (fully processed)
     #[derive(Clone, Copy, PartialEq)]
-    enum Color { White, Gray, Black }
+    enum Color {
+        White,
+        Gray,
+        Black,
+    }
 
-    let mut color: HashMap<&str, Color> =
-        desired_features.iter().map(|id| (id.as_str(), Color::White)).collect();
+    let mut color: HashMap<&str, Color> = desired_features
+        .iter()
+        .map(|id| (id.as_str(), Color::White))
+        .collect();
 
     let mut result: Vec<&str> = Vec::with_capacity(desired_features.len());
 
@@ -206,19 +220,34 @@ mod tests {
                     source_dir: format!("/features/{id}"),
                     dep: DepSpec {
                         depends: depends.iter().map(|s| s.to_string()).collect(),
-                        requires: requires.iter().map(|s| CapabilityRef { name: s.to_string() }).collect(),
-                        provides: provides.iter().map(|s| CapabilityRef { name: s.to_string() }).collect(),
+                        requires: requires
+                            .iter()
+                            .map(|s| CapabilityRef {
+                                name: s.to_string(),
+                            })
+                            .collect(),
+                        provides: provides
+                            .iter()
+                            .map(|s| CapabilityRef {
+                                name: s.to_string(),
+                            })
+                            .collect(),
                     },
                     spec: None,
                 };
                 (id.to_string(), meta)
             })
             .collect();
-        FeatureIndex { schema_version: 1, features }
+        FeatureIndex {
+            schema_version: 1,
+            features,
+        }
     }
 
     fn ids(raw: &[&str]) -> Vec<CanonicalFeatureId> {
-        raw.iter().map(|s| CanonicalFeatureId::new(*s).unwrap()).collect()
+        raw.iter()
+            .map(|s| CanonicalFeatureId::new(*s).unwrap())
+            .collect()
     }
 
     fn as_strs(order: &ResolvedFeatureOrder) -> Vec<&str> {
@@ -227,10 +256,7 @@ mod tests {
 
     #[test]
     fn no_deps() {
-        let index = make_index(&[
-            ("core/bash", &[], &[], &[]),
-            ("core/git", &[], &[], &[]),
-        ]);
+        let index = make_index(&[("core/bash", &[], &[], &[]), ("core/git", &[], &[], &[])]);
         let desired = ids(&["core/bash", "core/git"]);
         let order = resolve(&index, &desired).unwrap();
         // Both are present; order is deterministic (alphabetical when no deps).
@@ -267,7 +293,10 @@ mod tests {
         let strs = as_strs(&order);
         let brew_pos = strs.iter().position(|&s| s == "core/brew").unwrap();
         let git_pos = strs.iter().position(|&s| s == "core/git").unwrap();
-        assert!(brew_pos < git_pos, "brew (provider) must come before git (requirer)");
+        assert!(
+            brew_pos < git_pos,
+            "brew (provider) must come before git (requirer)"
+        );
     }
 
     #[test]
@@ -315,12 +344,13 @@ mod tests {
 
     #[test]
     fn missing_capability_provider() {
-        let index = make_index(&[
-            ("core/git", &[], &["package_manager"], &[]),
-        ]);
+        let index = make_index(&[("core/git", &[], &["package_manager"], &[])]);
         let desired = ids(&["core/git"]); // no provider for package_manager
         let err = resolve(&index, &desired).unwrap_err();
-        assert!(matches!(err, ResolverError::MissingCapabilityProvider { .. }));
+        assert!(matches!(
+            err,
+            ResolverError::MissingCapabilityProvider { .. }
+        ));
     }
 
     #[test]

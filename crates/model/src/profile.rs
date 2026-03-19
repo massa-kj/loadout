@@ -5,8 +5,8 @@
 //!
 //! See: `docs/specs/data/profile.md`
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// User-declared desired environment.
 ///
@@ -53,9 +53,6 @@ features:
     fn round_trip_with_version() {
         let json = r#"{"features":{"node":{"version":"22.17.1"}}}"#;
         let p: Profile = serde_json::from_str(json).unwrap();
-        assert_eq!(
-            p.features["node"].version.as_deref(),
-            Some("22.17.1")
-        );
+        assert_eq!(p.features["node"].version.as_deref(), Some("22.17.1"));
     }
 }

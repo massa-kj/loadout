@@ -45,7 +45,11 @@ pub enum Event {
     /// A feature failed; execution continues to the next feature.
     FeatureFailed { id: String, error: String },
     /// A single resource failed within a feature.
-    ResourceFailed { feature_id: String, resource_id: String, error: String },
+    ResourceFailed {
+        feature_id: String,
+        resource_id: String,
+        error: String,
+    },
 }
 
 /// Fatal executor errors (unrecoverable; stop all execution).
@@ -124,13 +128,22 @@ pub fn execute(
         let id_str = action.feature.as_str().to_string();
         on_event(Event::FeatureStart { id: id_str.clone() });
 
-        let result = execute_action(ctx, state, &action.feature, &action.operation, &action.details);
+        let result = execute_action(
+            ctx,
+            state,
+            &action.feature,
+            &action.operation,
+            &action.details,
+        );
 
         match result {
             Ok(()) => {
                 // Commit state after each successful feature.
-                state::commit(ctx.state_path, state)
-                    .map_err(|e| ExecutorError::StateCommitFailed { reason: e.to_string() })?;
+                state::commit(ctx.state_path, state).map_err(|e| {
+                    ExecutorError::StateCommitFailed {
+                        reason: e.to_string(),
+                    }
+                })?;
                 on_event(Event::FeatureDone { id: id_str.clone() });
                 report.executed.push(ExecutedFeature {
                     id: id_str,
@@ -143,7 +156,10 @@ pub fn execute(
                     resource_id,
                     error: error.clone(),
                 });
-                on_event(Event::FeatureFailed { id: id_str.clone(), error: error.clone() });
+                on_event(Event::FeatureFailed {
+                    id: id_str.clone(),
+                    error: error.clone(),
+                });
                 report.failed.push(FailedFeature {
                     id: id_str,
                     operation: format!("{:?}", action.operation),
@@ -151,7 +167,10 @@ pub fn execute(
                 });
             }
             Err(FeatureError::Feature { error }) => {
-                on_event(Event::FeatureFailed { id: id_str.clone(), error: error.clone() });
+                on_event(Event::FeatureFailed {
+                    id: id_str.clone(),
+                    error: error.clone(),
+                });
                 report.failed.push(FailedFeature {
                     id: id_str,
                     operation: format!("{:?}", action.operation),
@@ -176,7 +195,9 @@ enum FeatureError {
 
 impl From<feature_host::FeatureHostError> for FeatureError {
     fn from(e: feature_host::FeatureHostError) -> Self {
-        FeatureError::Feature { error: e.to_string() }
+        FeatureError::Feature {
+            error: e.to_string(),
+        }
     }
 }
 
@@ -207,19 +228,23 @@ fn execute_action(
                 feature_host::run_install(meta, feature_id, ctx.dirs)
                     .map_err(FeatureError::from)?;
                 // Script features are recorded with empty resources.
-                state.features.insert(id_str.to_string(), FeatureState { resources: vec![] });
+                state
+                    .features
+                    .insert(id_str.to_string(), FeatureState { resources: vec![] });
             }
             FeatureMode::Declarative => {
-                let desired = ctx
-                    .graph
-                    .features
-                    .get(id_str)
-                    .ok_or_else(|| FeatureError::Feature {
-                        error: format!("desired resources not found for: {id_str}"),
-                    })?;
+                let desired =
+                    ctx.graph
+                        .features
+                        .get(id_str)
+                        .ok_or_else(|| FeatureError::Feature {
+                            error: format!("desired resources not found for: {id_str}"),
+                        })?;
 
                 let resources = apply_resources(ctx, id_str, &desired.resources)?;
-                state.features.insert(id_str.to_string(), FeatureState { resources });
+                state
+                    .features
+                    .insert(id_str.to_string(), FeatureState { resources });
             }
         },
 
@@ -247,21 +272,25 @@ fn execute_action(
                         .map_err(FeatureError::from)?;
                     feature_host::run_install(meta, feature_id, ctx.dirs)
                         .map_err(FeatureError::from)?;
-                    state.features.insert(id_str.to_string(), FeatureState { resources: vec![] });
+                    state
+                        .features
+                        .insert(id_str.to_string(), FeatureState { resources: vec![] });
                 }
                 FeatureMode::Declarative => {
                     if let Some(feat_state) = state.features.get(id_str) {
                         remove_state_resources(ctx, id_str, &feat_state.resources.clone())?;
                     }
-                    let desired = ctx
-                        .graph
-                        .features
-                        .get(id_str)
-                        .ok_or_else(|| FeatureError::Feature {
-                            error: format!("desired resources not found for: {id_str}"),
-                        })?;
+                    let desired =
+                        ctx.graph
+                            .features
+                            .get(id_str)
+                            .ok_or_else(|| FeatureError::Feature {
+                                error: format!("desired resources not found for: {id_str}"),
+                            })?;
                     let resources = apply_resources(ctx, id_str, &desired.resources)?;
-                    state.features.insert(id_str.to_string(), FeatureState { resources });
+                    state
+                        .features
+                        .insert(id_str.to_string(), FeatureState { resources });
                 }
             }
         }
@@ -274,20 +303,24 @@ fn execute_action(
                     .map_err(FeatureError::from)?;
                 feature_host::run_install(meta, feature_id, ctx.dirs)
                     .map_err(FeatureError::from)?;
-                state.features.insert(id_str.to_string(), FeatureState { resources: vec![] });
+                state
+                    .features
+                    .insert(id_str.to_string(), FeatureState { resources: vec![] });
             } else {
                 if let Some(feat_state) = state.features.get(id_str) {
                     remove_state_resources(ctx, id_str, &feat_state.resources.clone())?;
                 }
-                let desired = ctx
-                    .graph
-                    .features
-                    .get(id_str)
-                    .ok_or_else(|| FeatureError::Feature {
-                        error: format!("desired resources not found for: {id_str}"),
-                    })?;
+                let desired =
+                    ctx.graph
+                        .features
+                        .get(id_str)
+                        .ok_or_else(|| FeatureError::Feature {
+                            error: format!("desired resources not found for: {id_str}"),
+                        })?;
                 let resources = apply_resources(ctx, id_str, &desired.resources)?;
-                state.features.insert(id_str.to_string(), FeatureState { resources });
+                state
+                    .features
+                    .insert(id_str.to_string(), FeatureState { resources });
             }
         }
 
@@ -331,9 +364,10 @@ fn execute_action(
             )?;
 
             // Merge new resources into existing state.
-            let feat_state = state.features.entry(id_str.to_string()).or_insert_with(|| {
-                FeatureState { resources: vec![] }
-            });
+            let feat_state = state
+                .features
+                .entry(id_str.to_string())
+                .or_insert_with(|| FeatureState { resources: vec![] });
             feat_state.resources.extend(new_resources);
         }
     }
@@ -375,29 +409,53 @@ fn apply_one_resource(
     dr: &DesiredResource,
 ) -> Result<Resource, String> {
     match &dr.kind {
-        DesiredResourceKind::Package { name, desired_backend } => {
-            let backend = ctx.registry.get(desired_backend).map_err(|e| e.to_string())?;
+        DesiredResourceKind::Package {
+            name,
+            desired_backend,
+        } => {
+            let backend = ctx
+                .registry
+                .get(desired_backend)
+                .map_err(|e| e.to_string())?;
             backend.apply(dr).map_err(|e| e.to_string())?;
             Ok(Resource {
                 id: dr.id.clone(),
                 kind: ResourceKind::Package {
                     backend: desired_backend.clone(),
-                    package: PackageDetails { name: name.clone(), version: None },
+                    package: PackageDetails {
+                        name: name.clone(),
+                        version: None,
+                    },
                 },
             })
         }
-        DesiredResourceKind::Runtime { name, version, desired_backend } => {
-            let backend = ctx.registry.get(desired_backend).map_err(|e| e.to_string())?;
+        DesiredResourceKind::Runtime {
+            name,
+            version,
+            desired_backend,
+        } => {
+            let backend = ctx
+                .registry
+                .get(desired_backend)
+                .map_err(|e| e.to_string())?;
             backend.apply(dr).map_err(|e| e.to_string())?;
             Ok(Resource {
                 id: dr.id.clone(),
                 kind: ResourceKind::Runtime {
                     backend: desired_backend.clone(),
-                    runtime: RuntimeDetails { name: name.clone(), version: version.clone() },
+                    runtime: RuntimeDetails {
+                        name: name.clone(),
+                        version: version.clone(),
+                    },
                 },
             })
         }
-        DesiredResourceKind::Fs { path, entry_type, op, .. } => {
+        DesiredResourceKind::Fs {
+            path,
+            entry_type,
+            op,
+            ..
+        } => {
             // Phase 4: Fs operations are handled directly by the executor.
             // Phase 5 will extract this into a builtin `core/fs` backend.
             apply_fs(path, entry_type, op)?;
@@ -447,7 +505,10 @@ fn remove_one_state_resource(ctx: &ExecutionContext<'_>, res: &Resource) -> Resu
                     desired_backend: backend.clone(),
                 },
             };
-            let b = ctx.registry.get(backend).map_err(|e: BackendError| e.to_string())?;
+            let b = ctx
+                .registry
+                .get(backend)
+                .map_err(|e: BackendError| e.to_string())?;
             b.remove(&dr).map_err(|e| e.to_string())?;
         }
         ResourceKind::Runtime { backend, runtime } => {
@@ -459,7 +520,10 @@ fn remove_one_state_resource(ctx: &ExecutionContext<'_>, res: &Resource) -> Resu
                     desired_backend: backend.clone(),
                 },
             };
-            let b = ctx.registry.get(backend).map_err(|e: BackendError| e.to_string())?;
+            let b = ctx
+                .registry
+                .get(backend)
+                .map_err(|e: BackendError| e.to_string())?;
             b.remove(&dr).map_err(|e| e.to_string())?;
         }
         ResourceKind::Fs { fs } => {
@@ -478,17 +542,12 @@ use model::desired_resource_graph::{FsEntryType as DesiredFsEntryType, FsOp as D
 /// Perform a filesystem apply operation (link or copy).
 ///
 /// `path` supports `~` prefix which is expanded to `$HOME`.
-fn apply_fs(
-    path: &str,
-    entry_type: &DesiredFsEntryType,
-    op: &DesiredFsOp,
-) -> Result<(), String> {
+fn apply_fs(path: &str, entry_type: &DesiredFsEntryType, op: &DesiredFsOp) -> Result<(), String> {
     let target = expand_home(path);
 
     // Ensure parent directory exists.
     if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("create_dir_all {:?}: {e}", parent))?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("create_dir_all {:?}: {e}", parent))?;
     }
 
     match op {
@@ -529,8 +588,7 @@ fn remove_fs(path: &str, entry_type: &FsEntryType) -> Result<(), String> {
     }
     match entry_type {
         FsEntryType::File | FsEntryType::Symlink | FsEntryType::Junction => {
-            std::fs::remove_file(&target)
-                .map_err(|e| format!("remove file {:?}: {e}", target))?;
+            std::fs::remove_file(&target).map_err(|e| format!("remove file {:?}: {e}", target))?;
         }
         FsEntryType::Dir => {
             std::fs::remove_dir_all(&target)
@@ -593,9 +651,16 @@ mod tests {
 
     struct OkBackend;
     impl Backend for OkBackend {
-        fn apply(&self, _r: &DesiredResource) -> Result<(), BackendError> { Ok(()) }
-        fn remove(&self, _r: &DesiredResource) -> Result<(), BackendError> { Ok(()) }
-        fn status(&self, _r: &DesiredResource) -> Result<backend_host::ResourceState, BackendError> {
+        fn apply(&self, _r: &DesiredResource) -> Result<(), BackendError> {
+            Ok(())
+        }
+        fn remove(&self, _r: &DesiredResource) -> Result<(), BackendError> {
+            Ok(())
+        }
+        fn status(
+            &self,
+            _r: &DesiredResource,
+        ) -> Result<backend_host::ResourceState, BackendError> {
             Ok(backend_host::ResourceState::Installed)
         }
     }
@@ -603,12 +668,21 @@ mod tests {
     struct FailBackend;
     impl Backend for FailBackend {
         fn apply(&self, _r: &DesiredResource) -> Result<(), BackendError> {
-            Err(BackendError::ScriptFailed { exit_code: 1, stderr: "fail".to_string() })
+            Err(BackendError::ScriptFailed {
+                exit_code: 1,
+                stderr: "fail".to_string(),
+            })
         }
         fn remove(&self, _r: &DesiredResource) -> Result<(), BackendError> {
-            Err(BackendError::ScriptFailed { exit_code: 1, stderr: "fail".to_string() })
+            Err(BackendError::ScriptFailed {
+                exit_code: 1,
+                stderr: "fail".to_string(),
+            })
         }
-        fn status(&self, _r: &DesiredResource) -> Result<backend_host::ResourceState, BackendError> {
+        fn status(
+            &self,
+            _r: &DesiredResource,
+        ) -> Result<backend_host::ResourceState, BackendError> {
             Ok(backend_host::ResourceState::NotInstalled)
         }
     }
@@ -658,7 +732,10 @@ mod tests {
     fn make_index(entries: Vec<(&str, FeatureMeta)>) -> FeatureIndex {
         FeatureIndex {
             schema_version: FEATURE_INDEX_SCHEMA_VERSION,
-            features: entries.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+            features: entries
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect(),
         }
     }
 
@@ -682,7 +759,11 @@ mod tests {
     }
 
     fn make_action(feature: &str, op: Operation) -> PlanAction {
-        PlanAction { feature: feature_id(feature), operation: op, details: None }
+        PlanAction {
+            feature: feature_id(feature),
+            operation: op,
+            details: None,
+        }
     }
 
     fn make_dirs(tmp: &TempDir) -> Dirs {
@@ -702,18 +783,27 @@ mod tests {
     }
 
     fn collect_events(events: &[Event]) -> (Vec<String>, Vec<String>, Vec<String>) {
-        let starts: Vec<_> = events.iter().filter_map(|e| match e {
-            Event::FeatureStart { id } => Some(id.clone()),
-            _ => None,
-        }).collect();
-        let dones: Vec<_> = events.iter().filter_map(|e| match e {
-            Event::FeatureDone { id } => Some(id.clone()),
-            _ => None,
-        }).collect();
-        let failed: Vec<_> = events.iter().filter_map(|e| match e {
-            Event::FeatureFailed { id, .. } => Some(id.clone()),
-            _ => None,
-        }).collect();
+        let starts: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::FeatureStart { id } => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
+        let dones: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::FeatureDone { id } => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
+        let failed: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::FeatureFailed { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
         (starts, dones, failed)
     }
 
@@ -735,8 +825,14 @@ mod tests {
         let mut state = State::empty();
         let dirs = make_dirs(&tmp);
 
-        let ctx = ExecutionContext { plan: &plan, graph: &graph, index: &index,
-            registry: &registry, dirs: &dirs, state_path: &state_path };
+        let ctx = ExecutionContext {
+            plan: &plan,
+            graph: &graph,
+            index: &index,
+            registry: &registry,
+            dirs: &dirs,
+            state_path: &state_path,
+        };
 
         let mut events = vec![];
         let report = execute(&ctx, &mut state, &mut |e| events.push(e)).unwrap();
@@ -772,8 +868,14 @@ mod tests {
 
         let mut state = State::empty();
         let dirs = make_dirs(&tmp);
-        let ctx = ExecutionContext { plan: &plan, graph: &graph, index: &index,
-            registry: &registry, dirs: &dirs, state_path: &state_path };
+        let ctx = ExecutionContext {
+            plan: &plan,
+            graph: &graph,
+            index: &index,
+            registry: &registry,
+            dirs: &dirs,
+            state_path: &state_path,
+        };
 
         let mut events = vec![];
         let report = execute(&ctx, &mut state, &mut |e| events.push(e)).unwrap();
@@ -783,8 +885,12 @@ mod tests {
         // State must not contain the feature.
         assert!(!state.features.contains_key("core/git"));
 
-        let resource_failed = events.iter().any(|e| matches!(e, Event::ResourceFailed { .. }));
-        let feature_failed = events.iter().any(|e| matches!(e, Event::FeatureFailed { .. }));
+        let resource_failed = events
+            .iter()
+            .any(|e| matches!(e, Event::ResourceFailed { .. }));
+        let feature_failed = events
+            .iter()
+            .any(|e| matches!(e, Event::FeatureFailed { .. }));
         assert!(resource_failed, "expected ResourceFailed event");
         assert!(feature_failed, "expected FeatureFailed event");
     }
@@ -797,29 +903,44 @@ mod tests {
 
         // Pre-populate state.
         let mut state = State::empty();
-        state.features.insert("core/git".to_string(), FeatureState {
-            resources: vec![Resource {
-                id: "package:git".to_string(),
-                kind: ResourceKind::Package {
-                    backend: backend_id("core/brew"),
-                    package: PackageDetails { name: "git".to_string(), version: None },
-                },
-            }],
-        });
+        state.features.insert(
+            "core/git".to_string(),
+            FeatureState {
+                resources: vec![Resource {
+                    id: "package:git".to_string(),
+                    kind: ResourceKind::Package {
+                        backend: backend_id("core/brew"),
+                        package: PackageDetails {
+                            name: "git".to_string(),
+                            version: None,
+                        },
+                    },
+                }],
+            },
+        );
 
         let plan = make_plan(vec![make_action("core/git", Operation::Destroy)]);
         let graph = make_graph(vec![]);
         let index = make_index(vec![("core/git", declarative_meta())]);
         let registry = make_registry_ok(&["core/brew"]);
         let dirs = make_dirs(&tmp);
-        let ctx = ExecutionContext { plan: &plan, graph: &graph, index: &index,
-            registry: &registry, dirs: &dirs, state_path: &state_path };
+        let ctx = ExecutionContext {
+            plan: &plan,
+            graph: &graph,
+            index: &index,
+            registry: &registry,
+            dirs: &dirs,
+            state_path: &state_path,
+        };
 
         let mut events = vec![];
         let report = execute(&ctx, &mut state, &mut |e| events.push(e)).unwrap();
 
         assert_eq!(report.executed.len(), 1);
-        assert!(!state.features.contains_key("core/git"), "feature must be removed from state");
+        assert!(
+            !state.features.contains_key("core/git"),
+            "feature must be removed from state"
+        );
     }
 
     /// Destroy declarative feature with failing backend: state unchanged.
@@ -829,15 +950,21 @@ mod tests {
         let state_path = tmp.path().join("state.json");
 
         let mut state = State::empty();
-        state.features.insert("core/git".to_string(), FeatureState {
-            resources: vec![Resource {
-                id: "package:git".to_string(),
-                kind: ResourceKind::Package {
-                    backend: backend_id("core/brew"),
-                    package: PackageDetails { name: "git".to_string(), version: None },
-                },
-            }],
-        });
+        state.features.insert(
+            "core/git".to_string(),
+            FeatureState {
+                resources: vec![Resource {
+                    id: "package:git".to_string(),
+                    kind: ResourceKind::Package {
+                        backend: backend_id("core/brew"),
+                        package: PackageDetails {
+                            name: "git".to_string(),
+                            version: None,
+                        },
+                    },
+                }],
+            },
+        );
 
         let plan = make_plan(vec![make_action("core/git", Operation::Destroy)]);
         let graph = make_graph(vec![]);
@@ -846,8 +973,14 @@ mod tests {
         registry.register(backend_id("core/brew"), Box::new(FailBackend));
 
         let dirs = make_dirs(&tmp);
-        let ctx = ExecutionContext { plan: &plan, graph: &graph, index: &index,
-            registry: &registry, dirs: &dirs, state_path: &state_path };
+        let ctx = ExecutionContext {
+            plan: &plan,
+            graph: &graph,
+            index: &index,
+            registry: &registry,
+            dirs: &dirs,
+            state_path: &state_path,
+        };
 
         let mut events = vec![];
         let report = execute(&ctx, &mut state, &mut |e| events.push(e)).unwrap();
@@ -864,12 +997,18 @@ mod tests {
         let state_path = tmp.path().join("state.json");
 
         let plan = make_plan(vec![
-            make_action("core/git", Operation::Create),    // will fail
-            make_action("core/node", Operation::Create),   // should still run
+            make_action("core/git", Operation::Create),  // will fail
+            make_action("core/node", Operation::Create), // should still run
         ]);
         let graph = make_graph(vec![
-            ("core/git", vec![package_resource("package:git", "git", "core/fail")]),
-            ("core/node", vec![package_resource("package:node", "node", "core/brew")]),
+            (
+                "core/git",
+                vec![package_resource("package:git", "git", "core/fail")],
+            ),
+            (
+                "core/node",
+                vec![package_resource("package:node", "node", "core/brew")],
+            ),
         ]);
         let index = make_index(vec![
             ("core/git", declarative_meta()),
@@ -882,8 +1021,14 @@ mod tests {
 
         let mut state = State::empty();
         let dirs = make_dirs(&tmp);
-        let ctx = ExecutionContext { plan: &plan, graph: &graph, index: &index,
-            registry: &registry, dirs: &dirs, state_path: &state_path };
+        let ctx = ExecutionContext {
+            plan: &plan,
+            graph: &graph,
+            index: &index,
+            registry: &registry,
+            dirs: &dirs,
+            state_path: &state_path,
+        };
 
         let mut events = vec![];
         let report = execute(&ctx, &mut state, &mut |e| events.push(e)).unwrap();
@@ -902,15 +1047,21 @@ mod tests {
 
         // Start with one already-installed resource.
         let mut state = State::empty();
-        state.features.insert("core/tools".to_string(), FeatureState {
-            resources: vec![Resource {
-                id: "package:git".to_string(),
-                kind: ResourceKind::Package {
-                    backend: backend_id("core/brew"),
-                    package: PackageDetails { name: "git".to_string(), version: None },
-                },
-            }],
-        });
+        state.features.insert(
+            "core/tools".to_string(),
+            FeatureState {
+                resources: vec![Resource {
+                    id: "package:git".to_string(),
+                    kind: ResourceKind::Package {
+                        backend: backend_id("core/brew"),
+                        package: PackageDetails {
+                            name: "git".to_string(),
+                            version: None,
+                        },
+                    },
+                }],
+            },
+        );
 
         // Plan adds ripgrep via strengthen.
         let strengthen_action = PlanAction {
@@ -935,15 +1086,25 @@ mod tests {
         let index = make_index(vec![("core/tools", declarative_meta())]);
         let registry = make_registry_ok(&["core/brew"]);
         let dirs = make_dirs(&tmp);
-        let ctx = ExecutionContext { plan: &plan, graph: &graph, index: &index,
-            registry: &registry, dirs: &dirs, state_path: &state_path };
+        let ctx = ExecutionContext {
+            plan: &plan,
+            graph: &graph,
+            index: &index,
+            registry: &registry,
+            dirs: &dirs,
+            state_path: &state_path,
+        };
 
         let mut events = vec![];
         let report = execute(&ctx, &mut state, &mut |e| events.push(e)).unwrap();
 
         assert_eq!(report.executed.len(), 1);
         let feat = &state.features["core/tools"];
-        assert_eq!(feat.resources.len(), 2, "both git and ripgrep should be in state");
+        assert_eq!(
+            feat.resources.len(),
+            2,
+            "both git and ripgrep should be in state"
+        );
     }
 
     /// Create script feature: install.sh executed, empty resources recorded in state.
@@ -969,8 +1130,14 @@ mod tests {
         let registry = BackendRegistry::new();
         let mut state = State::empty();
         let dirs = make_dirs(&tmp);
-        let ctx = ExecutionContext { plan: &plan, graph: &graph, index: &index,
-            registry: &registry, dirs: &dirs, state_path: &state_path };
+        let ctx = ExecutionContext {
+            plan: &plan,
+            graph: &graph,
+            index: &index,
+            registry: &registry,
+            dirs: &dirs,
+            state_path: &state_path,
+        };
 
         let mut events = vec![];
         let report = execute(&ctx, &mut state, &mut |e| events.push(e)).unwrap();
@@ -987,15 +1154,21 @@ mod tests {
         let state_path = tmp.path().join("state.json");
 
         let mut state = State::empty();
-        state.features.insert("core/git".to_string(), FeatureState {
-            resources: vec![Resource {
-                id: "package:git".to_string(),
-                kind: ResourceKind::Package {
-                    backend: backend_id("core/brew"),
-                    package: PackageDetails { name: "git".to_string(), version: None },
-                },
-            }],
-        });
+        state.features.insert(
+            "core/git".to_string(),
+            FeatureState {
+                resources: vec![Resource {
+                    id: "package:git".to_string(),
+                    kind: ResourceKind::Package {
+                        backend: backend_id("core/brew"),
+                        package: PackageDetails {
+                            name: "git".to_string(),
+                            version: None,
+                        },
+                    },
+                }],
+            },
+        );
 
         let plan = make_plan(vec![make_action("core/git", Operation::Replace)]);
         let graph = make_graph(vec![(
@@ -1005,8 +1178,14 @@ mod tests {
         let index = make_index(vec![("core/git", declarative_meta())]);
         let registry = make_registry_ok(&["core/brew", "core/apt"]);
         let dirs = make_dirs(&tmp);
-        let ctx = ExecutionContext { plan: &plan, graph: &graph, index: &index,
-            registry: &registry, dirs: &dirs, state_path: &state_path };
+        let ctx = ExecutionContext {
+            plan: &plan,
+            graph: &graph,
+            index: &index,
+            registry: &registry,
+            dirs: &dirs,
+            state_path: &state_path,
+        };
 
         let mut events = vec![];
         let report = execute(&ctx, &mut state, &mut |e| events.push(e)).unwrap();

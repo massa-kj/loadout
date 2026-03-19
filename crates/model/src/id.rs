@@ -1,7 +1,7 @@
 //! Canonical identifier types used throughout the pipeline.
 
-use std::fmt;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Canonical feature identifier: `<source_id>/<name>` (e.g. `core/git`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -102,10 +102,14 @@ impl SourceId {
     pub fn new(s: impl Into<String>) -> Result<Self, IdError> {
         let s = s.into();
         if s.is_empty() {
-            return Err(IdError { msg: "source id must not be empty".into() });
+            return Err(IdError {
+                msg: "source id must not be empty".into(),
+            });
         }
         if s.contains('/') {
-            return Err(IdError { msg: format!("source id must not contain '/': {s}") });
+            return Err(IdError {
+                msg: format!("source id must not contain '/': {s}"),
+            });
         }
         Ok(Self(s))
     }
@@ -132,10 +136,14 @@ fn validate_canonical(s: &str) -> Result<(), IdError> {
     }
     let (source, name) = split_canonical(s);
     if source.is_empty() {
-        return Err(IdError { msg: format!("source part must not be empty in: {s}") });
+        return Err(IdError {
+            msg: format!("source part must not be empty in: {s}"),
+        });
     }
     if name.is_empty() {
-        return Err(IdError { msg: format!("name part must not be empty in: {s}") });
+        return Err(IdError {
+            msg: format!("name part must not be empty in: {s}"),
+        });
     }
     Ok(())
 }

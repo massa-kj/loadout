@@ -73,7 +73,9 @@ fn validate_and_normalize_profile(raw: Profile) -> Result<Profile, ConfigError> 
                 let parts: Vec<&str> = key.splitn(2, '/').collect();
                 if parts[0].is_empty() || parts[1].is_empty() {
                     return Err(ConfigError::InvalidProfile {
-                        reason: format!("invalid feature key '{key}': source or name segment is empty"),
+                        reason: format!(
+                            "invalid feature key '{key}': source or name segment is empty"
+                        ),
                     });
                 }
                 normalized.features.insert(key, config);
@@ -152,7 +154,10 @@ fn validate_sources(spec: SourcesSpec) -> Result<SourcesSpec, ConfigError> {
         // Reserved ID check
         if RESERVED_SOURCE_IDS.contains(&entry.id.as_str()) {
             return Err(ConfigError::InvalidSources {
-                reason: format!("source id '{}' is reserved and must not appear in sources.yaml", entry.id),
+                reason: format!(
+                    "source id '{}' is reserved and must not appear in sources.yaml",
+                    entry.id
+                ),
             });
         }
 
@@ -176,7 +181,10 @@ fn validate_sources(spec: SourcesSpec) -> Result<SourcesSpec, ConfigError> {
                 for n in names {
                     if n.is_empty() {
                         return Err(ConfigError::InvalidSources {
-                            reason: format!("source '{}': allow.features contains empty name", entry.id),
+                            reason: format!(
+                                "source '{}': allow.features contains empty name",
+                                entry.id
+                            ),
                         });
                     }
                 }
@@ -185,7 +193,10 @@ fn validate_sources(spec: SourcesSpec) -> Result<SourcesSpec, ConfigError> {
                 for n in names {
                     if n.is_empty() {
                         return Err(ConfigError::InvalidSources {
-                            reason: format!("source '{}': allow.backends contains empty name", entry.id),
+                            reason: format!(
+                                "source '{}': allow.backends contains empty name",
+                                entry.id
+                            ),
                         });
                     }
                 }
@@ -213,7 +224,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p = write_yaml_file(dir.path(), "profile.yaml", "features:\n  git: {}\n");
         let profile = load_profile(&p).unwrap();
-        assert!(profile.features.contains_key("core/git"), "bare 'git' must become 'core/git'");
+        assert!(
+            profile.features.contains_key("core/git"),
+            "bare 'git' must become 'core/git'"
+        );
         assert!(!profile.features.contains_key("git"));
     }
 
@@ -264,7 +278,11 @@ mod tests {
     #[test]
     fn profile_version_config_preserved() {
         let dir = tempfile::tempdir().unwrap();
-        let p = write_yaml_file(dir.path(), "profile.yaml", "features:\n  node:\n    version: \"20\"\n");
+        let p = write_yaml_file(
+            dir.path(),
+            "profile.yaml",
+            "features:\n  node:\n    version: \"20\"\n",
+        );
         let profile = load_profile(&p).unwrap();
         let cfg = profile.features.get("core/node").unwrap();
         assert_eq!(cfg.version.as_deref(), Some("20"));
@@ -275,15 +293,26 @@ mod tests {
     #[test]
     fn policy_load_minimal() {
         let dir = tempfile::tempdir().unwrap();
-        let p = write_yaml_file(dir.path(), "policy.yaml", "package:\n  default_backend: brew\n");
+        let p = write_yaml_file(
+            dir.path(),
+            "policy.yaml",
+            "package:\n  default_backend: brew\n",
+        );
         let policy = load_policy(&p).unwrap();
-        assert_eq!(policy.package.unwrap().default_backend.as_deref(), Some("brew"));
+        assert_eq!(
+            policy.package.unwrap().default_backend.as_deref(),
+            Some("brew")
+        );
     }
 
     #[test]
     fn policy_empty_default_backend_rejected() {
         let dir = tempfile::tempdir().unwrap();
-        let p = write_yaml_file(dir.path(), "policy.yaml", "package:\n  default_backend: \"\"\n");
+        let p = write_yaml_file(
+            dir.path(),
+            "policy.yaml",
+            "package:\n  default_backend: \"\"\n",
+        );
         let err = load_policy(&p).unwrap_err();
         assert!(matches!(err, ConfigError::InvalidPolicy { .. }));
     }
@@ -312,7 +341,8 @@ mod tests {
     #[test]
     fn sources_valid_external_source() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = "sources:\n  - id: community\n    type: git\n    url: https://github.com/ex/repo\n";
+        let yaml =
+            "sources:\n  - id: community\n    type: git\n    url: https://github.com/ex/repo\n";
         let p = write_yaml_file(dir.path(), "sources.yaml", yaml);
         let spec = load_sources(&p).unwrap();
         assert_eq!(spec.sources[0].id, "community");
@@ -322,10 +352,14 @@ mod tests {
     fn sources_reserved_id_rejected() {
         for reserved in &["core", "user", "official"] {
             let dir = tempfile::tempdir().unwrap();
-            let yaml = format!("sources:\n  - id: {reserved}\n    type: git\n    url: https://x.com\n");
+            let yaml =
+                format!("sources:\n  - id: {reserved}\n    type: git\n    url: https://x.com\n");
             let p = write_yaml_file(dir.path(), "sources.yaml", &yaml);
             let err = load_sources(&p).unwrap_err();
-            assert!(matches!(err, ConfigError::InvalidSources { .. }), "expected error for reserved id '{reserved}'");
+            assert!(
+                matches!(err, ConfigError::InvalidSources { .. }),
+                "expected error for reserved id '{reserved}'"
+            );
         }
     }
 
@@ -358,7 +392,8 @@ mod tests {
     #[test]
     fn sources_allow_wildcard_ok() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = "sources:\n  - id: ext\n    type: git\n    url: https://x.com\n    allow: \"*\"\n";
+        let yaml =
+            "sources:\n  - id: ext\n    type: git\n    url: https://x.com\n    allow: \"*\"\n";
         let p = write_yaml_file(dir.path(), "sources.yaml", yaml);
         let spec = load_sources(&p).unwrap();
         assert!(matches!(spec.sources[0].allow, Some(AllowSpec::All(_))));

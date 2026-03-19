@@ -8,15 +8,15 @@
 //!
 //! See: `docs/specs/algorithms/planner.md`
 
-use std::collections::{HashMap, HashSet};
 use model::{
-    CanonicalFeatureId, DesiredResourceGraph, ResolvedFeatureOrder, State,
     desired_resource_graph::DesiredResourceKind,
     plan::{
         ActionDetails, BlockedEntry, NoopEntry, Operation, Plan, PlanAction, PlanSummary,
         ReplaceDetails, ResourceRef, StrengthenDetails,
     },
+    CanonicalFeatureId, DesiredResourceGraph, ResolvedFeatureOrder, State,
 };
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 /// Errors produced by the planner.
@@ -32,11 +32,18 @@ pub enum PlannerError {
 #[derive(Debug, Clone, PartialEq)]
 enum Classification {
     Create,
-    Replace { from_version: Option<String>, to_version: Option<String> },
+    Replace {
+        from_version: Option<String>,
+        to_version: Option<String>,
+    },
     ReplaceBackend,
-    Strengthen { add_resource_ids: Vec<(String, String)> }, // (kind, id)
+    Strengthen {
+        add_resource_ids: Vec<(String, String)>,
+    }, // (kind, id)
     Noop,
-    Blocked { reason: String },
+    Blocked {
+        reason: String,
+    },
 }
 
 /// Generate a [`Plan`] from the given inputs.
@@ -62,7 +69,9 @@ pub fn plan(
     // Validate: every feature in resolved_order must be in desired.
     for id in resolved_order {
         if !desired_ids.contains(id.as_str()) {
-            return Err(PlannerError::FeatureOrderMismatch { id: id.as_str().into() });
+            return Err(PlannerError::FeatureOrderMismatch {
+                id: id.as_str().into(),
+            });
         }
     }
 
@@ -111,7 +120,11 @@ pub fn plan(
             // represent the destroy. Use a best-effort reconstruction.
             panic!("state contains non-canonical feature id: {id}")
         });
-        actions.push(PlanAction { feature, operation: Operation::Destroy, details: None });
+        actions.push(PlanAction {
+            feature,
+            operation: Operation::Destroy,
+            details: None,
+        });
         summary.destroy += 1;
     }
 
@@ -127,20 +140,34 @@ pub fn plan(
             classify_existing(id, desired_feat, state)
         };
 
-        let feature = CanonicalFeatureId::new(id)
-            .expect("desired_resource_graph keys are canonical ids");
+        let feature =
+            CanonicalFeatureId::new(id).expect("desired_resource_graph keys are canonical ids");
 
         match classification {
             Classification::Create => {
-                actions.push(PlanAction { feature, operation: Operation::Create, details: None });
+                actions.push(PlanAction {
+                    feature,
+                    operation: Operation::Create,
+                    details: None,
+                });
                 summary.create += 1;
             }
             Classification::Noop => {
                 noops.push(NoopEntry { feature });
             }
-            Classification::Replace { from_version, to_version } => {
-                let details = Some(ActionDetails::Replace(ReplaceDetails { from_version, to_version }));
-                actions.push(PlanAction { feature, operation: Operation::Replace, details });
+            Classification::Replace {
+                from_version,
+                to_version,
+            } => {
+                let details = Some(ActionDetails::Replace(ReplaceDetails {
+                    from_version,
+                    to_version,
+                }));
+                actions.push(PlanAction {
+                    feature,
+                    operation: Operation::Replace,
+                    details,
+                });
                 summary.replace += 1;
             }
             Classification::ReplaceBackend => {
@@ -156,8 +183,14 @@ pub fn plan(
                     .into_iter()
                     .map(|(kind, id)| ResourceRef { kind, id })
                     .collect();
-                let details = Some(ActionDetails::Strengthen(StrengthenDetails { add_resources }));
-                actions.push(PlanAction { feature, operation: Operation::Strengthen, details });
+                let details = Some(ActionDetails::Strengthen(StrengthenDetails {
+                    add_resources,
+                }));
+                actions.push(PlanAction {
+                    feature,
+                    operation: Operation::Strengthen,
+                    details,
+                });
                 summary.strengthen += 1;
             }
             Classification::Blocked { reason } => {
@@ -167,7 +200,12 @@ pub fn plan(
         }
     }
 
-    Ok(Plan { actions, noops, blocked, summary })
+    Ok(Plan {
+        actions,
+        noops,
+        blocked,
+        summary,
+    })
 }
 
 /// Classify a feature that exists in both desired and state.
@@ -179,10 +217,16 @@ fn classify_existing(
     let state_feat = state.features.get(feature_id).unwrap();
 
     // Build lookup maps by resource id.
-    let desired_map: HashMap<&str, &model::desired_resource_graph::DesiredResource> =
-        desired_feat.resources.iter().map(|r| (r.id.as_str(), r)).collect();
-    let state_map: HashMap<&str, &model::state::Resource> =
-        state_feat.resources.iter().map(|r| (r.id.as_str(), r)).collect();
+    let desired_map: HashMap<&str, &model::desired_resource_graph::DesiredResource> = desired_feat
+        .resources
+        .iter()
+        .map(|r| (r.id.as_str(), r))
+        .collect();
+    let state_map: HashMap<&str, &model::state::Resource> = state_feat
+        .resources
+        .iter()
+        .map(|r| (r.id.as_str(), r))
+        .collect();
 
     // Check for unknown resource kinds in desired → blocked.
     for res in &desired_feat.resources {
@@ -194,7 +238,8 @@ fn classify_existing(
     }
 
     // Check for backend mismatch on any shared resource (resource present in both, same id).
-    let shared_ids: HashSet<&str> = desired_map.keys()
+    let shared_ids: HashSet<&str> = desired_map
+        .keys()
         .filter(|&&id| state_map.contains_key(id))
         .copied()
         .collect();
@@ -204,8 +249,14 @@ fn classify_existing(
         let d = desired_map[id];
         let s = state_map[id];
         match check_compatibility(d, s) {
-            Compatibility::Incompatible { from_version, to_version } => {
-                return Classification::Replace { from_version, to_version };
+            Compatibility::Incompatible {
+                from_version,
+                to_version,
+            } => {
+                return Classification::Replace {
+                    from_version,
+                    to_version,
+                };
             }
             Compatibility::BackendMismatch => {
                 return Classification::ReplaceBackend;
@@ -215,16 +266,21 @@ fn classify_existing(
     }
 
     // Check resources in state but not in desired → replace (resources removed).
-    let state_only_ids: HashSet<&str> = state_map.keys()
+    let state_only_ids: HashSet<&str> = state_map
+        .keys()
         .filter(|&&id| !desired_map.contains_key(id))
         .copied()
         .collect();
     if !state_only_ids.is_empty() {
-        return Classification::Replace { from_version: None, to_version: None };
+        return Classification::Replace {
+            from_version: None,
+            to_version: None,
+        };
     }
 
     // Check resources in desired but not in state → strengthen candidate.
-    let desired_only: Vec<_> = desired_map.keys()
+    let desired_only: Vec<_> = desired_map
+        .keys()
         .filter(|&&id| !state_map.contains_key(id))
         .copied()
         .collect();
@@ -249,7 +305,10 @@ fn classify_existing(
 enum Compatibility {
     Compatible,
     BackendMismatch,
-    Incompatible { from_version: Option<String>, to_version: Option<String> },
+    Incompatible {
+        from_version: Option<String>,
+        to_version: Option<String>,
+    },
 }
 
 /// Compare a desired resource against its state counterpart.
@@ -266,18 +325,37 @@ fn check_compatibility(
     use model::state::{FsEntryType, FsOp, ResourceKind as S};
 
     match (&desired.kind, &recorded.kind) {
-        (D::Package { name: dn, desired_backend: db }, S::Package { backend: sb, package: sp }) => {
+        (
+            D::Package {
+                name: dn,
+                desired_backend: db,
+            },
+            S::Package {
+                backend: sb,
+                package: sp,
+            },
+        ) => {
             if db.as_str() != sb.as_str() {
                 return Compatibility::BackendMismatch;
             }
             if dn != &sp.name {
-                return Compatibility::Incompatible { from_version: None, to_version: None };
+                return Compatibility::Incompatible {
+                    from_version: None,
+                    to_version: None,
+                };
             }
             Compatibility::Compatible
         }
         (
-            D::Runtime { name: dn, version: dv, desired_backend: db },
-            S::Runtime { backend: sb, runtime: sr },
+            D::Runtime {
+                name: dn,
+                version: dv,
+                desired_backend: db,
+            },
+            S::Runtime {
+                backend: sb,
+                runtime: sr,
+            },
         ) => {
             if db.as_str() != sb.as_str() {
                 return Compatibility::BackendMismatch;
@@ -290,24 +368,43 @@ fn check_compatibility(
             }
             Compatibility::Compatible
         }
-        (D::Fs { path: dp, entry_type: det, op: dop, .. }, S::Fs { fs: sf }) => {
+        (
+            D::Fs {
+                path: dp,
+                entry_type: det,
+                op: dop,
+                ..
+            },
+            S::Fs { fs: sf },
+        ) => {
             let et_match = matches!(
                 (det, &sf.entry_type),
-                (model::desired_resource_graph::FsEntryType::File, FsEntryType::File)
-                | (model::desired_resource_graph::FsEntryType::Dir, FsEntryType::Dir)
+                (
+                    model::desired_resource_graph::FsEntryType::File,
+                    FsEntryType::File
+                ) | (
+                    model::desired_resource_graph::FsEntryType::Dir,
+                    FsEntryType::Dir
+                )
             );
             let op_match = matches!(
                 (dop, &sf.op),
                 (model::desired_resource_graph::FsOp::Link, FsOp::Link)
-                | (model::desired_resource_graph::FsOp::Copy, FsOp::Copy)
+                    | (model::desired_resource_graph::FsOp::Copy, FsOp::Copy)
             );
             if dp != &sf.path || !et_match || !op_match {
-                return Compatibility::Incompatible { from_version: None, to_version: None };
+                return Compatibility::Incompatible {
+                    from_version: None,
+                    to_version: None,
+                };
             }
             Compatibility::Compatible
         }
         // Kind mismatch (e.g. package in desired, runtime in state) → replace.
-        _ => Compatibility::Incompatible { from_version: None, to_version: None },
+        _ => Compatibility::Incompatible {
+            from_version: None,
+            to_version: None,
+        },
     }
 }
 
@@ -329,13 +426,16 @@ fn kind_str(kind: &DesiredResourceKind) -> &'static str {
 mod tests {
     use super::*;
     use model::{
-        CanonicalBackendId,
         desired_resource_graph::{
             DesiredResource, DesiredResourceGraph, DesiredResourceKind, FeatureDesiredResources,
             FsEntryType, FsOp,
         },
         plan::Operation,
-        state::{FeatureState, FsDetails, FsEntryType as SFsEntryType, FsOp as SFsOp, PackageDetails, Resource, ResourceKind, RuntimeDetails, State},
+        state::{
+            FeatureState, FsDetails, FsEntryType as SFsEntryType, FsOp as SFsOp, PackageDetails,
+            Resource, ResourceKind, RuntimeDetails, State,
+        },
+        CanonicalBackendId,
     };
 
     fn backend(s: &str) -> CanonicalBackendId {
@@ -347,15 +447,32 @@ mod tests {
     }
 
     fn empty_desired(ids: &[&str]) -> DesiredResourceGraph {
-        let features = ids.iter().map(|&id| {
-            (id.to_string(), FeatureDesiredResources { resources: vec![] })
-        }).collect();
-        DesiredResourceGraph { schema_version: 1, features }
+        let features = ids
+            .iter()
+            .map(|&id| {
+                (
+                    id.to_string(),
+                    FeatureDesiredResources { resources: vec![] },
+                )
+            })
+            .collect();
+        DesiredResourceGraph {
+            schema_version: 1,
+            features,
+        }
     }
 
-    fn with_package(mut g: DesiredResourceGraph, feat: &str, pkg: &str, be: &str) -> DesiredResourceGraph {
-        g.features.entry(feat.to_string()).or_insert(FeatureDesiredResources { resources: vec![] })
-            .resources.push(DesiredResource {
+    fn with_package(
+        mut g: DesiredResourceGraph,
+        feat: &str,
+        pkg: &str,
+        be: &str,
+    ) -> DesiredResourceGraph {
+        g.features
+            .entry(feat.to_string())
+            .or_insert(FeatureDesiredResources { resources: vec![] })
+            .resources
+            .push(DesiredResource {
                 id: format!("package:{pkg}"),
                 kind: DesiredResourceKind::Package {
                     name: pkg.to_string(),
@@ -365,9 +482,18 @@ mod tests {
         g
     }
 
-    fn with_runtime(mut g: DesiredResourceGraph, feat: &str, rt: &str, ver: &str, be: &str) -> DesiredResourceGraph {
-        g.features.entry(feat.to_string()).or_insert(FeatureDesiredResources { resources: vec![] })
-            .resources.push(DesiredResource {
+    fn with_runtime(
+        mut g: DesiredResourceGraph,
+        feat: &str,
+        rt: &str,
+        ver: &str,
+        be: &str,
+    ) -> DesiredResourceGraph {
+        g.features
+            .entry(feat.to_string())
+            .or_insert(FeatureDesiredResources { resources: vec![] })
+            .resources
+            .push(DesiredResource {
                 id: format!("runtime:{rt}"),
                 kind: DesiredResourceKind::Runtime {
                     name: rt.to_string(),
@@ -380,29 +506,41 @@ mod tests {
 
     fn state_with_package(feat: &str, pkg: &str, be: &str) -> State {
         let mut s = State::empty();
-        s.features.insert(feat.to_string(), FeatureState {
-            resources: vec![Resource {
-                id: format!("package:{pkg}"),
-                kind: ResourceKind::Package {
-                    backend: backend(be),
-                    package: PackageDetails { name: pkg.to_string(), version: None },
-                },
-            }],
-        });
+        s.features.insert(
+            feat.to_string(),
+            FeatureState {
+                resources: vec![Resource {
+                    id: format!("package:{pkg}"),
+                    kind: ResourceKind::Package {
+                        backend: backend(be),
+                        package: PackageDetails {
+                            name: pkg.to_string(),
+                            version: None,
+                        },
+                    },
+                }],
+            },
+        );
         s
     }
 
     fn state_with_runtime(feat: &str, rt: &str, ver: &str, be: &str) -> State {
         let mut s = State::empty();
-        s.features.insert(feat.to_string(), FeatureState {
-            resources: vec![Resource {
-                id: format!("runtime:{rt}"),
-                kind: ResourceKind::Runtime {
-                    backend: backend(be),
-                    runtime: RuntimeDetails { name: rt.to_string(), version: ver.to_string() },
-                },
-            }],
-        });
+        s.features.insert(
+            feat.to_string(),
+            FeatureState {
+                resources: vec![Resource {
+                    id: format!("runtime:{rt}"),
+                    kind: ResourceKind::Runtime {
+                        backend: backend(be),
+                        runtime: RuntimeDetails {
+                            name: rt.to_string(),
+                            version: ver.to_string(),
+                        },
+                    },
+                }],
+            },
+        );
         s
     }
 
@@ -449,7 +587,13 @@ mod tests {
 
     #[test]
     fn replace_on_runtime_version_mismatch() {
-        let desired = with_runtime(empty_desired(&["core/node"]), "core/node", "node", "20", "core/mise");
+        let desired = with_runtime(
+            empty_desired(&["core/node"]),
+            "core/node",
+            "node",
+            "20",
+            "core/mise",
+        );
         let state = state_with_runtime("core/node", "node", "18", "core/mise");
         let order = vec![fid("core/node")];
         let p = plan(&desired, &state, &order).unwrap();
@@ -481,16 +625,22 @@ mod tests {
     #[test]
     fn strengthen_when_new_resource_added() {
         // State has only package:git; desired adds fs:gitconfig.
-        let mut desired = with_package(empty_desired(&["core/git"]), "core/git", "git", "core/brew");
-        desired.features.get_mut("core/git").unwrap().resources.push(DesiredResource {
-            id: "fs:gitconfig".to_string(),
-            kind: DesiredResourceKind::Fs {
-                source: None,
-                path: "~/.gitconfig".to_string(),
-                entry_type: FsEntryType::File,
-                op: FsOp::Link,
-            },
-        });
+        let mut desired =
+            with_package(empty_desired(&["core/git"]), "core/git", "git", "core/brew");
+        desired
+            .features
+            .get_mut("core/git")
+            .unwrap()
+            .resources
+            .push(DesiredResource {
+                id: "fs:gitconfig".to_string(),
+                kind: DesiredResourceKind::Fs {
+                    source: None,
+                    path: "~/.gitconfig".to_string(),
+                    entry_type: FsEntryType::File,
+                    op: FsOp::Link,
+                },
+            });
         let state = state_with_package("core/git", "git", "core/brew");
         let order = vec![fid("core/git")];
         let p = plan(&desired, &state, &order).unwrap();
@@ -510,26 +660,36 @@ mod tests {
     #[test]
     fn replace_on_fs_path_change() {
         let mut desired = empty_desired(&["core/git"]);
-        desired.features.get_mut("core/git").unwrap().resources.push(DesiredResource {
-            id: "fs:gitconfig".to_string(),
-            kind: DesiredResourceKind::Fs {
-                source: None,
-                path: "~/.gitconfig_new".to_string(),
-                entry_type: FsEntryType::File,
-                op: FsOp::Link,
-            },
-        });
-        let mut state = State::empty();
-        state.features.insert("core/git".to_string(), FeatureState {
-            resources: vec![Resource {
+        desired
+            .features
+            .get_mut("core/git")
+            .unwrap()
+            .resources
+            .push(DesiredResource {
                 id: "fs:gitconfig".to_string(),
-                kind: ResourceKind::Fs { fs: FsDetails {
-                    path: "~/.gitconfig".to_string(),
-                    entry_type: SFsEntryType::Symlink,
-                    op: SFsOp::Link,
-                }},
-            }],
-        });
+                kind: DesiredResourceKind::Fs {
+                    source: None,
+                    path: "~/.gitconfig_new".to_string(),
+                    entry_type: FsEntryType::File,
+                    op: FsOp::Link,
+                },
+            });
+        let mut state = State::empty();
+        state.features.insert(
+            "core/git".to_string(),
+            FeatureState {
+                resources: vec![Resource {
+                    id: "fs:gitconfig".to_string(),
+                    kind: ResourceKind::Fs {
+                        fs: FsDetails {
+                            path: "~/.gitconfig".to_string(),
+                            entry_type: SFsEntryType::Symlink,
+                            op: SFsOp::Link,
+                        },
+                    },
+                }],
+            },
+        );
         let order = vec![fid("core/git")];
         let p = plan(&desired, &state, &order).unwrap();
         assert_eq!(p.actions[0].operation, Operation::Replace);
@@ -539,7 +699,12 @@ mod tests {
 
     #[test]
     fn ordering_destroy_then_create() {
-        let desired = with_package(empty_desired(&["core/new"]), "core/new", "new-tool", "core/brew");
+        let desired = with_package(
+            empty_desired(&["core/new"]),
+            "core/new",
+            "new-tool",
+            "core/brew",
+        );
         let state = state_with_package("core/old", "old-tool", "core/brew");
         let order = vec![fid("core/new")];
         let p = plan(&desired, &state, &order).unwrap();
@@ -555,7 +720,9 @@ mod tests {
         // create one, noop one, destroy one
         let mut desired = with_package(
             empty_desired(&["core/new", "core/keep"]),
-            "core/new", "new", "core/brew",
+            "core/new",
+            "new",
+            "core/brew",
         );
         desired = with_package(desired, "core/keep", "keep", "core/brew");
 
@@ -563,15 +730,21 @@ mod tests {
         // Also add "core/keep" to state as-is.
         let _ = state.features.clone(); // just for clarity; state_with_package creates fresh state
         let mut state2 = state_with_package("core/old", "old", "core/brew");
-        state2.features.insert("core/keep".to_string(), FeatureState {
-            resources: vec![Resource {
-                id: "package:keep".to_string(),
-                kind: ResourceKind::Package {
-                    backend: backend("core/brew"),
-                    package: PackageDetails { name: "keep".to_string(), version: None },
-                },
-            }],
-        });
+        state2.features.insert(
+            "core/keep".to_string(),
+            FeatureState {
+                resources: vec![Resource {
+                    id: "package:keep".to_string(),
+                    kind: ResourceKind::Package {
+                        backend: backend("core/brew"),
+                        package: PackageDetails {
+                            name: "keep".to_string(),
+                            version: None,
+                        },
+                    },
+                }],
+            },
+        );
 
         let order = vec![fid("core/new"), fid("core/keep")];
         let p = plan(&desired, &state2, &order).unwrap();

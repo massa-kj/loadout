@@ -30,7 +30,11 @@ pub enum ValidationError {
     /// A required field is absent or empty.
     MissingField { field: String, context: String },
     /// A field value does not match the expected format or constraint.
-    InvalidField { field: String, value: String, reason: String },
+    InvalidField {
+        field: String,
+        value: String,
+        reason: String,
+    },
     /// A duplicate identifier was found where uniqueness is required.
     DuplicateId { id: String, context: String },
     /// An absolute path is required but a relative path was provided.
@@ -44,7 +48,11 @@ impl fmt::Display for ValidationError {
             Self::MissingField { field, context } => {
                 write!(f, "{context}: missing required field '{field}'")
             }
-            Self::InvalidField { field, value, reason } => {
+            Self::InvalidField {
+                field,
+                value,
+                reason,
+            } => {
                 write!(f, "invalid value for '{field}': {value} ({reason})")
             }
             Self::DuplicateId { id, context } => {
@@ -71,8 +79,15 @@ mod tests {
 
     #[test]
     fn schema_version_error_display() {
-        let e = SchemaVersionError { expected: 3, found: 2, context: "state" };
-        assert_eq!(e.to_string(), "state: unsupported schema version 2 (expected 3)");
+        let e = SchemaVersionError {
+            expected: 3,
+            found: 2,
+            context: "state",
+        };
+        assert_eq!(
+            e.to_string(),
+            "state: unsupported schema version 2 (expected 3)"
+        );
     }
 
     #[test]
@@ -81,6 +96,9 @@ mod tests {
             field: "resources".into(),
             context: "core/git".into(),
         };
-        assert_eq!(e.to_string(), "core/git: missing required field 'resources'");
+        assert_eq!(
+            e.to_string(),
+            "core/git: missing required field 'resources'"
+        );
     }
 }

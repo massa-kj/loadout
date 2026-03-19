@@ -92,7 +92,11 @@ pub struct AppContext {
 impl AppContext {
     /// Create an `AppContext` from explicit parts.
     pub fn new(repo_root: PathBuf, platform: platform::Platform, dirs: platform::Dirs) -> Self {
-        Self { repo_root, platform, dirs }
+        Self {
+            repo_root,
+            platform,
+            dirs,
+        }
     }
 
     /// Absolute path to the authoritative state file: `{state_home}/state.json`.
@@ -103,11 +107,13 @@ impl AppContext {
     /// Absolute path to the platform default policy: `{repo_root}/policies/default.{platform}.yaml`.
     pub fn default_policy_path(&self) -> PathBuf {
         let suffix = match &self.platform {
-            platform::Platform::Linux   => "linux",
+            platform::Platform::Linux => "linux",
             platform::Platform::Windows => "windows",
-            platform::Platform::Wsl     => "wsl",
+            platform::Platform::Wsl => "wsl",
         };
-        self.repo_root.join("policies").join(format!("default.{suffix}.yaml"))
+        self.repo_root
+            .join("policies")
+            .join(format!("default.{suffix}.yaml"))
     }
 
     /// Absolute path to the user sources file: `{config_home}/sources.yaml`.
@@ -126,7 +132,12 @@ impl AppContext {
 /// Returns the [`Plan`] that describes what `apply()` would do.
 /// All stages are read-only; no state is modified.
 pub fn plan(ctx: &AppContext, profile_path: &Path) -> Result<Plan, AppError> {
-    let PipelineOutput { order, graph, state, .. } = run_pipeline(ctx, profile_path)?;
+    let PipelineOutput {
+        order,
+        graph,
+        state,
+        ..
+    } = run_pipeline(ctx, profile_path)?;
     let p = planner::plan(&graph, &state, &order)?;
     Ok(p)
 }
@@ -147,8 +158,13 @@ pub fn apply(
     profile_path: &Path,
     on_event: &mut dyn FnMut(Event),
 ) -> Result<ExecutorReport, AppError> {
-    let PipelineOutput { index, order, graph, mut state, .. } =
-        run_pipeline(ctx, profile_path)?;
+    let PipelineOutput {
+        index,
+        order,
+        graph,
+        mut state,
+        ..
+    } = run_pipeline(ctx, profile_path)?;
 
     let p = planner::plan(&graph, &state, &order)?;
 
@@ -201,7 +217,9 @@ struct PipelineOutput {
 fn run_pipeline(ctx: &AppContext, profile_path: &Path) -> Result<PipelineOutput, AppError> {
     // Step 1: profile file must exist.
     if !profile_path.exists() {
-        return Err(AppError::ProfileNotFound { path: profile_path.to_path_buf() });
+        return Err(AppError::ProfileNotFound {
+            path: profile_path.to_path_buf(),
+        });
     }
 
     // Step 2: load profile (normalises bare names to "core/<name>").
@@ -231,7 +249,14 @@ fn run_pipeline(ctx: &AppContext, profile_path: &Path) -> Result<PipelineOutput,
     // Step 9: load state (state::load returns empty state if file absent).
     let state = state::load(&ctx.state_path())?;
 
-    Ok(PipelineOutput { profile, policy, index, order, graph, state })
+    Ok(PipelineOutput {
+        profile,
+        policy,
+        index,
+        order,
+        graph,
+        state,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -241,9 +266,9 @@ fn run_pipeline(ctx: &AppContext, profile_path: &Path) -> Result<PipelineOutput,
 /// Map `platform::Platform` → `feature_index::Platform`.
 fn to_fi_platform(p: &platform::Platform) -> feature_index::Platform {
     match p {
-        platform::Platform::Linux   => feature_index::Platform::Linux,
+        platform::Platform::Linux => feature_index::Platform::Linux,
         platform::Platform::Windows => feature_index::Platform::Windows,
-        platform::Platform::Wsl     => feature_index::Platform::Wsl,
+        platform::Platform::Wsl => feature_index::Platform::Wsl,
     }
 }
 
@@ -273,7 +298,9 @@ fn build_source_roots(
     for entry in &sources.sources {
         roots.push(feature_index::SourceRoot {
             source_id: entry.id.clone(),
-            features_dir: ctx.dirs.data_home
+            features_dir: ctx
+                .dirs
+                .data_home
                 .join("sources")
                 .join(&entry.id)
                 .join("features"),
@@ -336,7 +363,11 @@ fn profile_to_desired_ids(
 fn build_backend_registry(ctx: &AppContext) -> backend_host::BackendRegistry {
     let mut registry = backend_host::BackendRegistry::new();
     load_backends_from_dir(&mut registry, &ctx.repo_root.join("backends"), "core");
-    load_backends_from_dir(&mut registry, &ctx.dirs.config_home.join("backends"), "user");
+    load_backends_from_dir(
+        &mut registry,
+        &ctx.dirs.config_home.join("backends"),
+        "user",
+    );
     registry
 }
 
@@ -346,7 +377,9 @@ fn load_backends_from_dir(
     backends_dir: &Path,
     source_id: &str,
 ) {
-    let Ok(entries) = std::fs::read_dir(backends_dir) else { return };
+    let Ok(entries) = std::fs::read_dir(backends_dir) else {
+        return;
+    };
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -354,9 +387,13 @@ fn load_backends_from_dir(
             continue; // Skip flat .sh files (old shell layout).
         }
 
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
         let backend_id_str = format!("{source_id}/{name}");
-        let Ok(backend_id) = model::CanonicalBackendId::new(&backend_id_str) else { continue };
+        let Ok(backend_id) = model::CanonicalBackendId::new(&backend_id_str) else {
+            continue;
+        };
 
         match backend_host::ScriptBackend::load(path.clone()) {
             Ok(backend) => {
@@ -429,7 +466,10 @@ mod tests {
     fn write_profile(dir: &Path, filename: &str, features: &[&str]) -> PathBuf {
         let content = format!(
             "features:\n{}",
-            features.iter().map(|f| format!("  {f}: {{}}\n")).collect::<String>()
+            features
+                .iter()
+                .map(|f| format!("  {f}: {{}}\n"))
+                .collect::<String>()
         );
         let path = dir.join(filename);
         write(&path, &content);
@@ -472,7 +512,10 @@ mod tests {
 
         // Should succeed: empty desired produces a plan with no actions.
         let p = plan(&ctx, &profile_path).unwrap();
-        assert!(p.actions.is_empty(), "plan should have no actions for unknown features");
+        assert!(
+            p.actions.is_empty(),
+            "plan should have no actions for unknown features"
+        );
     }
 
     /// plan() with a valid script feature returns a Plan with a Create action.
@@ -508,8 +551,14 @@ mod tests {
         assert!(ctx.state_path().exists(), "state.json must be written");
 
         // Events: FeatureStart + FeatureDone.
-        let starts = events.iter().filter(|e| matches!(e, Event::FeatureStart { .. })).count();
-        let dones  = events.iter().filter(|e| matches!(e, Event::FeatureDone { .. })).count();
+        let starts = events
+            .iter()
+            .filter(|e| matches!(e, Event::FeatureStart { .. }))
+            .count();
+        let dones = events
+            .iter()
+            .filter(|e| matches!(e, Event::FeatureDone { .. }))
+            .count();
         assert_eq!(starts, 1);
         assert_eq!(dones, 1);
     }
@@ -551,7 +600,10 @@ mod tests {
         let profile_path = tmp.path().join("does_not_exist.yaml");
 
         let (result, _) = collect_apply(&ctx, &profile_path);
-        assert!(matches!(result.unwrap_err(), AppError::ProfileNotFound { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            AppError::ProfileNotFound { .. }
+        ));
     }
 
     /// apply() two script features: both install, state has both.
@@ -561,8 +613,7 @@ mod tests {
         let ctx = make_ctx(&tmp);
         write_script_feature(tmp.path(), "git");
         write_script_feature(tmp.path(), "node");
-        let profile_path =
-            write_profile(tmp.path(), "profile.yaml", &["core/git", "core/node"]);
+        let profile_path = write_profile(tmp.path(), "profile.yaml", &["core/git", "core/node"]);
 
         let (result, _) = collect_apply(&ctx, &profile_path);
         let report = result.unwrap();
@@ -580,8 +631,7 @@ mod tests {
         write_script_feature(tmp.path(), "node");
 
         // First apply: install git + node.
-        let profile_both =
-            write_profile(tmp.path(), "both.yaml", &["core/git", "core/node"]);
+        let profile_both = write_profile(tmp.path(), "both.yaml", &["core/git", "core/node"]);
         collect_apply(&ctx, &profile_both).0.unwrap();
 
         // Second apply: only git desired → node should be destroyed.
@@ -595,8 +645,14 @@ mod tests {
 
         // Reload state from disk and verify.
         let state = state::load(&ctx.state_path()).unwrap();
-        assert!(state.features.contains_key("core/git"), "git must still be in state");
-        assert!(!state.features.contains_key("core/node"), "node must be removed from state");
+        assert!(
+            state.features.contains_key("core/git"),
+            "git must still be in state"
+        );
+        assert!(
+            !state.features.contains_key("core/node"),
+            "node must be removed from state"
+        );
     }
 
     /// AppContext::default_policy_path returns the correct path for Linux.
@@ -645,8 +701,7 @@ mod tests {
         write_script_feature(tmp.path(), "git");
 
         // First apply: install both.
-        let profile_both =
-            write_profile(tmp.path(), "both.yaml", &["core/badfeature", "core/git"]);
+        let profile_both = write_profile(tmp.path(), "both.yaml", &["core/badfeature", "core/git"]);
         collect_apply(&ctx, &profile_both).0.unwrap();
 
         // Second apply: only git desired → badfeature must be destroyed (fails), git is noop.

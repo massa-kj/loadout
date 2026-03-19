@@ -122,8 +122,7 @@ pub fn commit(path: &Path, state: &State) -> Result<(), StateError> {
         io::make_dirs(parent)?;
     }
 
-    let serialized = serde_json::to_string_pretty(state)
-        .expect("State is always serializable");
+    let serialized = serde_json::to_string_pretty(state).expect("State is always serializable");
 
     let tmp = path.with_extension("json.tmp");
 
@@ -170,10 +169,7 @@ pub fn commit(path: &Path, state: &State) -> Result<(), StateError> {
 pub fn validate(state: &State) -> Result<(), StateError> {
     if state.version != STATE_VERSION {
         return Err(StateError::InvalidState {
-            reason: format!(
-                "version must be {STATE_VERSION}, found {}",
-                state.version
-            ),
+            reason: format!("version must be {STATE_VERSION}, found {}", state.version),
         });
     }
 
@@ -186,9 +182,7 @@ pub fn validate(state: &State) -> Result<(), StateError> {
         for resource in &feature_state.resources {
             if resource.id.is_empty() {
                 return Err(StateError::InvalidState {
-                    reason: format!(
-                        "feature '{feature_id}': resource.id must not be empty"
-                    ),
+                    reason: format!("feature '{feature_id}': resource.id must not be empty"),
                 });
             }
             if !seen_ids.insert(resource.id.as_str()) {
@@ -384,14 +378,20 @@ mod tests {
                         id: "pkg:git".into(),
                         kind: ResourceKind::Package {
                             backend: backend("core/brew"),
-                            package: PackageDetails { name: "git".into(), version: None },
+                            package: PackageDetails {
+                                name: "git".into(),
+                                version: None,
+                            },
                         },
                     },
                     Resource {
                         id: "pkg:git".into(), // duplicate
                         kind: ResourceKind::Package {
                             backend: backend("core/brew"),
-                            package: PackageDetails { name: "git".into(), version: None },
+                            package: PackageDetails {
+                                name: "git".into(),
+                                version: None,
+                            },
                         },
                     },
                 ],
@@ -527,9 +527,18 @@ mod tests {
         });
         let migrated = migrate_v2_to_v3(&raw).unwrap();
         assert_eq!(migrated.version, STATE_VERSION);
-        assert!(migrated.features.contains_key("core/git"), "bare 'git' must become 'core/git'");
-        assert!(migrated.features.contains_key("core/ruby"), "'core/ruby' must be preserved");
-        assert!(!migrated.features.contains_key("git"), "bare key must be removed");
+        assert!(
+            migrated.features.contains_key("core/git"),
+            "bare 'git' must become 'core/git'"
+        );
+        assert!(
+            migrated.features.contains_key("core/ruby"),
+            "'core/ruby' must be preserved"
+        );
+        assert!(
+            !migrated.features.contains_key("git"),
+            "bare key must be removed"
+        );
     }
 
     #[test]

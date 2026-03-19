@@ -6,8 +6,8 @@
 //!
 //! See: `docs/specs/data/feature_index.md`
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Current schema version for the Feature Index.
 pub const FEATURE_INDEX_SCHEMA_VERSION: u32 = 1;

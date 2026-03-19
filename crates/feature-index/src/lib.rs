@@ -26,8 +26,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use model::feature_index::{
-    CapabilityRef, DepSpec, FeatureIndex, FeatureMeta, FeatureMode, FeatureSpec,
-    SpecResource, SpecResourceKind, FEATURE_INDEX_SCHEMA_VERSION,
+    CapabilityRef, DepSpec, FeatureIndex, FeatureMeta, FeatureMode, FeatureSpec, SpecResource,
+    SpecResourceKind, FEATURE_INDEX_SCHEMA_VERSION,
 };
 use serde::Deserialize;
 use thiserror::Error;
@@ -177,11 +177,12 @@ fn build_one(
 ) -> Result<FeatureMeta, FeatureIndexError> {
     // Load base feature.yaml.
     let base_path = feature_dir.join("feature.yaml");
-    let base: RawFeatureYaml = io::load_yaml(&base_path).map_err(|e| FeatureIndexError::ReadError {
-        feature_id: feature_id.to_string(),
-        path: base_path,
-        source: e,
-    })?;
+    let base: RawFeatureYaml =
+        io::load_yaml(&base_path).map_err(|e| FeatureIndexError::ReadError {
+            feature_id: feature_id.to_string(),
+            path: base_path,
+            source: e,
+        })?;
 
     // Load and merge platform override if present.
     let override_path = feature_dir.join(format!("feature.{}.yaml", platform.file_suffix()));
@@ -407,10 +408,17 @@ mod tests {
     fn build_script_feature() {
         let tmp = tempfile::tempdir().unwrap();
         let fdir = make_feature_dir(tmp.path(), "git");
-        write(&fdir, "feature.yaml", "spec_version: 1\ndescription: Git VCS\n");
+        write(
+            &fdir,
+            "feature.yaml",
+            "spec_version: 1\ndescription: Git VCS\n",
+        );
 
         let index = build(&[source_root("core", tmp.path())], &Platform::Linux).unwrap();
-        let meta = index.features.get("core/git").expect("core/git must be in index");
+        let meta = index
+            .features
+            .get("core/git")
+            .expect("core/git must be in index");
         assert_eq!(meta.mode, FeatureMode::Script);
         assert_eq!(meta.description.as_deref(), Some("Git VCS"));
         assert!(meta.spec.is_none());
@@ -447,7 +455,11 @@ mod tests {
     fn bare_depends_normalized_to_same_source() {
         let tmp = tempfile::tempdir().unwrap();
         let fdir = make_feature_dir(tmp.path(), "neovim");
-        write(&fdir, "feature.yaml", "spec_version: 1\ndepends:\n  - git\n");
+        write(
+            &fdir,
+            "feature.yaml",
+            "spec_version: 1\ndepends:\n  - git\n",
+        );
 
         let index = build(&[source_root("core", tmp.path())], &Platform::Linux).unwrap();
         let deps = &index.features["core/neovim"].dep.depends;
@@ -458,7 +470,11 @@ mod tests {
     fn canonical_depends_preserved() {
         let tmp = tempfile::tempdir().unwrap();
         let fdir = make_feature_dir(tmp.path(), "neovim");
-        write(&fdir, "feature.yaml", "spec_version: 1\ndepends:\n  - community/plugin\n");
+        write(
+            &fdir,
+            "feature.yaml",
+            "spec_version: 1\ndepends:\n  - community/plugin\n",
+        );
 
         let index = build(&[source_root("core", tmp.path())], &Platform::Linux).unwrap();
         let deps = &index.features["core/neovim"].dep.depends;
@@ -471,7 +487,11 @@ mod tests {
     fn platform_override_replaces_depends() {
         let tmp = tempfile::tempdir().unwrap();
         let fdir = make_feature_dir(tmp.path(), "mise");
-        write(&fdir, "feature.yaml", "spec_version: 1\ndepends:\n  - brew\n");
+        write(
+            &fdir,
+            "feature.yaml",
+            "spec_version: 1\ndepends:\n  - brew\n",
+        );
         write(&fdir, "feature.linux.yaml", "depends:\n  - apt\n");
 
         let index = build(&[source_root("core", tmp.path())], &Platform::Linux).unwrap();
@@ -484,7 +504,11 @@ mod tests {
     fn platform_override_not_applied_on_different_platform() {
         let tmp = tempfile::tempdir().unwrap();
         let fdir = make_feature_dir(tmp.path(), "mise");
-        write(&fdir, "feature.yaml", "spec_version: 1\ndepends:\n  - brew\n");
+        write(
+            &fdir,
+            "feature.yaml",
+            "spec_version: 1\ndepends:\n  - brew\n",
+        );
         write(&fdir, "feature.linux.yaml", "depends:\n  - apt\n");
 
         let index = build(&[source_root("core", tmp.path())], &Platform::Windows).unwrap();
@@ -521,7 +545,10 @@ mod tests {
         write(&fdir, "feature.yaml", "description: no version\n");
 
         let err = build(&[source_root("core", tmp.path())], &Platform::Linux).unwrap_err();
-        assert!(matches!(err, FeatureIndexError::UnsupportedSpecVersion { .. }));
+        assert!(matches!(
+            err,
+            FeatureIndexError::UnsupportedSpecVersion { .. }
+        ));
     }
 
     #[test]
@@ -531,34 +558,55 @@ mod tests {
         write(&fdir, "feature.yaml", "spec_version: 99\n");
 
         let err = build(&[source_root("core", tmp.path())], &Platform::Linux).unwrap_err();
-        assert!(matches!(err, FeatureIndexError::UnsupportedSpecVersion { .. }));
+        assert!(matches!(
+            err,
+            FeatureIndexError::UnsupportedSpecVersion { .. }
+        ));
     }
 
     #[test]
     fn declarative_with_no_resources_is_error() {
         let tmp = tempfile::tempdir().unwrap();
         let fdir = make_feature_dir(tmp.path(), "nodecl");
-        write(&fdir, "feature.yaml", "spec_version: 1\nmode: declarative\n");
+        write(
+            &fdir,
+            "feature.yaml",
+            "spec_version: 1\nmode: declarative\n",
+        );
 
         let err = build(&[source_root("core", tmp.path())], &Platform::Linux).unwrap_err();
-        assert!(matches!(err, FeatureIndexError::DeclarativeMissingResources { .. }));
+        assert!(matches!(
+            err,
+            FeatureIndexError::DeclarativeMissingResources { .. }
+        ));
     }
 
     #[test]
     fn declarative_with_empty_resources_is_error() {
         let tmp = tempfile::tempdir().unwrap();
         let fdir = make_feature_dir(tmp.path(), "empty");
-        write(&fdir, "feature.yaml", "spec_version: 1\nmode: declarative\nresources: []\n");
+        write(
+            &fdir,
+            "feature.yaml",
+            "spec_version: 1\nmode: declarative\nresources: []\n",
+        );
 
         let err = build(&[source_root("core", tmp.path())], &Platform::Linux).unwrap_err();
-        assert!(matches!(err, FeatureIndexError::DeclarativeMissingResources { .. }));
+        assert!(matches!(
+            err,
+            FeatureIndexError::DeclarativeMissingResources { .. }
+        ));
     }
 
     #[test]
     fn invalid_multi_slash_depends_is_error() {
         let tmp = tempfile::tempdir().unwrap();
         let fdir = make_feature_dir(tmp.path(), "bad");
-        write(&fdir, "feature.yaml", "spec_version: 1\ndepends:\n  - a/b/c\n");
+        write(
+            &fdir,
+            "feature.yaml",
+            "spec_version: 1\ndepends:\n  - a/b/c\n",
+        );
 
         let err = build(&[source_root("core", tmp.path())], &Platform::Linux).unwrap_err();
         assert!(matches!(err, FeatureIndexError::InvalidDependsEntry { .. }));
@@ -577,7 +625,10 @@ mod tests {
         write(&umyvim, "feature.yaml", simple_script_yaml());
 
         let index = build(
-            &[source_root("core", &core_dir), source_root("user", &user_dir)],
+            &[
+                source_root("core", &core_dir),
+                source_root("user", &user_dir),
+            ],
             &Platform::Linux,
         )
         .unwrap();

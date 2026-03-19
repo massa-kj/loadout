@@ -176,10 +176,7 @@ impl SourceRegistry {
 
     // ─── Internal helpers ────────────────────────────────────────────────────
 
-    fn find_source<'a>(
-        &'a self,
-        source_id: &str,
-    ) -> Result<&'a SourceEntry, RegistryError> {
+    fn find_source<'a>(&'a self, source_id: &str) -> Result<&'a SourceEntry, RegistryError> {
         self.sources
             .iter()
             .find(|e| e.id == source_id)
@@ -297,12 +294,20 @@ fn check_allowed_backend(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use model::sources::{AllowList, AllowSpec, DetailedAllow, SourceType, SourcesSpec, WildcardAll};
+    use model::sources::{
+        AllowList, AllowSpec, DetailedAllow, SourceType, SourcesSpec, WildcardAll,
+    };
     use std::path::PathBuf;
 
-    fn repo() -> PathBuf { PathBuf::from("/repo") }
-    fn cfg() -> PathBuf { PathBuf::from("/cfg") }
-    fn data() -> PathBuf { PathBuf::from("/data") }
+    fn repo() -> PathBuf {
+        PathBuf::from("/repo")
+    }
+    fn cfg() -> PathBuf {
+        PathBuf::from("/cfg")
+    }
+    fn data() -> PathBuf {
+        PathBuf::from("/data")
+    }
 
     fn feature(s: &str) -> CanonicalFeatureId {
         CanonicalFeatureId::new(s).unwrap()
@@ -320,10 +325,7 @@ mod tests {
         registry_with(SourcesSpec::default())
     }
 
-    fn source_entry(
-        id: &str,
-        allow: Option<AllowSpec>,
-    ) -> model::sources::SourceEntry {
+    fn source_entry(id: &str, allow: Option<AllowSpec>) -> model::sources::SourceEntry {
         model::sources::SourceEntry {
             id: id.into(),
             source_type: SourceType::Git,
@@ -407,8 +409,13 @@ mod tests {
     #[test]
     fn external_no_allow_is_deny_all() {
         let r = registry_with(spec_with(vec![source_entry("community", None)]));
-        let err = r.check_feature_allowed(&feature("community/node")).unwrap_err();
-        assert!(matches!(err, RegistryError::FeatureDeniedNoAllowList { .. }));
+        let err = r
+            .check_feature_allowed(&feature("community/node"))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            RegistryError::FeatureDeniedNoAllowList { .. }
+        ));
     }
 
     #[test]
@@ -418,7 +425,8 @@ mod tests {
             Some(AllowSpec::All(WildcardAll)),
         )]));
         r.check_feature_allowed(&feature("community/node")).unwrap();
-        r.check_feature_allowed(&feature("community/python")).unwrap();
+        r.check_feature_allowed(&feature("community/python"))
+            .unwrap();
     }
 
     #[test]
@@ -490,8 +498,13 @@ mod tests {
     #[test]
     fn external_no_allow_denies_backend() {
         let r = registry_with(spec_with(vec![source_entry("community", None)]));
-        let err = r.check_backend_allowed(&backend("community/brew")).unwrap_err();
-        assert!(matches!(err, RegistryError::BackendDeniedNoAllowList { .. }));
+        let err = r
+            .check_backend_allowed(&backend("community/brew"))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            RegistryError::BackendDeniedNoAllowList { .. }
+        ));
     }
 
     #[test]

@@ -265,15 +265,21 @@ mod tests {
 
     #[test]
     fn xdg_uses_defaults_when_vars_absent() {
-        let dirs = resolve_dirs_from_env(
-            &Platform::Linux,
-            env_map(&[("HOME", "/home/user")]),
-        )
-        .unwrap();
+        let dirs =
+            resolve_dirs_from_env(&Platform::Linux, env_map(&[("HOME", "/home/user")])).unwrap();
 
-        assert_eq!(dirs.config_home, PathBuf::from("/home/user/.config/loadout"));
-        assert_eq!(dirs.data_home, PathBuf::from("/home/user/.local/share/loadout"));
-        assert_eq!(dirs.state_home, PathBuf::from("/home/user/.local/state/loadout"));
+        assert_eq!(
+            dirs.config_home,
+            PathBuf::from("/home/user/.config/loadout")
+        );
+        assert_eq!(
+            dirs.data_home,
+            PathBuf::from("/home/user/.local/share/loadout")
+        );
+        assert_eq!(
+            dirs.state_home,
+            PathBuf::from("/home/user/.local/state/loadout")
+        );
     }
 
     #[test]
@@ -299,16 +305,19 @@ mod tests {
         // Only XDG_CONFIG_HOME set; others fall back to HOME defaults.
         let dirs = resolve_dirs_from_env(
             &Platform::Linux,
-            env_map(&[
-                ("HOME", "/home/user"),
-                ("XDG_CONFIG_HOME", "/custom/cfg"),
-            ]),
+            env_map(&[("HOME", "/home/user"), ("XDG_CONFIG_HOME", "/custom/cfg")]),
         )
         .unwrap();
 
         assert_eq!(dirs.config_home, PathBuf::from("/custom/cfg/loadout"));
-        assert_eq!(dirs.data_home, PathBuf::from("/home/user/.local/share/loadout"));
-        assert_eq!(dirs.state_home, PathBuf::from("/home/user/.local/state/loadout"));
+        assert_eq!(
+            dirs.data_home,
+            PathBuf::from("/home/user/.local/share/loadout")
+        );
+        assert_eq!(
+            dirs.state_home,
+            PathBuf::from("/home/user/.local/state/loadout")
+        );
     }
 
     #[test]
@@ -319,12 +328,12 @@ mod tests {
 
     #[test]
     fn wsl_uses_same_xdg_logic() {
-        let dirs = resolve_dirs_from_env(
-            &Platform::Wsl,
-            env_map(&[("HOME", "/home/wsluser")]),
-        )
-        .unwrap();
-        assert_eq!(dirs.config_home, PathBuf::from("/home/wsluser/.config/loadout"));
+        let dirs =
+            resolve_dirs_from_env(&Platform::Wsl, env_map(&[("HOME", "/home/wsluser")])).unwrap();
+        assert_eq!(
+            dirs.config_home,
+            PathBuf::from("/home/wsluser/.config/loadout")
+        );
     }
 
     // --- AppData directory resolution (Windows) ---------------------------
@@ -354,11 +363,8 @@ mod tests {
 
     #[test]
     fn all_dirs_end_with_loadout() {
-        let dirs = resolve_dirs_from_env(
-            &Platform::Linux,
-            env_map(&[("HOME", "/home/u")]),
-        )
-        .unwrap();
+        let dirs =
+            resolve_dirs_from_env(&Platform::Linux, env_map(&[("HOME", "/home/u")])).unwrap();
 
         for path in [&dirs.config_home, &dirs.data_home, &dirs.state_home] {
             assert_eq!(

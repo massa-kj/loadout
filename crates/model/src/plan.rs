@@ -5,8 +5,8 @@
 //!
 //! See: `docs/specs/algorithms/planner.md`
 
-use serde::{Deserialize, Serialize};
 use crate::id::CanonicalFeatureId;
+use serde::{Deserialize, Serialize};
 
 /// Ordered set of actions the Executor must apply.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

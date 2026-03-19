@@ -5,9 +5,9 @@
 //!
 //! See: `docs/specs/data/state.md`
 
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 use crate::id::CanonicalBackendId;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Current version number for the state schema.
 pub const STATE_VERSION: u32 = 3;

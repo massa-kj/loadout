@@ -66,7 +66,11 @@ pub struct WildcardAll;
 impl TryFrom<String> for WildcardAll {
     type Error = String;
     fn try_from(s: String) -> Result<Self, String> {
-        if s == "*" { Ok(Self) } else { Err(format!("expected \"*\", got \"{s}\"")) }
+        if s == "*" {
+            Ok(Self)
+        } else {
+            Err(format!("expected \"*\", got \"{s}\""))
+        }
     }
 }
 

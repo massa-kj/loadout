@@ -12,14 +12,13 @@ use model::desired_resource_graph::{
     DesiredResource, DesiredResourceGraph, DesiredResourceKind, FeatureDesiredResources,
     FsEntryType, FsOp, DESIRED_RESOURCE_GRAPH_SCHEMA_VERSION,
 };
-use model::feature_index::{FeatureIndex, FeatureMode, SpecFsEntryType, SpecResourceKind};
 use model::feature_index::FsOp as SpecFsOp;
+use model::feature_index::{FeatureIndex, FeatureMode, SpecFsEntryType, SpecResourceKind};
 use model::id::{CanonicalBackendId, ResolvedFeatureOrder};
 use model::policy::{BackendPolicy, Policy};
 
 pub use model::desired_resource_graph::{
-    DesiredResource as CompiledResource,
-    DesiredResourceGraph as CompiledGraph,
+    DesiredResource as CompiledResource, DesiredResourceGraph as CompiledGraph,
     DesiredResourceKind as CompiledResourceKind,
 };
 
@@ -74,10 +73,13 @@ pub fn compile(
     for feature_id in resolved_order {
         let id_str = feature_id.as_str();
 
-        let meta = feature_index
-            .features
-            .get(id_str)
-            .ok_or_else(|| CompilerError::FeatureNotFound { id: id_str.to_string() })?;
+        let meta =
+            feature_index
+                .features
+                .get(id_str)
+                .ok_or_else(|| CompilerError::FeatureNotFound {
+                    id: id_str.to_string(),
+                })?;
 
         // Script-mode features have no declarative resources.
         // They are still recorded in the graph with an empty list so the planner
@@ -106,13 +108,19 @@ pub fn compile(
         let mut resources: Vec<DesiredResource> = Vec::new();
         for resource in &spec.resources {
             let kind = compile_resource(resource, policy, id_str)?;
-            resources.push(DesiredResource { id: resource.id.clone(), kind });
+            resources.push(DesiredResource {
+                id: resource.id.clone(),
+                kind,
+            });
         }
 
         features.insert(id_str.to_string(), FeatureDesiredResources { resources });
     }
 
-    Ok(DesiredResourceGraph { schema_version: DESIRED_RESOURCE_GRAPH_SCHEMA_VERSION, features })
+    Ok(DesiredResourceGraph {
+        schema_version: DESIRED_RESOURCE_GRAPH_SCHEMA_VERSION,
+        features,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -134,7 +142,10 @@ fn compile_resource(
                 &resource.id,
                 "package",
             )?;
-            Ok(DesiredResourceKind::Package { name: name.clone(), desired_backend: backend })
+            Ok(DesiredResourceKind::Package {
+                name: name.clone(),
+                desired_backend: backend,
+            })
         }
 
         SpecResourceKind::Runtime { name, version } => {
@@ -152,14 +163,17 @@ fn compile_resource(
             })
         }
 
-        SpecResourceKind::Fs { source, path, entry_type, op } => {
-            Ok(DesiredResourceKind::Fs {
-                source: source.clone(),
-                path: path.clone(),
-                entry_type: map_entry_type(entry_type.clone()),
-                op: map_fs_op(op.clone()),
-            })
-        }
+        SpecResourceKind::Fs {
+            source,
+            path,
+            entry_type,
+            op,
+        } => Ok(DesiredResourceKind::Fs {
+            source: source.clone(),
+            path: path.clone(),
+            entry_type: map_entry_type(entry_type.clone()),
+            op: map_fs_op(op.clone()),
+        }),
     }
 }
 
@@ -212,11 +226,11 @@ fn map_fs_op(op: SpecFsOp) -> FsOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use model::feature_index::{
-        DepSpec, FeatureMeta, FeatureMode, FeatureSpec, SpecFsEntryType,
-        SpecResource, SpecResourceKind, FEATURE_INDEX_SCHEMA_VERSION,
-    };
     use model::feature_index::FsOp as SpecFsOp;
+    use model::feature_index::{
+        DepSpec, FeatureMeta, FeatureMode, FeatureSpec, SpecFsEntryType, SpecResource,
+        SpecResourceKind, FEATURE_INDEX_SCHEMA_VERSION,
+    };
     use model::id::CanonicalFeatureId;
     use model::policy::{BackendOverride, BackendPolicy, Policy};
     use std::collections::HashMap;
@@ -230,7 +244,10 @@ mod tests {
     fn make_index(features: Vec<(&str, FeatureMeta)>) -> FeatureIndex {
         FeatureIndex {
             schema_version: FEATURE_INDEX_SCHEMA_VERSION,
-            features: features.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+            features: features
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect(),
         }
     }
 
@@ -257,7 +274,12 @@ mod tests {
     }
 
     fn package_resource(id: &str, name: &str) -> SpecResource {
-        SpecResource { id: id.to_string(), kind: SpecResourceKind::Package { name: name.to_string() } }
+        SpecResource {
+            id: id.to_string(),
+            kind: SpecResourceKind::Package {
+                name: name.to_string(),
+            },
+        }
     }
 
     fn runtime_resource(id: &str, name: &str, version: &str) -> SpecResource {
@@ -270,7 +292,12 @@ mod tests {
         }
     }
 
-    fn fs_resource(id: &str, path: &str, entry_type: SpecFsEntryType, op: SpecFsOp) -> SpecResource {
+    fn fs_resource(
+        id: &str,
+        path: &str,
+        entry_type: SpecFsEntryType,
+        op: SpecFsOp,
+    ) -> SpecResource {
         SpecResource {
             id: id.to_string(),
             kind: SpecResourceKind::Fs {
@@ -291,8 +318,16 @@ mod tests {
 
     fn backend_policy_with_override(default: &str, name: &str, backend: &str) -> BackendPolicy {
         let mut overrides = HashMap::new();
-        overrides.insert(name.to_string(), BackendOverride { backend: backend.to_string() });
-        BackendPolicy { default_backend: Some(default.to_string()), overrides }
+        overrides.insert(
+            name.to_string(),
+            BackendOverride {
+                backend: backend.to_string(),
+            },
+        );
+        BackendPolicy {
+            default_backend: Some(default.to_string()),
+            overrides,
+        }
     }
 
     // --- Tests --------------------------------------------------------------
@@ -326,7 +361,10 @@ mod tests {
         let resources = &graph.features["core/git"].resources;
         assert_eq!(resources.len(), 1);
         match &resources[0].kind {
-            DesiredResourceKind::Package { name, desired_backend } => {
+            DesiredResourceKind::Package {
+                name,
+                desired_backend,
+            } => {
                 assert_eq!(name, "git");
                 assert_eq!(desired_backend.as_str(), "core/brew");
             }
@@ -342,14 +380,20 @@ mod tests {
             declarative_meta(vec![package_resource("package:ripgrep", "ripgrep")]),
         )]);
         let policy = Policy {
-            package: Some(backend_policy_with_override("core/brew", "ripgrep", "core/cargo")),
+            package: Some(backend_policy_with_override(
+                "core/brew",
+                "ripgrep",
+                "core/cargo",
+            )),
             ..Default::default()
         };
         let order = vec![make_feature_id("core/ripgrep")];
 
         let graph = compile(&index, &policy, &order).unwrap();
         match &graph.features["core/ripgrep"].resources[0].kind {
-            DesiredResourceKind::Package { desired_backend, .. } => {
+            DesiredResourceKind::Package {
+                desired_backend, ..
+            } => {
                 assert_eq!(desired_backend.as_str(), "core/cargo");
             }
             _ => panic!("expected Package"),
@@ -371,7 +415,11 @@ mod tests {
 
         let graph = compile(&index, &policy, &order).unwrap();
         match &graph.features["core/node"].resources[0].kind {
-            DesiredResourceKind::Runtime { name, version, desired_backend } => {
+            DesiredResourceKind::Runtime {
+                name,
+                version,
+                desired_backend,
+            } => {
                 assert_eq!(name, "node");
                 assert_eq!(version, "20");
                 assert_eq!(desired_backend.as_str(), "core/mise");
@@ -388,14 +436,20 @@ mod tests {
             declarative_meta(vec![runtime_resource("runtime:python", "python", "3.12")]),
         )]);
         let policy = Policy {
-            runtime: Some(backend_policy_with_override("core/mise", "python", "core/uv")),
+            runtime: Some(backend_policy_with_override(
+                "core/mise",
+                "python",
+                "core/uv",
+            )),
             ..Default::default()
         };
         let order = vec![make_feature_id("core/python")];
 
         let graph = compile(&index, &policy, &order).unwrap();
         match &graph.features["core/python"].resources[0].kind {
-            DesiredResourceKind::Runtime { desired_backend, .. } => {
+            DesiredResourceKind::Runtime {
+                desired_backend, ..
+            } => {
                 assert_eq!(desired_backend.as_str(), "core/uv");
             }
             _ => panic!("expected Runtime"),
@@ -419,7 +473,12 @@ mod tests {
 
         let graph = compile(&index, &policy, &order).unwrap();
         match &graph.features["core/git"].resources[0].kind {
-            DesiredResourceKind::Fs { path, entry_type, op, source } => {
+            DesiredResourceKind::Fs {
+                path,
+                entry_type,
+                op,
+                source,
+            } => {
                 assert_eq!(path, "~/.gitconfig");
                 assert_eq!(*entry_type, FsEntryType::File);
                 assert_eq!(*op, FsOp::Link);
@@ -507,8 +566,14 @@ mod tests {
     #[test]
     fn multiple_features_all_compiled() {
         let index = make_index(vec![
-            ("core/git", declarative_meta(vec![package_resource("package:git", "git")])),
-            ("core/node", declarative_meta(vec![runtime_resource("runtime:node", "node", "20")])),
+            (
+                "core/git",
+                declarative_meta(vec![package_resource("package:git", "git")]),
+            ),
+            (
+                "core/node",
+                declarative_meta(vec![runtime_resource("runtime:node", "node", "20")]),
+            ),
             ("core/bash", script_meta()),
         ]);
         let policy = Policy {
@@ -518,7 +583,7 @@ mod tests {
         };
         let order = vec![
             make_feature_id("core/git"),
-            make_feature_id("core/bash"),  // script: skipped
+            make_feature_id("core/bash"), // script: skipped
             make_feature_id("core/node"),
         ];
 

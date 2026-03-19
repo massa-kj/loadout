@@ -6,9 +6,9 @@
 //!
 //! See: `docs/specs/data/desired_resource_graph.md`
 
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 use crate::id::CanonicalBackendId;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Current schema version for DesiredResourceGraph.
 pub const DESIRED_RESOURCE_GRAPH_SCHEMA_VERSION: u32 = 1;
@@ -143,14 +143,22 @@ mod tests {
         let git = &g.features["core/git"];
         assert_eq!(git.resources.len(), 2);
         match &git.resources[0].kind {
-            DesiredResourceKind::Package { name, desired_backend } => {
+            DesiredResourceKind::Package {
+                name,
+                desired_backend,
+            } => {
                 assert_eq!(name, "git");
                 assert_eq!(desired_backend.as_str(), "core/brew");
             }
             _ => panic!("expected package"),
         }
         match &git.resources[1].kind {
-            DesiredResourceKind::Fs { path, entry_type, op, .. } => {
+            DesiredResourceKind::Fs {
+                path,
+                entry_type,
+                op,
+                ..
+            } => {
                 assert_eq!(path, "~/.gitconfig");
                 assert_eq!(*entry_type, FsEntryType::File);
                 assert_eq!(*op, FsOp::Link);
@@ -160,7 +168,11 @@ mod tests {
 
         let node = &g.features["core/node"];
         match &node.resources[0].kind {
-            DesiredResourceKind::Runtime { name, version, desired_backend } => {
+            DesiredResourceKind::Runtime {
+                name,
+                version,
+                desired_backend,
+            } => {
                 assert_eq!(name, "node");
                 assert_eq!(version, "20");
                 assert_eq!(desired_backend.as_str(), "core/mise");

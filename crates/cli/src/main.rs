@@ -56,8 +56,8 @@ fn main() {
     let rest = args[2..].to_vec();
 
     match subcommand.as_str() {
-        "apply"   => cmd_apply(&rest),
-        "plan"    => cmd_plan(&rest),
+        "apply" => cmd_apply(&rest),
+        "plan" => cmd_plan(&rest),
         "migrate" => cmd_migrate(&rest),
         other => {
             eprintln!("error: unknown command: {other}");
@@ -89,7 +89,11 @@ fn cmd_apply(args: &[String]) {
             Event::FeatureDone { id } => {
                 println!("  ✓ {id}");
             }
-            Event::ResourceFailed { feature_id, resource_id, error } => {
+            Event::ResourceFailed {
+                feature_id,
+                resource_id,
+                error,
+            } => {
                 eprintln!("  ✗ [{feature_id}] resource '{resource_id}': {error}");
             }
             Event::FeatureFailed { id, error } => {
@@ -152,9 +156,8 @@ fn cmd_plan(args: &[String]) {
 fn print_plan(plan: &model::Plan, verbose: bool) {
     use model::plan::Operation;
 
-    let has_anything = !plan.actions.is_empty()
-        || !plan.blocked.is_empty()
-        || (verbose && !plan.noops.is_empty());
+    let has_anything =
+        !plan.actions.is_empty() || !plan.blocked.is_empty() || (verbose && !plan.noops.is_empty());
 
     if !has_anything {
         println!("Nothing to do.");
@@ -165,11 +168,11 @@ fn print_plan(plan: &model::Plan, verbose: bool) {
         println!("Actions:");
         for action in &plan.actions {
             let op_label = match action.operation {
-                Operation::Create         => "create",
-                Operation::Destroy        => "destroy",
-                Operation::Replace        => "replace",
+                Operation::Create => "create",
+                Operation::Destroy => "destroy",
+                Operation::Replace => "replace",
                 Operation::ReplaceBackend => "replace-backend",
-                Operation::Strengthen     => "strengthen",
+                Operation::Strengthen => "strengthen",
             };
             println!("  [{op_label}] {}", action.feature.as_str());
         }
@@ -195,8 +198,12 @@ fn print_plan(plan: &model::Plan, verbose: bool) {
     let s = &plan.summary;
     let total_action = s.create + s.destroy + s.replace + s.replace_backend + s.strengthen;
     print!("Summary: {total_action} action(s)");
-    if s.blocked > 0 { print!(", {} blocked", s.blocked); }
-    if verbose { print!(", {} noop", plan.noops.len()); }
+    if s.blocked > 0 {
+        print!(", {} blocked", s.blocked);
+    }
+    if verbose {
+        print!(", {} noop", plan.noops.len());
+    }
     println!();
 }
 
@@ -281,7 +288,7 @@ fn cmd_migrate(args: &[String]) {
 /// Platform and dirs are detected automatically.
 fn build_app_context() -> app::AppContext {
     let repo_root = resolve_repo_root();
-    let platform  = platform::detect_platform();
+    let platform = platform::detect_platform();
     let dirs = platform::resolve_dirs(&platform).unwrap_or_else(|e| {
         eprintln!("error: failed to resolve directories: {e}");
         process::exit(1);
@@ -313,9 +320,7 @@ fn exe_dir() -> PathBuf {
     env::current_exe()
         .expect("failed to locate current executable")
         .canonicalize()
-        .unwrap_or_else(|_| {
-            env::current_exe().expect("failed to locate current executable")
-        })
+        .unwrap_or_else(|_| env::current_exe().expect("failed to locate current executable"))
         .parent()
         .expect("executable has no parent directory")
         .to_path_buf()
