@@ -1,18 +1,23 @@
-// crates/cli/src/main.rs — loadout entry point
+// crates/cli/src/main.rs — loadout CLI entry point (Phase 4)
 //
-// This binary is a pure dispatcher: it locates the appropriate cmd script
-// relative to its own location and spawns it, forwarding all arguments and
-// propagating the exit code transparently.
+// This binary implements all subcommands directly in Rust by calling the `app`
+// crate. No shell scripts are spawned for core commands.
 //
-// No business logic lives here. All logic is in cmd/*.sh (unix) or
-// cmd/*.ps1 (windows).
+// Subcommands:
+//   apply   <profile>             Apply a profile (install/update/remove features)
+//   plan    <profile> [--verbose] Show what apply would do without changes
+//   migrate [--dry-run]           Migrate state file to the current schema version
+//
+// Repository root resolution (for features/, backends/, policies/):
+//   1. LOADOUT_ROOT environment variable (explicit override)
+//   2. Parent of the binary's directory (tarball layout: bin/loadout → ../)
+//
+// See: docs/architecture/layers.md (cmd / app boundary)
 
 use std::path::{Path, PathBuf};
 use std::{env, process};
 
-// ── Commands ──────────────────────────────────────────────────────────────────
-
-const COMMANDS: &[&str] = &["apply", "plan", "migrate"];
+// ── Usage text ────────────────────────────────────────────────────────────────
 
 const USAGE: &str = "\
 Usage: loadout <command> [options]
@@ -20,12 +25,9 @@ Usage: loadout <command> [options]
 A declarative environment management system.
 
 Available commands:
-  apply <profile>    Apply a loadout profile
-  plan  <profile>    Show what apply would do (no changes made)
-  migrate            Migrate state/profile keys to current schema
-
-Options:
-  plan --verbose     Also list noop (already up-to-date) features
+  apply <profile>              Apply a loadout profile to the system
+  plan  <profile> [--verbose]  Show what apply would do (no changes made)
+  migrate [--dry-run]          Migrate state file to the latest schema version
 
 Examples:
   loadout apply profiles/linux.yaml
@@ -44,38 +46,266 @@ fn main() {
             println!("{USAGE}");
             process::exit(0);
         }
-        Some(cmd) => cmd,
+        Some("--version") | Some("-V") => {
+            println!("loadout {}", env!("CARGO_PKG_VERSION"));
+            process::exit(0);
+        }
+        Some(cmd) => cmd.to_string(),
     };
 
-    let rest = &args[2..];
+    let rest = args[2..].to_vec();
 
-    if !COMMANDS.contains(&subcommand) {
-        eprintln!("error: unknown command: {subcommand}");
-        eprintln!();
-        eprintln!("{USAGE}");
-        process::exit(1);
+    match subcommand.as_str() {
+        "apply"   => cmd_apply(&rest),
+        "plan"    => cmd_plan(&rest),
+        "migrate" => cmd_migrate(&rest),
+        other => {
+            eprintln!("error: unknown command: {other}");
+            eprintln!();
+            eprintln!("{USAGE}");
+            process::exit(1);
+        }
     }
-
-    run_cmd(subcommand, rest);
 }
 
-// ── Dispatch ──────────────────────────────────────────────────────────────────
+// ── apply ─────────────────────────────────────────────────────────────────────
 
-fn run_cmd(subcommand: &str, args: &[String]) {
-    let script = exe_dir().join("cmd").join(script_name(subcommand));
+fn cmd_apply(args: &[String]) {
+    let profile_path = require_profile_arg(args, "apply");
+    let verbose = args.contains(&"--verbose".to_string());
 
-    if !script.exists() {
-        eprintln!("error: cmd script not found: {}", script.display());
-        process::exit(1);
-    }
+    let ctx = build_app_context();
 
-    let status = spawn_shell(&script, args).unwrap_or_else(|e| {
-        eprintln!("error: failed to spawn shell: {e}");
-        process::exit(1);
+    println!("Applying profile: {}", profile_path.display());
+
+    let result = app::apply(&ctx, &profile_path, &mut |event| {
+        use app::Event;
+        match event {
+            Event::FeatureStart { id } => {
+                if verbose {
+                    println!("  → {id}");
+                }
+            }
+            Event::FeatureDone { id } => {
+                println!("  ✓ {id}");
+            }
+            Event::ResourceFailed { feature_id, resource_id, error } => {
+                eprintln!("  ✗ [{feature_id}] resource '{resource_id}': {error}");
+            }
+            Event::FeatureFailed { id, error } => {
+                eprintln!("  ✗ {id}: {error}");
+            }
+        }
     });
 
-    // Propagate exit code transparently; treat signal termination as 1.
-    process::exit(status.code().unwrap_or(1));
+    match result {
+        Ok(report) => {
+            println!();
+            if report.failed.is_empty() {
+                println!("Profile applied successfully.");
+            } else {
+                println!("Profile applied with errors.");
+            }
+            if !report.executed.is_empty() {
+                println!();
+                println!("Executed ({}):", report.executed.len());
+                for f in &report.executed {
+                    println!("  {} [{}]", f.id, f.operation);
+                }
+            }
+            if !report.failed.is_empty() {
+                println!();
+                println!("Failed ({}):", report.failed.len());
+                for f in &report.failed {
+                    println!("  {} [{}]: {}", f.id, f.operation, f.error);
+                }
+                println!();
+                process::exit(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            process::exit(1);
+        }
+    }
+}
+
+// ── plan ──────────────────────────────────────────────────────────────────────
+
+fn cmd_plan(args: &[String]) {
+    let profile_path = require_profile_arg(args, "plan");
+    let verbose = args.contains(&"--verbose".to_string());
+
+    let ctx = build_app_context();
+
+    match app::plan(&ctx, &profile_path) {
+        Ok(plan) => {
+            print_plan(&plan, verbose);
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            process::exit(1);
+        }
+    }
+}
+
+fn print_plan(plan: &model::Plan, verbose: bool) {
+    use model::plan::Operation;
+
+    let has_anything = !plan.actions.is_empty()
+        || !plan.blocked.is_empty()
+        || (verbose && !plan.noops.is_empty());
+
+    if !has_anything {
+        println!("Nothing to do.");
+        return;
+    }
+
+    if !plan.actions.is_empty() {
+        println!("Actions:");
+        for action in &plan.actions {
+            let op_label = match action.operation {
+                Operation::Create         => "create",
+                Operation::Destroy        => "destroy",
+                Operation::Replace        => "replace",
+                Operation::ReplaceBackend => "replace-backend",
+                Operation::Strengthen     => "strengthen",
+            };
+            println!("  [{op_label}] {}", action.feature.as_str());
+        }
+        println!();
+    }
+
+    if !plan.blocked.is_empty() {
+        println!("Blocked:");
+        for entry in &plan.blocked {
+            println!("  [blocked] {}: {}", entry.feature.as_str(), entry.reason);
+        }
+        println!();
+    }
+
+    if verbose && !plan.noops.is_empty() {
+        println!("No-op (already up to date):");
+        for entry in &plan.noops {
+            println!("  [noop] {}", entry.feature.as_str());
+        }
+        println!();
+    }
+
+    let s = &plan.summary;
+    let total_action = s.create + s.destroy + s.replace + s.replace_backend + s.strengthen;
+    print!("Summary: {total_action} action(s)");
+    if s.blocked > 0 { print!(", {} blocked", s.blocked); }
+    if verbose { print!(", {} noop", plan.noops.len()); }
+    println!();
+}
+
+// ── migrate ───────────────────────────────────────────────────────────────────
+
+fn cmd_migrate(args: &[String]) {
+    let dry_run = args.contains(&"--dry-run".to_string());
+
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!("Usage: loadout migrate [--dry-run]");
+        println!();
+        println!("Migrate the state file to the current schema version.");
+        println!("  --dry-run  Show what would change without writing");
+        process::exit(0);
+    }
+
+    let ctx = build_app_context();
+    let state_path = ctx.state_path();
+
+    if !state_path.exists() {
+        println!(
+            "State file not found: {} — nothing to migrate.",
+            state_path.display()
+        );
+        process::exit(0);
+    }
+
+    // Load raw JSON to inspect version without triggering version guards.
+    let raw = match state::load_raw(&state_path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("error reading state: {e}");
+            process::exit(1);
+        }
+    };
+
+    let version = raw.get("version").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+
+    match version {
+        3 => {
+            println!("State is already at version 3 — nothing to migrate.");
+        }
+        2 => {
+            println!("Migrating state v2 → v3 ...");
+            match state::migrate_v2_to_v3(&raw) {
+                Ok(migrated) => {
+                    let feature_count = migrated.features.len();
+                    if dry_run {
+                        println!(
+                            "[dry-run] Would migrate {feature_count} feature(s). \
+                             No changes written."
+                        );
+                    } else {
+                        if let Err(e) = state::commit(&state_path, &migrated) {
+                            eprintln!("error: failed to commit migrated state: {e}");
+                            process::exit(1);
+                        }
+                        println!("Migration complete. {feature_count} feature(s) migrated.");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("error: migration failed: {e}");
+                    process::exit(1);
+                }
+            }
+        }
+        other => {
+            eprintln!("error: unknown state version {other}; cannot migrate");
+            process::exit(1);
+        }
+    }
+}
+
+// ── Context ───────────────────────────────────────────────────────────────────
+
+/// Build an `AppContext` from the current environment.
+///
+/// Repository root resolution order:
+///   1. `LOADOUT_ROOT` environment variable
+///   2. Parent of the binary's directory (tarball layout: `bin/loadout → ../`)
+///
+/// Platform and dirs are detected automatically.
+fn build_app_context() -> app::AppContext {
+    let repo_root = resolve_repo_root();
+    let platform  = platform::detect_platform();
+    let dirs = platform::resolve_dirs(&platform).unwrap_or_else(|e| {
+        eprintln!("error: failed to resolve directories: {e}");
+        process::exit(1);
+    });
+    app::AppContext::new(repo_root, platform, dirs)
+}
+
+/// Resolve the loadout repository root directory.
+fn resolve_repo_root() -> PathBuf {
+    // Explicit override via environment variable.
+    if let Ok(root) = env::var("LOADOUT_ROOT") {
+        let p = PathBuf::from(&root);
+        if p.is_dir() {
+            return p;
+        }
+        eprintln!("warning: LOADOUT_ROOT={root} is not a directory; falling back to exe-relative");
+    }
+
+    // Tarball layout: binary is at `<install_root>/bin/loadout`.
+    // Walk up one level from the binary's directory to get the install root.
+    exe_dir()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(exe_dir)
 }
 
 /// Returns the directory containing this binary, following symlinks.
@@ -83,53 +313,24 @@ fn exe_dir() -> PathBuf {
     env::current_exe()
         .expect("failed to locate current executable")
         .canonicalize()
-        .expect("failed to canonicalize executable path")
+        .unwrap_or_else(|_| {
+            env::current_exe().expect("failed to locate current executable")
+        })
         .parent()
         .expect("executable has no parent directory")
         .to_path_buf()
 }
 
-// ── Platform-specific dispatch ────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-#[cfg(unix)]
-fn script_name(subcommand: &str) -> String {
-    format!("{subcommand}.sh")
-}
-
-#[cfg(windows)]
-fn script_name(subcommand: &str) -> String {
-    format!("{subcommand}.ps1")
-}
-
-#[cfg(unix)]
-fn spawn_shell(script: &Path, args: &[String]) -> std::io::Result<process::ExitStatus> {
-    process::Command::new("bash")
-        .arg(script)
-        .args(args)
-        .status()
-}
-
-#[cfg(windows)]
-fn spawn_shell(script: &Path, args: &[String]) -> std::io::Result<process::ExitStatus> {
-    process::Command::new(find_powershell())
-        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
-        .arg(script)
-        .args(args)
-        .status()
-}
-
-/// Returns `"pwsh"` (PowerShell 7+) if available, otherwise `"powershell"` (5.1).
-#[cfg(windows)]
-fn find_powershell() -> &'static str {
-    let available = process::Command::new("where")
-        .arg("pwsh")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-
-    if available {
-        "pwsh"
-    } else {
-        "powershell"
-    }
+/// Require the first non-flag positional argument as a profile path.
+fn require_profile_arg(args: &[String], subcommand: &str) -> PathBuf {
+    args.iter()
+        .find(|a| !a.starts_with('-'))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            eprintln!("error: {subcommand} requires a <profile> argument");
+            eprintln!("Usage: loadout {subcommand} <profile.yaml>");
+            process::exit(1);
+        })
 }

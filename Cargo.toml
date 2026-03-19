@@ -1,3 +1,3 @@
 [workspace]
-members = ["crates/cli"]
+members = ["crates/cli", "crates/model", "crates/resolver", "crates/planner", "crates/io", "crates/config", "crates/state", "crates/source-registry", "crates/feature-index", "crates/compiler", "crates/platform", "crates/backend-host", "crates/feature-host", "crates/executor", "crates/app"]
 resolver = "2"

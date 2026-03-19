@@ -12,3 +12,9 @@ readme = "../../README.md"
 [[bin]]
 name = "loadout"
 path = "src/main.rs"
+
+[dependencies]
+app      = { path = "../app" }
+state    = { path = "../state" }
+model    = { path = "../model" }
+platform = { path = "../platform" }
