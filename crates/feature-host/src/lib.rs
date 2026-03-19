@@ -137,7 +137,7 @@ fn execute_script(
     feature_id: &CanonicalFeatureId,
     dirs: &Dirs,
 ) -> Result<FeatureOutput, FeatureHostError> {
-    let output = Command::new("sh")
+    let output = Command::new("bash")
         .arg(script)
         .env("LOADOUT_FEATURE_ID", feature_id.as_str())
         .env("LOADOUT_CONFIG_HOME", &dirs.config_home)
