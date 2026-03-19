@@ -1,0 +1,21 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+model        = { path = "../model" }
+config       = { path = "../config" }
+source-registry = { path = "../source-registry" }
+feature-index   = { path = "../feature-index" }
+compiler     = { path = "../compiler" }
+resolver     = { path = "../resolver" }
+planner      = { path = "../planner" }
+executor     = { path = "../executor" }
+state        = { path = "../state" }
+platform     = { path = "../platform" }
+backend-host = { path = "../backend-host" }
+thiserror    = "2"
+
+[dev-dependencies]
+tempfile = "3"
