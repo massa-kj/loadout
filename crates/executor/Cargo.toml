@@ -1,0 +1,15 @@
+[package]
+name = "executor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+model = { path = "../model" }
+state = { path = "../state" }
+backend-host = { path = "../backend-host" }
+feature-host = { path = "../feature-host" }
+platform = { path = "../platform" }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
