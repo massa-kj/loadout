@@ -65,7 +65,7 @@ pub enum FeatureIndexError {
         feature_id: String,
         path: PathBuf,
         #[source]
-        source: io::IoError,
+        source: Box<io::IoError>,
     },
 
     /// A feature directory could not be scanned.
@@ -181,7 +181,7 @@ fn build_one(
         io::load_yaml(&base_path).map_err(|e| FeatureIndexError::ReadError {
             feature_id: feature_id.to_string(),
             path: base_path,
-            source: e,
+            source: Box::new(e),
         })?;
 
     // Load and merge platform override if present.
@@ -191,7 +191,7 @@ fn build_one(
             io::load_yaml(&override_path).map_err(|e| FeatureIndexError::ReadError {
                 feature_id: feature_id.to_string(),
                 path: override_path,
-                source: e,
+                source: Box::new(e),
             })?;
         merge(base, overlay)
     } else {
