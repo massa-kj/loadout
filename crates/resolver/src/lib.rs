@@ -208,7 +208,11 @@ mod tests {
     use super::*;
     use model::feature_index::{CapabilityRef, DepSpec, FeatureIndex, FeatureMeta, FeatureMode};
 
-    fn make_index(entries: &[(&str, &[&str], &[&str], &[&str])]) -> FeatureIndex {
+    // Type alias to avoid clippy::type_complexity in the test helper signature.
+    // (id, depends, requires, provides)
+    type IndexEntry<'a> = (&'a str, &'a [&'a str], &'a [&'a str], &'a [&'a str]);
+
+    fn make_index(entries: &[IndexEntry<'_>]) -> FeatureIndex {
         // entries: (id, depends, requires, provides)
         let features = entries
             .iter()

@@ -281,11 +281,8 @@ fn cmd_migrate(args: &[String]) {
 
 /// Build an `AppContext` from the current environment.
 ///
-/// Repository root resolution order:
-///   1. `LOADOUT_ROOT` environment variable
-///   2. Parent of the binary's directory (tarball layout: `bin/loadout → ../`)
-///
-/// Platform and dirs are detected automatically.
+/// See [`resolve_repo_root`] for repository root resolution order.
+/// Platform and XDG/AppData dirs are detected automatically.
 fn build_app_context() -> app::AppContext {
     let repo_root = resolve_repo_root();
     let platform = platform::detect_platform();
@@ -297,22 +294,50 @@ fn build_app_context() -> app::AppContext {
 }
 
 /// Resolve the loadout repository root directory.
+///
+/// Resolution order:
+///   1. `LOADOUT_ROOT` environment variable (explicit override)
+///   2. Parent of the binary's directory, if it contains `features/`
+///      (tarball layout: `<install_root>/bin/loadout → ../`)
+///   3. Current working directory, if it contains `features/`
+///      (development fallback — works with `cargo run`)
+///   4. Parent of the binary's directory (unconditional last resort)
 fn resolve_repo_root() -> PathBuf {
-    // Explicit override via environment variable.
+    // 1. Explicit override via environment variable.
     if let Ok(root) = env::var("LOADOUT_ROOT") {
         let p = PathBuf::from(&root);
         if p.is_dir() {
             return p;
         }
-        eprintln!("warning: LOADOUT_ROOT={root} is not a directory; falling back to exe-relative");
+        eprintln!("warning: LOADOUT_ROOT={root} is not a directory; falling back");
     }
 
-    // Tarball layout: binary is at `<install_root>/bin/loadout`.
-    // Walk up one level from the binary's directory to get the install root.
+    // 2. Tarball layout: binary is at `<install_root>/bin/loadout`.
+    if let Some(candidate) = exe_dir().parent().map(Path::to_path_buf) {
+        if looks_like_repo_root(&candidate) {
+            return candidate;
+        }
+    }
+
+    // 3. Development fallback: current working directory (used by `cargo run`).
+    if let Ok(cwd) = env::current_dir() {
+        if looks_like_repo_root(&cwd) {
+            return cwd;
+        }
+    }
+
+    // 4. Last resort: exe parent even without a features/ directory.
     exe_dir()
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(exe_dir)
+}
+
+/// Returns `true` if `path` looks like the loadout repository root.
+///
+/// The presence of a `features/` directory is used as the heuristic.
+fn looks_like_repo_root(path: &Path) -> bool {
+    path.join("features").is_dir()
 }
 
 /// Returns the directory containing this binary, following symlinks.
