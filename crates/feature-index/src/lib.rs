@@ -210,10 +210,10 @@ fn build_one(
         }
     }
 
-    // Determine mode (default: script).
+    // Determine mode. Default is declarative; script must be declared explicitly.
     let mode = match merged.mode.as_deref() {
-        Some("declarative") => FeatureMode::Declarative,
-        _ => FeatureMode::Script,
+        Some("script") => FeatureMode::Script,
+        _ => FeatureMode::Declarative,
     };
 
     // Normalize dep.depends bare names.
@@ -240,8 +240,10 @@ fn build_one(
         resources: resources.into_iter().map(convert_resource).collect(),
     });
 
-    // Reject declarative features without resources.
-    if mode == FeatureMode::Declarative {
+    // Reject declarative features that *explicitly* declare `mode: declarative`
+    // but provide no resources — this is almost certainly a mistake.
+    // Omitting `mode:` with no resources is allowed (produces a no-op declarative feature).
+    if matches!(merged.mode.as_deref(), Some("declarative")) {
         let empty = match &spec {
             None => true,
             Some(s) => s.resources.is_empty(),
@@ -405,7 +407,7 @@ mod tests {
     }
 
     #[test]
-    fn build_script_feature() {
+    fn build_default_mode_is_declarative() {
         let tmp = tempfile::tempdir().unwrap();
         let fdir = make_feature_dir(tmp.path(), "git");
         write(
@@ -419,7 +421,8 @@ mod tests {
             .features
             .get("core/git")
             .expect("core/git must be in index");
-        assert_eq!(meta.mode, FeatureMode::Script);
+        // No `mode:` field → default is Declarative.
+        assert_eq!(meta.mode, FeatureMode::Declarative);
         assert_eq!(meta.description.as_deref(), Some("Git VCS"));
         assert!(meta.spec.is_none());
     }
