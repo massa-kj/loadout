@@ -14,13 +14,16 @@ Three levels of testing exist in this project:
 
 Unit tests cover stable public APIs and invariant-critical logic.
 
-Target modules:
-* `core/lib/planner` — classification, decision table
-* `core/lib/state` — schema validation, invariants, atomic commit
-* `core/lib/resolver` — topological sort, cycle detection, capability injection
-* `core/lib/source_registry` — canonical ID parsing, source path resolution, allow-list checks
-* `core/lib/compiler` — DRG output format, platform override, absence of `desired_backend` in raw DRG
-* `core/lib/declarative_executor` — resource routing by kind, all plan operations
+**Test runner:** `cargo test` (Rust-native)
+
+Target crates:
+* `crates/planner` — classification, decision table
+* `crates/state` — schema validation, invariants, atomic commit
+* `crates/resolver` — topological sort, cycle detection, capability injection
+* `crates/source-registry` — canonical ID parsing, source path resolution, allow-list checks
+* `crates/compiler` — DesiredResourceGraph output format, platform override, backend resolution
+* `crates/executor` — resource routing by kind, all plan operations
+* `crates/model` — data structure validation (State, Profile, Policy, etc.)
 
 Internal APIs must NOT be tested directly.
 Tests must validate behavior, not implementation details.
@@ -69,11 +72,11 @@ On Windows tests, use disposable AppData/LocalAppData roots.
 Tests must validate behavior, not implementation details.
 
 Do not test:
-* Internal APIs (functions not listed in module public API)
-* Shell-specific implementation choices (use of `mapfile`, `yq` invocation style, etc.)
+* Internal APIs (functions not listed in crate public API)
+* Rust-specific implementation choices (use of `HashMap` vs `BTreeMap`, iterator style, etc.)
 * Log output format
 * OS-specific branching internals
-* Command syntax details
+* Error message wording (only error type/variant)
 
 If a test breaks because of a refactor that preserves behavior, the test is testing the wrong thing.
 

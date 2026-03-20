@@ -11,21 +11,52 @@ They are recorded so that design and contribution decisions can align with long-
 
 ## Directions Under Consideration
 
-### Rust migration
+### ~~Rust migration~~
 
-Reimplementing core (resolver, planner, executor, state, backend dispatch) in Rust.
+**Implemented (Phase 1-6 complete)**
 
-* **Rationale** — Performance, single binary, stronger typing, cross-platform without shell/PowerShell duality.
-* **Scope** — Core logic and possibly CLI; features and backends may remain script-based or become pluggable.
-* **Status** — Exploratory. No timeline. Current shell/PowerShell implementation remains the reference.
+Core logic (resolver, planner, compiler, executor, state, backend dispatch, feature execution) is now implemented in Rust.
+
+* **Scope achieved:**
+  - Single Rust binary (`loadout`)
+  - Strongtyping for all data models (State, Profile, Policy, Plan, etc.)
+  - Cross-platform without shell/PowerShell duality for core logic
+  - 16 crates with comprehensive test coverage (202 tests)
+  - Plugin interfaces stabilized (JSON stdin/stdout protocol for backends)
+  - Feature scripts (`install.sh`/`uninstall.sh`) remain script-based
+  - Platform bootstrap scripts (`platforms/linux/`, etc.) remain script-based
+  - Backend plugins can be Rust-native (builtin) or script-based (community)
+
+* **What remains:**
+  - Optional: Embed builtin features into binary (currently loaded from filesystem)
+  - Optional: External git source wiring (spec exists, execution path not yet implemented)
+  - Ongoing: Migration of `mode: script` core features to `mode: declarative`
+
+**For Rust implementation details, see:**
+- `crates/` directory structure
+- [docs/architecture/layers.md](../architecture/layers.md) — Repository Structure section
+- [docs/rustdoc-map.md](../rustdoc-map.md) — docs ↔ Rust code mapping
 
 ### ~~Externalized profile / policy / feature / backend~~
 
-Allowing profile, policy, feature definitions, and backends to be loaded from outside the repository (e.g. config directories, plugin paths, remote sources).
+**Implemented (Phase 3-6)**
 
-* **Rationale** — Users can maintain private profiles or third-party features without forking; separation of "loadout engine" vs "my config".
-* **Scope** — Load paths, discovery, validation; compatibility with current in-repo layout.
-* **Status** — Exploratory. Contract (profile/policy/state schema) would remain; only the source of files would change.
+Profiles, policies, features, and backends can now be loaded from multiple sources:
+
+* **Profiles/Policies:**
+  - Platform defaults: `$XDG_CONFIG_HOME/loadout/profiles/` (Linux/WSL) or `%LOCALAPPDATA%\loadout\profiles\` (Windows)
+  - Repository examples: `{repo}/profiles/` and `{repo}/policies/`
+  
+* **Features/Backends:**
+  - `core` source: `{repo}/features/` and `{repo}/backends/`
+  - `user` source: `$XDG_CONFIG_HOME/loadout/features/` and `backends/`
+  - External sources: `$XDG_DATA_HOME/loadout/sources/<source_id>/` (schema defined, execution path deferred)
+
+* **Canonical IDs:** All features and backends use `<source_id>/<name>` format (e.g., `core/git`, `user/mypkg`).
+* **Source registry:** Manages discovery, allow-list validation, path resolution (see `crates/source-registry/`).
+
+**Remaining work:**
+- External git repository source execution path (spec exists in `docs/specs/data/sources.md`, not yet wired)
 
 ### ~~Declarative features~~ (implemented in Phase 4)
 
