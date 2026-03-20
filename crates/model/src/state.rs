@@ -55,26 +55,42 @@ pub struct Resource {
 }
 
 /// Kind-specific data for a recorded resource.
+///
+/// The `backend` field is present for `Package` and `Runtime` to ensure deterministic removal.
+/// The backend that was used to install must be the same backend used to remove.
+///
+/// See `docs/specs/data/state.md` for JSON schema and invariants.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ResourceKind {
     /// An installed package managed by a backend.
+    ///
+    /// Packages are named artifacts installed by package managers (e.g., `brew`, `apt`, `scoop`).
+    /// The recorded `backend` ensures the same backend is used for removal.
     Package {
-        /// Backend that was used to install this package.
+        /// Canonical backend ID that was used to install this package (e.g., `core/brew`).
+        /// Must be used for deterministic removal.
         backend: CanonicalBackendId,
-        /// Package-specific details.
+        /// Package name and optional version.
         package: PackageDetails,
     },
     /// An installed runtime managed by a backend.
+    ///
+    /// Runtimes are version-managed language runtimes (e.g., `node@20`, `python@3.12`).
+    /// Unlike packages, runtimes always require an explicit version.
     Runtime {
-        /// Backend that was used to install this runtime.
+        /// Canonical backend ID that was used to install this runtime (e.g., `core/mise`).
+        /// Must be used for deterministic removal.
         backend: CanonicalBackendId,
-        /// Runtime-specific details.
+        /// Runtime name and version.
         runtime: RuntimeDetails,
     },
     /// A filesystem entry created or linked by loadout.
+    ///
+    /// No backend is involved; the `fs` module handles these directly.
+    /// Recorded to ensure safe removal (only tracked paths may be removed).
     Fs {
-        /// Filesystem-specific details.
+        /// Path, entry type, and operation details.
         fs: FsDetails,
     },
 }
@@ -82,18 +98,23 @@ pub enum ResourceKind {
 /// Details for a recorded package resource.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PackageDetails {
-    /// Package name as known to the backend.
+    /// Package name as known to the backend (e.g., `"git"`, `"neovim"`).
     pub name: String,
-    /// Installed version, or `null` if unknown/unpinned.
+    /// Installed version string, or `None` if unknown or unpinned.
+    ///
+    /// `None` means the version was not tracked at install time.
+    /// It does NOT mean "latest".
     pub version: Option<String>,
 }
 
 /// Details for a recorded runtime resource.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeDetails {
-    /// Runtime name (e.g. `node`, `python`).
+    /// Runtime name (e.g., `"node"`, `"python"`, `"ruby"`).
     pub name: String,
-    /// Installed version string.
+    /// Installed version string (e.g., `"20.0.0"`, `"3.12"`).
+    ///
+    /// Unlike packages, runtime versions are always required and recorded.
     pub version: String,
 }
 

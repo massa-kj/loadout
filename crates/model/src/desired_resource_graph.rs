@@ -48,36 +48,53 @@ pub struct DesiredResource {
 }
 
 /// Kind-specific data for a desired resource (post-compiler, backend resolved).
+///
+/// `desired_backend` is present for `Package` and `Runtime` because FeatureCompiler
+/// has already resolved policy. The Planner uses this field for backend-mismatch detection.
+///
+/// `Fs` resources have no backend; they are handled directly by the `fs` module.
+///
+/// See `docs/specs/data/desired_resource_graph.md` for JSON schema and compatibility rules.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DesiredResourceKind {
     /// A package to be installed via a resolved backend.
+    ///
+    /// Packages are named artifacts installed by package managers.
+    /// Policy has already determined which backend should be used.
     Package {
-        /// Package name as known to the backend.
+        /// Package name as known to the backend (e.g., `"git"`, `"neovim"`).
         name: String,
-        /// Resolved backend identifier.
+        /// Canonical backend ID resolved by FeatureCompiler (e.g., `"core/brew"`).
+        ///
+        /// The Planner uses this for backend-mismatch detection. The Executor dispatches to this backend.
         desired_backend: CanonicalBackendId,
     },
     /// A runtime to be installed via a resolved backend.
+    ///
+    /// Runtimes are version-managed language runtimes. Unlike packages, runtimes always require a version.
     Runtime {
-        /// Runtime name (e.g. `node`, `python`).
+        /// Runtime name (e.g., `"node"`, `"python"`, `"ruby"`).
         name: String,
-        /// Version string (exact or constraint).
+        /// Version string (exact or constraint, e.g., `"20.0.0"`, `"3.12"`).
         version: String,
-        /// Resolved backend identifier.
+        /// Canonical backend ID resolved by FeatureCompiler (e.g., `"core/mise"`).
         desired_backend: CanonicalBackendId,
     },
     /// A filesystem entry to be created or linked (no backend).
+    ///
+    /// Handled directly by the `fs` module without backend involvement.
     Fs {
         /// Path to source file/dir relative to the feature directory.
-        /// Defaults to `files/<basename(path)>` if omitted.
+        ///
+        /// Defaults to `files/<basename(path)>` if omitted in the feature spec.
         #[serde(skip_serializing_if = "Option::is_none")]
         source: Option<String>,
-        /// Target path (absolute or `~`-relative).
+        /// Target path where the file/dir should exist (absolute or `~`-relative).
         path: String,
-        /// Type of entry to create (`file` or `dir`).
+        /// Type of filesystem entry to create (`file` or `dir`).
         entry_type: FsEntryType,
-        /// Operation to perform.
+        /// Operation to perform (`link` for symlink, `copy` for copy).
         op: FsOp,
     },
 }
@@ -86,7 +103,9 @@ pub enum DesiredResourceKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FsEntryType {
+    /// A regular file.
     File,
+    /// A directory.
     Dir,
 }
 
@@ -94,7 +113,9 @@ pub enum FsEntryType {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FsOp {
+    /// Create a symlink from `source` to `path`.
     Link,
+    /// Copy the file/dir from `source` to `path`.
     Copy,
 }
 

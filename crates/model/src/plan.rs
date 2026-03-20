@@ -41,13 +41,23 @@ pub struct PlanAction {
 }
 
 /// Type of operation in a plan action.
+///
+/// The Executor interprets these operation types to determine what work to perform.
+/// The Planner is the sole authority for classification; the Executor must not re-classify.
+///
+/// See `docs/specs/algorithms/planner.md` for the decision table that produces these operations.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Operation {
+    /// Feature is not in state; install it fresh.
     Create,
+    /// Feature is in state but not in desired profile; uninstall it.
     Destroy,
+    /// Feature exists but desired resources are incompatible with current state; uninstall then reinstall.
     Replace,
+    /// Feature exists but backend has changed for one or more resources; uninstall then reinstall with new backend.
     ReplaceBackend,
+    /// Feature exists and is compatible; install additional resources not yet in state.
     Strengthen,
 }
 

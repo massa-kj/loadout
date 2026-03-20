@@ -49,10 +49,23 @@ pub struct FeatureMeta {
 }
 
 /// Feature execution mode.
+///
+/// Determines how the executor handles a feature: via subprocess (script mode)
+/// or via direct resource application (declarative mode).
+///
+/// See `docs/guides/features.md` and `docs/specs/api/feature-host.md`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FeatureMode {
+    /// Execute `install.sh` / `uninstall.sh` scripts.
+    ///
+    /// Used when installation logic cannot be expressed as declarative resources
+    /// (e.g., system configuration, templating, conditional logic).
     Script,
+    /// Declare resources in `feature.yaml`; executor applies them without scripts.
+    ///
+    /// Preferred mode for packages, runtimes, and files. Provides better plan accuracy
+    /// (noop detection, replace/strengthen classification) and atomic operations.
     Declarative,
 }
 
@@ -60,17 +73,26 @@ pub enum FeatureMode {
 ///
 /// Only these fields may be read by the Resolver. FeatureCompiler and Planner must not
 /// add or modify fields here.
+///
+/// See `docs/specs/algorithms/resolver.md` for resolution semantics.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct DepSpec {
-    /// Canonical feature IDs this feature depends on explicitly.
+    /// Canonical feature IDs this feature depends on explicitly (install ordering).
+    ///
+    /// Use when dependency is on a specific named feature (e.g., `["core/git"]`).
     #[serde(default)]
     pub depends: Vec<String>,
 
-    /// Capability names this feature requires from another feature.
+    /// Capability names this feature requires from another feature (abstract dependency).
+    ///
+    /// Use when any provider of a capability suffices (e.g., any package manager).
+    /// If no provider is in the desired set, resolution aborts.
     #[serde(default)]
     pub requires: Vec<CapabilityRef>,
 
-    /// Capability names this feature exposes to others.
+    /// Capability names this feature exposes to others (abstract provision).
+    ///
+    /// Other features can `requires` these capabilities.
     #[serde(default)]
     pub provides: Vec<CapabilityRef>,
 }

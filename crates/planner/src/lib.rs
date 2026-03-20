@@ -23,7 +23,9 @@ use thiserror::Error;
 #[derive(Debug, Error, PartialEq)]
 pub enum PlannerError {
     /// A feature appears in `resolved_feature_order` but not in the DesiredResourceGraph.
+    ///
     /// This is always a programming error caused by a mismatch between resolver and compiler output.
+    /// Should be unreachable in normal operation if the pipeline is correctly sequenced.
     #[error("feature '{id}' is in the resolved order but not in the DesiredResourceGraph")]
     FeatureOrderMismatch { id: String },
 }
@@ -48,10 +50,19 @@ enum Classification {
 
 /// Generate a [`Plan`] from the given inputs.
 ///
+/// This is a **pure function**: it does not perform I/O, does not mutate global state,
+/// and is deterministic (same inputs always produce the same output).
+///
 /// # Parameters
-/// - `desired`: compiled desired resources (FeatureCompiler output)
-/// - `state`: current authoritative state
-/// - `resolved_order`: topologically sorted feature IDs (resolver output, install order)
+/// - `desired`: compiled desired resources (FeatureCompiler output, includes resolved backends)
+/// - `state`: current authoritative state (features installed, resources recorded)
+/// - `resolved_order`: topologically sorted feature IDs (resolver output, defines install order)
+///
+/// # Returns
+///
+/// A [`Plan`] containing actions, noops, and blocked entries. Actions are classified
+/// by operation type (Create/Destroy/Replace/ReplaceBackend/Strengthen) using the decision
+/// table in `docs/specs/algorithms/planner.md`. The Executor must not re-classify.
 ///
 /// # Errors
 ///

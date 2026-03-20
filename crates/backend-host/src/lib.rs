@@ -33,6 +33,9 @@ pub use model::id::CanonicalBackendId as BackendId;
 
 /// Installation status of a resource as reported by a backend.
 ///
+/// Used by the Planner for noop detection: if desired resource matches installed state,
+/// no action is needed.
+///
 /// Phase 4 uses three values only. Version-aware comparison is deferred to Phase 5.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResourceState {
@@ -41,6 +44,8 @@ pub enum ResourceState {
     /// The resource is absent.
     NotInstalled,
     /// The backend could not determine the state (e.g. backend not available).
+    ///
+    /// Planner treats Unknown as NotInstalled for safety (re-installation is idempotent).
     Unknown,
 }
 
@@ -52,38 +57,56 @@ pub enum ResourceState {
 #[derive(Debug, thiserror::Error)]
 pub enum BackendError {
     /// The backend registry does not contain an entry for this ID.
+    ///
+    /// Should be unreachable if FeatureCompiler validated backends correctly.
     #[error("unknown backend: {id}")]
     UnknownBackend { id: String },
 
     /// The backend directory does not exist or is not a directory.
+    ///
+    /// Occurs when backend discovery failed or backend was removed after registration.
     #[error("backend directory not found: {path}")]
     DirNotFound { path: String },
 
     /// A required script file (`apply.sh`, `remove.sh`, `status.sh`) is missing.
+    ///
+    /// Indicates incomplete backend implementation.
     #[error("backend script not found: {path}")]
     ScriptNotFound { path: String },
 
     /// `backend.yaml` is absent or could not be parsed.
+    ///
+    /// Indicates malformed backend metadata.
     #[error("invalid backend.yaml at {path}: {reason}")]
     InvalidMeta { path: String, reason: String },
 
     /// The backend API version is not supported.
+    ///
+    /// Occurs when backend.yaml declares api_version that loadout does not recognize.
     #[error("unsupported backend api_version {version} at {path}")]
     UnsupportedApiVersion { version: u32, path: String },
 
     /// A backend script exited with a non-zero exit code.
+    ///
+    /// Example: `apply.sh package:foo` failed because package does not exist in repository.
     #[error("backend script failed (exit {exit_code}): {stderr}")]
     ScriptFailed { exit_code: i32, stderr: String },
 
     /// The script process could not be spawned.
+    ///
+    /// Indicates OS-level failure (e.g., permissions, resource exhaustion).
     #[error("failed to spawn backend script: {reason}")]
     SpawnFailed { reason: String },
 
     /// The `status` script produced output that could not be interpreted.
+    ///
+    /// Expected format: "installed", "not_installed", or "unknown".
     #[error("unrecognised status output from backend: {output:?}")]
     UnrecognisedStatus { output: String },
 
     /// The resource kind is not supported by this backend.
+    ///
+    /// Example: npm backend does not support runtime resources.
     #[error("resource kind not supported by this backend: {kind}")]
     NotSupported { kind: String },
 }

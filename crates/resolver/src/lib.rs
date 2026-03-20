@@ -15,10 +15,14 @@ use thiserror::Error;
 #[derive(Debug, Error, PartialEq)]
 pub enum ResolverError {
     /// A feature listed in the desired set is not present in the Feature Index.
+    ///
+    /// Example: Profile requests `"foo/bar"` but no such feature.yaml exists.
     #[error("feature '{id}' is not present in the Feature Index")]
     FeatureNotFound { id: String },
 
     /// An explicit `dep.depends` entry points to a feature not in the desired set.
+    ///
+    /// Example: A depends on B, but B was not requested and has no transitive requirer.
     #[error("feature '{dependent}' depends on '{dependency}', but '{dependency}' is not in the desired set")]
     MissingDependency {
         dependent: String,
@@ -26,20 +30,36 @@ pub enum ResolverError {
     },
 
     /// A `dep.requires` capability has no provider in the desired set.
+    ///
+    /// Example: Feature requires `capability:package-manager` but no brew/apt is in the profile.
     #[error("feature '{requirer}' requires capability '{capability}', but no provider is in the desired set")]
     MissingCapabilityProvider {
         requirer: String,
         capability: String,
     },
 
-    /// A dependency cycle was detected.
+    /// A dependency cycle was detected; install order cannot be determined.
+    ///
+    /// Example: A depends on B, B depends on C, C depends on A.
     #[error("dependency cycle detected: {cycle}")]
     Cycle { cycle: String },
 }
 
 /// Resolve the dependency order for `desired_features` using `feature_index`.
 ///
+/// This is a **pure function**: it does not perform I/O, does not mutate global state,
+/// and is deterministic (same inputs always produce the same output).
+///
 /// Returns a [`ResolvedFeatureOrder`] (topologically sorted, dependencies before dependents).
+///
+/// # Algorithm
+///
+/// 1. Expand desired features to include transitive dependencies (walk `dep.depends`)
+/// 2. Resolve capability-based dependencies (map `dep.requires` to `dep.provides`)
+/// 3. Build dependency graph (directed edges from dependents to dependencies)
+/// 4. Perform topological sort with cycle detection
+///
+/// See `docs/specs/algorithms/resolver.md` for full specification.
 ///
 /// # Errors
 ///
