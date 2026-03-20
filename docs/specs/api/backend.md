@@ -1,85 +1,305 @@
-# Backend Plugin Specification
+# Backend Plugin Specification (Rust Edition)
 
 ## Scope
 
-This document defines the normative interface contract for backend plugins.
+This document defines the normative interface contract for backend plugins in the Rust implementation.
 
-Covered: required operations, observation API, capability declaration,
-plugin isolation rules, determinism requirements, and compatibility.
+**Covered:**
+- Required script operations (`apply.sh`, `remove.sh`, `status.sh`)
+- Environment variable and JSON stdin protocol
+- Plugin directory layout and metadata
+- Determinism requirements and isolation rules
 
-Not covered: how to implement a backend (see `guides/backends.md`).
+**Not covered:**
+- How to implement a backend (see `guides/backends.md`)
+- Backend trait internals (see `crates/backend-host/src/lib.rs`)
 
-## Backend API Contract
+## Overview
 
-Every backend plugin must implement the required operations listed below.
-Core dispatches to backends via `backend_call <op> <args...>` through `backend_registry`.
+Backend plugins are **shell script directories** that implement resource management operations (install/upgrade/uninstall packages, runtimes, etc.).
 
-Plugins are shell scripts loaded by sourcing. They must not have side effects on load.
+The Rust `ScriptBackend` loads these directories and invokes the scripts, passing **resource data via environment variables** (primary protocol) and **optionally as JSON on stdin** (for complex parsing).
 
-## Required Operations
+Builtin backends (like `brew`, `apt`, `mise`) are implemented directly in Rust via the `Backend` trait and ship with the `loadout` binary. Script backends can extend or override these builtins.
 
-**`backend_api_version`**
-Print the API version string (currently `"1"`). No arguments.
+---
 
-**`backend_capabilities`**
-Print a space-separated list of supported resource kinds (e.g. `"package"`, `"runtime"`).
+## Plugin Directory Layout
 
-**`backend_package_install <name> [version]`**
-Install the named package. Version is optional.
-Must be idempotent: no error if already installed.
+```text
+<backend_dir>/
+  backend.yaml     # metadata (api_version)
+  apply.sh         # install or upgrade
+  remove.sh        # uninstall
+  status.sh        # query installation state
+```
 
-**`backend_package_uninstall <name>`**
-Uninstall the named package.
-Must only remove what this backend installed. Must not remove untracked resources.
+All three scripts must be present and executable.
 
-## Optional Operations
+---
 
-**`backend_runtime_install <name> <version>`** (required if capabilities includes `runtime`)
-Install the named runtime at the specified version.
+## Metadata: `backend.yaml`
 
-**`backend_runtime_uninstall <name> <version>`** (required if capabilities includes `runtime`)
-Uninstall the named runtime version.
+```yaml
+api_version: 1
+```
 
-## Capability Declaration
+- **`api_version`** (integer, required): Must be `1`.
+  Breaking changes to the script interface will increment this version.
 
-`backend_capabilities` defines which resource kinds this plugin handles.
+Script backends with an unsupported `api_version` will be rejected at load time.
 
-| Value | Meaning |
-|---|---|
-| `package` | Can install/uninstall packages |
-| `runtime` | Can install/uninstall versioned runtimes |
+---
 
-A backend declaring `runtime` must implement both `backend_runtime_install`
-and `backend_runtime_uninstall`.
+## Protocol: Environment Variables + JSON
 
-## Observation API
+### Primary Method: Environment Variables
 
-Used by the `plan` command layer (read-only, no side effects).
-Must NOT be called by the planner itself.
+All three scripts receive **resource data via environment variables**.
 
-**`backend_manager_exists`** — Return 0 if the underlying tool is available.
+Scripts can access fields directly using shell variable expansion (no external tools required):
 
-**`backend_package_exists <name> [version]`** — Return 0 if the package is installed.
+```bash
+#!/usr/bin/env bash
+brew install "$LOADOUT_PACKAGE_NAME"
+```
 
-**`backend_runtime_exists <name> <version>`** — Return 0 if the runtime version is installed.
+#### Common Variables (All Resource Kinds)
 
-## Plugin Isolation Rules
+- **`LOADOUT_RESOURCE_ID`** — Unique resource identifier (e.g., `package:git`)
+- **`LOADOUT_RESOURCE_KIND`** — Resource kind: `Package`, `Runtime`, or `Fs`
+- **`LOADOUT_BACKEND_ID`** — Canonical backend ID (e.g., `core/brew`)
 
-Backend plugins must NOT:
+#### Package Resources
 
-* read policy files directly
-* read or write `state.json`
-* communicate with other backend plugins
-* produce side effects outside install/uninstall scope
-* contain orchestration logic or dependency resolution
+When `LOADOUT_RESOURCE_KIND=Package`:
+
+- **`LOADOUT_PACKAGE_NAME`** — Package name (e.g., `git`, `neovim`)
+
+#### Runtime Resources
+
+When `LOADOUT_RESOURCE_KIND=Runtime`:
+
+- **`LOADOUT_RUNTIME_NAME`** — Runtime name (e.g., `node`, `python`)
+- **`LOADOUT_RUNTIME_VERSION`** — Version string (e.g., `20`, `3.12`)
+
+#### Fs Resources
+
+When `LOADOUT_RESOURCE_KIND=Fs`:
+
+- **`LOADOUT_FS_PATH`** — Destination path
+- **`LOADOUT_FS_SOURCE`** — Source path (optional)
+- **`LOADOUT_FS_ENTRY_TYPE`** — Entry type (e.g., `File`, `Directory`)
+- **`LOADOUT_FS_OP`** — Operation (e.g., `Copy`, `Symlink`)
+
+### Optional Method: JSON Stdin
+
+Scripts **also** receive the full resource definition as JSON on stdin.
+
+This is provided for complex parsing cases where structured data is preferred.
+
+**Most scripts do NOT need to use JSON.** Environment variables are simpler and eliminate the `jq` dependency.
+
+#### JSON Schema Example (Package)
+
+```json
+{
+  "id": "package:bash",
+  "kind": "package",
+  "Package": {
+    "name": "bash",
+    "desired_backend": "core/brew"
+  }
+}
+```
+
+#### JSON Schema Example (Runtime)
+
+```json
+{
+  "id": "runtime:node@20",
+  "kind": "runtime",
+  "Runtime": {
+    "name": "node",
+    "version": "20",
+    "desired_backend": "core/mise"
+  }
+}
+```
+
+Scripts that need JSON can parse stdin with `jq` or other tools:
+
+```bash
+name=$(jq -r '.Package.name' <&0)
+```
+
+---
+
+## Script Operations
+
+### `apply.sh`
+
+**Purpose:** Install or upgrade the resource.
+
+**Input:** 
+- Environment variables (primary: `LOADOUT_RESOURCE_ID`, `LOADOUT_PACKAGE_NAME`, etc.)
+- JSON on stdin (optional)
+
+**Output:** None (stderr for logging)
+
+**Exit code:**
+- **0** — Success (resource installed or already at desired state)
+- **Non-0** — Failure (installation failed; stderr captured for logging)
+
+**Contract:**
+- Must be **idempotent**: applying the same resource multiple times must succeed without error.
+- Must NOT uninstall other resources or modify unrelated state.
+
+**Example (using environment variables):**
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+brew install "$LOADOUT_PACKAGE_NAME"
+```
+
+---
+
+### `remove.sh`
+
+**Purpose:** Uninstall the resource.
+
+**Input:**
+- Environment variables (primary)
+- JSON on stdin (optional)
+
+**Output:** None (stderr for logging)
+
+**Exit code:**
+- **0** — Success (resource removed or already absent)
+- **Non-0** — Failure (removal failed; stderr captured for logging)
+
+**Contract:**
+- Must be **idempotent**: removing an absent resource must succeed without error.
+- Must only remove what this backend installed. Must NOT remove resources managed by other backends.
+
+**Example (using environment variables):**
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+brew uninstall "$LOADOUT_PACKAGE_NAME" 2>&1 || true
+```
+
+---
+
+### `status.sh`
+
+**Purpose:** Query the current installation state of the resource.
+
+**Input:**
+- Environment variables (primary)
+- JSON on stdin (optional)
+
+**Output:** One of these **exact strings** on stdout (case-sensitive):
+- `installed` — Resource is present and correctly installed
+- `not_installed` — Resource is absent
+- `unknown` — Unable to determine (e.g., backend tool not available)
+
+**Exit code:**
+- **0** — Status query succeeded (output must be one of the above)
+- **Non-0** — Query failed (treated as `unknown`)
+
+**Example (using environment variables):**
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+if brew list --formula "$LOADOUT_PACKAGE_NAME" &>/dev/null; then
+    echo "installed"
+else
+    echo "not_installed"
+fi
+```
+
+**Contract:**
+- Must be **read-only** (no side effects).
+- Must complete quickly (used by `plan` command to diff against desired state).
+
+---
+
+## Isolation Rules
+
+Backend plugins **must NOT**:
+- Read `state.json` or policy files directly
+- Communicate with other backend plugins
+- Produce side effects outside their declared resource scope
+- Contain orchestration logic or dependency resolution
+
+State and policy are managed by the executor; backends operate only on individual resources.
+
+---
 
 ## Determinism Requirements
 
-Given the same inputs (name, version), a backend must attempt the same operation.
-Backends must not branch on undeclared environment state.
+Given the same resource definition (same `name`/`version`), a backend must:
+- Attempt the same operation
+- Not branch on undeclared environment state
 
-## Compatibility Rules
+Non-determinism (e.g., race conditions, external network failures) may cause transient errors, but the backend's **intent** must be deterministic.
 
-The backend API version is `1`. Breaking changes to required operations require a version bump.
-New optional operations may be added without a version bump.
-Core must gracefully handle backends that do not implement optional operations.
+---
+
+## Compatibility and Versioning
+
+- **Current API version:** `1`
+- Breaking changes to the JSON schema or script contract will increment `api_version`.
+- New optional fields may be added to the resource JSON without a version bump (scripts must ignore unknown fields).
+
+Core will reject backends with an unsupported `api_version` at load time.
+
+---
+
+## Example: Minimal `brew` Backend
+
+### `backend.yaml`
+```yaml
+api_version: 1
+```
+
+### `apply.sh`
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+brew install "$LOADOUT_PACKAGE_NAME"
+```
+
+### `remove.sh`
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+brew uninstall "$LOADOUT_PACKAGE_NAME" 2>&1 || true
+```
+
+### `status.sh`
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+if brew list --formula "$LOADOUT_PACKAGE_NAME" &>/dev/null; then
+    echo "installed"
+else
+    echo "not_installed"
+fi
+```
+
+### Notes
+
+- **No `jq` required**: Scripts access resource data via environment variables.
+- **JSON still available**: For complex cases, scripts can parse stdin with `jq` or other tools.
+- **Idempotency**: `apply.sh` and `remove.sh` must succeed when run multiple times.
+
+---
+
+## See Also
+
+- **Implementation:** `crates/backend-host/src/lib.rs` (`ScriptBackend`, `Backend` trait)
+- **Builtin backends:** `crates/backends-builtin/src/`
+- **Usage guide:** `docs/guides/backends.md`
+

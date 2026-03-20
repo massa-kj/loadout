@@ -272,19 +272,19 @@ impl ScriptBackend {
 impl Backend for ScriptBackend {
     fn apply(&self, resource: &DesiredResource) -> Result<(), BackendError> {
         let json = serialise_resource(resource);
-        run_script(&self.apply_script, &json)?;
+        run_script(&self.apply_script, resource, &json)?;
         Ok(())
     }
 
     fn remove(&self, resource: &DesiredResource) -> Result<(), BackendError> {
         let json = serialise_resource(resource);
-        run_script(&self.remove_script, &json)?;
+        run_script(&self.remove_script, resource, &json)?;
         Ok(())
     }
 
     fn status(&self, resource: &DesiredResource) -> Result<ResourceState, BackendError> {
         let json = serialise_resource(resource);
-        let stdout = run_script_with_output(&self.status_script, &json)?;
+        let stdout = run_script_with_output(&self.status_script, resource, &json)?;
         match stdout.trim() {
             "installed" => Ok(ResourceState::Installed),
             "not_installed" => Ok(ResourceState::NotInstalled),
@@ -317,17 +317,73 @@ fn serialise_resource(resource: &DesiredResource) -> String {
     serde_json::to_string(resource).unwrap_or_else(|_| "{}".to_string())
 }
 
-/// Run a script, writing `json` to stdin. Returns `Err` on non-zero exit.
-fn run_script(script: &std::path::Path, json: &str) -> Result<(), BackendError> {
-    let mut child = Command::new("sh")
-        .arg(script)
-        .stdin(Stdio::piped())
+/// Build a Command with environment variables set from the resource.
+///
+/// Scripts receive parameters via environment variables (primary protocol)
+/// and optionally via JSON on stdin (for complex cases requiring jq).
+fn build_command_with_env(
+    script: &std::path::Path,
+    resource: &DesiredResource,
+) -> Command {
+    let mut cmd = Command::new("sh");
+    cmd.arg(script);
+
+    // Common environment variables
+    cmd.env("LOADOUT_RESOURCE_ID", &resource.id);
+
+    // Kind-specific environment variables
+    match &resource.kind {
+        DesiredResourceKind::Package {
+            name,
+            desired_backend,
+        } => {
+            cmd.env("LOADOUT_RESOURCE_KIND", "Package");
+            cmd.env("LOADOUT_PACKAGE_NAME", name);
+            cmd.env("LOADOUT_BACKEND_ID", desired_backend.as_str());
+        }
+        DesiredResourceKind::Runtime {
+            name,
+            version,
+            desired_backend,
+        } => {
+            cmd.env("LOADOUT_RESOURCE_KIND", "Runtime");
+            cmd.env("LOADOUT_RUNTIME_NAME", name);
+            cmd.env("LOADOUT_RUNTIME_VERSION", version);
+            cmd.env("LOADOUT_BACKEND_ID", desired_backend.as_str());
+        }
+        DesiredResourceKind::Fs {
+            source,
+            path,
+            entry_type,
+            op,
+        } => {
+            cmd.env("LOADOUT_RESOURCE_KIND", "Fs");
+            cmd.env("LOADOUT_FS_PATH", path);
+            if let Some(src) = source {
+                cmd.env("LOADOUT_FS_SOURCE", src);
+            }
+            cmd.env("LOADOUT_FS_ENTRY_TYPE", format!("{:?}", entry_type));
+            cmd.env("LOADOUT_FS_OP", format!("{:?}", op));
+        }
+    }
+
+    cmd
+}
+
+/// Run a script with environment variables and JSON on stdin. Returns `Err` on non-zero exit.
+fn run_script(
+    script: &std::path::Path,
+    resource: &DesiredResource,
+    json: &str,
+) -> Result<(), BackendError> {
+    let mut cmd = build_command_with_env(script, resource);
+    cmd.stdin(Stdio::piped())
         .stdout(Stdio::inherit())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| BackendError::SpawnFailed {
-            reason: e.to_string(),
-        })?;
+        .stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().map_err(|e| BackendError::SpawnFailed {
+        reason: e.to_string(),
+    })?;
 
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(json.as_bytes());
@@ -349,17 +405,20 @@ fn run_script(script: &std::path::Path, json: &str) -> Result<(), BackendError> 
     }
 }
 
-/// Run a script, writing `json` to stdin. Returns stdout on success.
-fn run_script_with_output(script: &std::path::Path, json: &str) -> Result<String, BackendError> {
-    let mut child = Command::new("sh")
-        .arg(script)
-        .stdin(Stdio::piped())
+/// Run a script with environment variables and JSON on stdin. Returns stdout on success.
+fn run_script_with_output(
+    script: &std::path::Path,
+    resource: &DesiredResource,
+    json: &str,
+) -> Result<String, BackendError> {
+    let mut cmd = build_command_with_env(script, resource);
+    cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| BackendError::SpawnFailed {
-            reason: e.to_string(),
-        })?;
+        .stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().map_err(|e| BackendError::SpawnFailed {
+        reason: e.to_string(),
+    })?;
 
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(json.as_bytes());
