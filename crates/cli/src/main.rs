@@ -299,9 +299,7 @@ fn build_app_context() -> app::AppContext {
 ///   1. `LOADOUT_ROOT` environment variable (explicit override)
 ///   2. Parent of the binary's directory, if it contains `features/`
 ///      (tarball layout: `<install_root>/bin/loadout → ../`)
-///   3. Current working directory, if it contains `features/`
-///      (development fallback — works with `cargo run`)
-///   4. Parent of the binary's directory (unconditional last resort)
+///   3. Parent of the binary's directory (unconditional fallback)
 fn resolve_repo_root() -> PathBuf {
     // 1. Explicit override via environment variable.
     if let Ok(root) = env::var("LOADOUT_ROOT") {
@@ -319,14 +317,7 @@ fn resolve_repo_root() -> PathBuf {
         }
     }
 
-    // 3. Development fallback: current working directory (used by `cargo run`).
-    if let Ok(cwd) = env::current_dir() {
-        if looks_like_repo_root(&cwd) {
-            return cwd;
-        }
-    }
-
-    // 4. Last resort: exe parent even without a features/ directory.
+    // 3. Last resort: exe parent even without a features/ directory.
     exe_dir()
         .parent()
         .map(Path::to_path_buf)

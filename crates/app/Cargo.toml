@@ -14,7 +14,8 @@ planner      = { path = "../planner" }
 executor     = { path = "../executor" }
 state        = { path = "../state" }
 platform     = { path = "../platform" }
-backend-host = { path = "../backend-host" }
+backend-host     = { path = "../backend-host" }
+backends-builtin = { path = "../backends-builtin" }
 thiserror    = "2"
 
 [dev-dependencies]

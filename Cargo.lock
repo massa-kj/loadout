@@ -13,6 +13,7 @@ name = "app"
 version = "0.1.0"
 dependencies = [
  "backend-host",
+ "backends-builtin",
  "compiler",
  "config",
  "executor",
@@ -37,6 +38,15 @@ dependencies = [
  "serde_yaml",
  "tempfile",
  "thiserror",
+]
+
+[[package]]
+name = "backends-builtin"
+version = "0.1.0"
+dependencies = [
+ "backend-host",
+ "model",
+ "platform",
 ]
 
 [[package]]

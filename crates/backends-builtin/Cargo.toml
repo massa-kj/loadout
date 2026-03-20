@@ -1,0 +1,9 @@
+[package]
+name = "backends-builtin"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+backend-host = { path = "../backend-host" }
+model        = { path = "../model" }
+platform     = { path = "../platform" }

@@ -358,10 +358,16 @@ fn profile_to_desired_ids(
 /// - Backends under `{repo_root}/backends/` → registered as `core/<name>`.
 /// - Backends under `{config_home}/backends/` → registered as `user/<name>`.
 ///
+/// Builtin Rust backends are registered first; script backends on disk can override
+/// individual entries (community / user customisation).
+///
 /// Flat `.sh` files (old shell layout) and directories that fail to load are
 /// skipped silently to remain resilient during the migration period.
 fn build_backend_registry(ctx: &AppContext) -> backend_host::BackendRegistry {
     let mut registry = backend_host::BackendRegistry::new();
+    // 1. Register builtin Rust backends for the current platform.
+    backends_builtin::register_builtins(&mut registry, &ctx.platform);
+    // 2. Script backends from disk can override / extend builtins.
     load_backends_from_dir(&mut registry, &ctx.repo_root.join("backends"), "core");
     load_backends_from_dir(
         &mut registry,
