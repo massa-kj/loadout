@@ -3,7 +3,7 @@
 ## Layer Overview
 
 ```
-platforms  →  profiles  →  loadout  →  cmd  →  core  →  features
+platforms  →  profiles  →  loadout  →  app  →  core  →  features
                                           ↓
                                         state
 ```
@@ -29,7 +29,7 @@ Responsibilities: list enabled features, provide optional configuration values (
 
 Must NOT: contain logic, OS branching, commands, or install details.
 
-### cmd
+### app
 
 Coordinate execution flow.
 
@@ -74,30 +74,84 @@ See `specs/data/state.md` for the full contract.
 
 ## Data Flow
 
+The system executes a deterministic pipeline from user declarations to state commit:
+
 ```
-Profile + Policy + State + Sources
+Orchestrator (app)
     ↓
-  Source Registry       (pure lookup — canonical ID → source paths / allow-list)
+Load Configuration
+  ├─ Profile         (profile.yaml — desired features, versions)
+  ├─ Policy          (policy.yaml — backend selection, backup strategy)
+  ├─ Sources         (sources.yaml — plugin locations, admission control)
+  └─ State           (state.json — installed resources, backends, versions)
     ↓
-  Feature Index Builder (discovery, parse, spec_version validation → Feature Index)
+SourceRegistry
+  (source clone, path resolution, allow rules)
     ↓
-  Resolver              (pure — dep fields only → ResolvedFeatureOrder)
+Feature Discovery
+  (scan features/ directories in each source)
     ↓
-  FeatureCompiler       (pure — Feature Index + Policy → DesiredResourceGraph)
+FeatureIndexBuilder
+  (parse feature.yaml, validate schema)
+    ↓ FeatureIndex (normalized feature metadata)
+Resolver
+  (dependency resolution, topological sort using dep fields only)
+    ↓ ResolvedFeatureOrder (ordered list of feature IDs)
+FeatureCompiler
+  ├─ resource expansion (from feature specs)
+  └─ backend resolution (using Policy + platform defaults)
+    ↓ DesiredResourceGraph (resources with desired_backend embedded)
+Planner
+  (diff with State, classify, decide: create/destroy/replace/noop/blocked)
+    ↓ Plan (authoritative instruction set)
+Executor
+  inputs:
+    ├─ Plan                   (what to do)
+    ├─ DesiredResourceGraph   (execution payload for declarative resources)
+    ├─ FeatureIndex           (mode/script metadata lookup)
+    └─ BackendRegistry        (backend dispatch)
+  operations:
+    ├─ Declarative Execution  (install/remove via backends)
+    ├─ Imperative Execution   (install.sh/uninstall.sh scripts)
+    └─ Fs Operations          (copy/symlink files/)
     ↓
-  Planner               (pure — diff + classify + decide → Plan)
-    ↓
-  Executor              (impure — executes actions, commits state)
-    ↓
-  State
+State Commit
+  (atomic write of installed resources to state.json)
 ```
 
-Planner is pure: same inputs always produce the same Plan.
-Executor is impure: calls feature scripts and backend plugins, commits state atomically.
-State is both input (current reality) and output (recorded effects).
-Source registry data influences lookup and admission only; it must not introduce hidden fallback or side effects.
-Resolver reads only `dep` fields from the Feature Index; it must not read `resources` fields.
-FeatureCompiler applies policy to resolve `desired_backend` for each resource; the result is embedded in DesiredResourceGraph.
+### Key Invariants
+
+- **Planner is pure**: Same inputs always produce the same Plan.
+- **Executor is impure**: Calls feature scripts and backend plugins, commits state atomically.
+- **State is both input and output**: Input = current reality, Output = recorded effects.
+- **Source registry**: Influences lookup and admission only; must not introduce hidden fallback or side effects.
+- **Resolver**: Reads only `dep` fields from Feature Index; must not read `resources` fields.
+- **FeatureCompiler**: Applies policy to resolve `desired_backend` for each resource; the result is embedded in DesiredResourceGraph.
+
+### Phase Characteristics
+
+| Phase | Purity | Inputs | Outputs |
+|---|---|---|---|
+| Load | Impure (I/O) | Filesystem | Profile, Policy, Sources, State |
+| SourceRegistry | Pure (lookup) | Sources | Source paths, allow-lists |
+| FeatureIndexBuilder | Impure (I/O) | Source paths, feature.yaml | FeatureIndex |
+| Resolver | Pure | Profile.features, FeatureIndex.dep | ResolvedFeatureOrder |
+| FeatureCompiler | Pure | ResolvedFeatureOrder, FeatureIndex, Policy | DesiredResourceGraph |
+| Planner | Pure | DesiredResourceGraph, State, ResolvedFeatureOrder | Plan |
+| Executor | Impure (side effects) | Plan, DesiredResourceGraph, FeatureIndex, BackendRegistry | Effects |
+| State Commit | Impure (I/O) | Execution results | state.json |
+
+### Data Structure Roles
+
+- **Profile**: User's desired environment (feature list, versions, enable/disable)
+- **Policy**: User's implementation strategy (backend selection, backup policy)
+- **Sources**: Plugin locations and security allow-lists
+- **State**: Single authority for installed resources (backend, version, fs paths)
+- **FeatureIndex**: Normalized feature metadata (depends, capabilities, resources)
+- **ResolvedFeatureOrder**: Topologically sorted feature IDs (dependency-resolved)
+- **DesiredResourceGraph**: Expanded resources with resolved backends
+- **Plan**: Authoritative instruction set (create/destroy/replace/noop/blocked)
+- **BackendRegistry**: Dispatcher mapping `CanonicalBackendId` → `Backend` trait implementation
 
 ## Repository Structure
 
