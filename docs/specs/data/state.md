@@ -9,6 +9,25 @@ atomic commit rules, safety rules, and compatibility.
 
 Not covered: profile semantics, policy semantics, planner rules, backend selection.
 
+## Document Boundary
+
+**What this document defines (source of truth):**
+- JSON schema semantics (what fields mean)
+- State authority rules (who may read/write state)
+- Safety constraints (what must/must not be in state)
+- Identity rules and invariants (uniqueness, path constraints)
+- State transition rules (atomic commit, corruption handling)
+- Migration semantics (v2 → v3)
+
+**What Rust code defines (source of truth):**
+- Struct definitions and field types (`State`, `FeatureState`, `Resource`, `ResourceKind` in `crates/model/src/state.rs`)
+- Parsing and validation logic (`crates/state/src/lib.rs`)
+- JSON serialization format (via serde)
+
+**Cross-reference:**
+- Implementation: `crates/model/src/state.rs`, `crates/state/src/lib.rs`
+- For field-level structure documentation, see rustdoc: `cargo doc --open`
+
 ## Purpose
 
 State is the **single authority** for:
@@ -54,7 +73,11 @@ All bare names (legacy v2 state) must be prefixed with `core/` when migrating to
 
 ### Resource kinds
 
-**`package`**
+State records three kinds of resources: `package`, `runtime`, and `fs`.
+
+For detailed field definitions and types, see `crates/model/src/state.rs` (rustdoc).
+
+**`package` — Managed artifacts installed by package managers**
 
 ```json
 {
@@ -65,10 +88,11 @@ All bare names (legacy v2 state) must be prefixed with `core/` when migrating to
 }
 ```
 
-`version: null` means unknown or unpinned — not "latest".
-`backend` must be a canonical backend ID of the form `<source_id>/<name>`, e.g. `core/brew`.
+**Meaning:**
+- `version: null` means version was not tracked at install time (not "latest")
+- `backend` is required for deterministic removal (use same backend that installed)
 
-**`runtime`**
+**`runtime` — Version-managed language runtimes (e.g., Node.js, Python)**
 
 ```json
 {
@@ -79,9 +103,11 @@ All bare names (legacy v2 state) must be prefixed with `core/` when migrating to
 }
 ```
 
-`backend` must be a canonical backend ID of the form `<source_id>/<name>`, e.g. `core/mise`.
+**Meaning:**
+- `version` is always required (unlike packages)
+- `backend` is required for deterministic removal
 
-**`fs`**
+**`fs` — Files, directories, symlinks managed by loadout**
 
 ```json
 {
@@ -95,8 +121,10 @@ All bare names (legacy v2 state) must be prefixed with `core/` when migrating to
 }
 ```
 
-`fs` resources must NOT contain `backend`.
-`fs.path` must be absolute. `logical_id` must be stable within a feature.
+**Meaning:**
+- No `backend` field (fs operations are backend-independent)
+- `path` must be absolute
+- `logical_id` must be stable within a feature (used for diff matching)
 
 ## Identity Rules
 

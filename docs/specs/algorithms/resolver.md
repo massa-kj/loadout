@@ -4,23 +4,44 @@
 
 This document defines the input/output contract and algorithm for the resolver.
 
-Covered: inputs, metadata sources, dependency model, graph construction, cycle detection, output contract.
+Covered: inputs, dependency model, graph construction, cycle detection, output contract, determinism.
 
-Not covered: execution, state mutations, planner decision logic.
+Not covered: execution, state mutations, planner decision logic, feature metadata format (see `specs/data/feature_index.md`).
+
+## Document Boundary
+
+**What this document defines (source of truth):**
+- Resolver inputs/outputs (Feature Index → ResolvedFeatureOrder)
+- Dependency model semantics (depends/provides/requires)
+- Graph construction algorithm (explicit edges + capability resolution)
+- Cycle detection requirement (DAG enforcement)
+- Forbidden operations (must not read resources, must not scan filesystem)
+- Determinism guarantee (same inputs → same order)
+
+**What Rust code defines (source of truth):**
+- `ResolvedFeatureOrder` type (`crates/model/src/lib.rs`)
+- Resolver function signature and algorithm (`crates/resolver/src/lib.rs`)
+- Error types (`ResolverError` in `crates/resolver/src/lib.rs`)
+
+**Cross-reference:**
+- Implementation: `crates/resolver/src/lib.rs`
+- Feature Index format: `docs/specs/data/feature_index.md`
+- For field-level structure documentation, see rustdoc: `cargo doc --open`
 
 ## Inputs
 
 The resolver receives:
 
-* `feature_index` — parsed Feature Index produced by Feature Index Builder
+* `feature_index` — parsed Feature Index produced by Feature Index Builder (see `specs/data/feature_index.md`)
 * `desired_features` — list of canonical feature identifiers from the resolved profile
 
 All resolver inputs must already be normalized to canonical IDs of the form `<source_id>/<name>`.
 Bare names are normalized upstream to `core/<name>` before resolver execution.
 
-The resolver reads only `dep` fields from the Feature Index:
-`depends`, `provides`, and `requires`.
+**Permitted reads:**
+The resolver reads **only** `dep` fields from the Feature Index: `depends`, `provides`, and `requires`.
 
+**Forbidden reads:**
 The resolver must NOT read `resources` fields. Resource definitions are the exclusive domain of FeatureCompiler.
 The resolver must NOT scan the filesystem directly for feature metadata.
 
@@ -28,23 +49,7 @@ The resolver must NOT scan the filesystem directly for feature metadata.
 
 Feature metadata is supplied via the Feature Index. The resolver does not read files directly.
 
-For reference, the Feature Index Builder reads the following files from each feature directory
-(determined via source registry):
-
-1. `feature.yaml` — base metadata (always present)
-2. `feature.<platform>.yaml` — platform-specific overrides (merged if present)
-
-Platform resolution order:
-
-* WSL: `feature.wsl.yaml` → `feature.linux.yaml` → none
-* Linux: `feature.linux.yaml` → none
-* Windows: `feature.windows.yaml` → none
-
-Fields exposed in the Feature Index that the resolver may read (dep fields only):
-
-* `dep.depends[]` — list of explicit feature identifiers
-* `dep.provides[].name` — capability names this feature exposes
-* `dep.requires[].name` — capability names this feature depends on
+For the Feature Index schema and construction rules, see `docs/specs/data/feature_index.md`.
 
 ## Dependency Model
 

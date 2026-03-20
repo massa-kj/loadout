@@ -7,6 +7,25 @@ after a successful apply, grouped by feature.
 
 It is produced by FeatureCompiler and consumed exclusively by Planner.
 
+## Document Boundary
+
+**What this document defines (source of truth):**
+- DesiredResourceGraph purpose and pipeline position
+- Backend resolution authority (FeatureCompiler resolves, Planner must not re-resolve)
+- Immutability constraint (Planner/Executor must not modify)
+- Compatibility rules (used by Planner for classification)
+- Unknown kind handling (Planner must block)
+- Resource ID stability requirement (breaking change semantics)
+
+**What Rust code defines (source of truth):**
+- `DesiredResourceGraph` struct and types (`crates/model/src/desired_resource_graph.rs`)
+- `DesiredResourceKind` enum variants (`Package`, `Runtime`, `Fs`)
+- Field types and deserialization logic
+
+**Cross-reference:**
+- Implementation: `crates/model/src/desired_resource_graph.rs`
+- For field-level structure documentation, see rustdoc: `cargo doc --open`
+
 ## Position in Pipeline
 
 ```
@@ -53,6 +72,10 @@ Changing a resource `id` is a breaking change requiring state migration.
 
 ## Resource Kinds
 
+DesiredResourceGraph supports three resource kinds: `package`, `runtime`, and `fs`.
+
+For detailed field definitions and types, see `crates/model/src/desired_resource_graph.rs` (rustdoc).
+
 ### package
 
 ```json
@@ -64,12 +87,9 @@ Changing a resource `id` is a breaking change requiring state migration.
 }
 ```
 
-| Field | Required | Description |
-|---|---|---|
-| `id` | yes | stable identifier |
-| `kind` | yes | `package` |
-| `name` | yes | package name as known to the backend |
-| `desired_backend` | yes | resolved backend identifier |
+**Meaning:**
+- `desired_backend` is resolved by FeatureCompiler using policy (source of truth)
+- Planner uses this value for backend-mismatch detection
 
 ### runtime
 
@@ -83,13 +103,9 @@ Changing a resource `id` is a breaking change requiring state migration.
 }
 ```
 
-| Field | Required | Description |
-|---|---|---|
-| `id` | yes | stable identifier |
-| `kind` | yes | `runtime` |
-| `name` | yes | runtime name |
-| `version` | yes | version string (exact or constraint) |
-| `desired_backend` | yes | resolved backend identifier |
+**Meaning:**
+- `version` is always required (unlike packages)
+- `desired_backend` is resolved by FeatureCompiler
 
 ### fs
 
@@ -104,16 +120,10 @@ Changing a resource `id` is a breaking change requiring state migration.
 }
 ```
 
-| Field | Required | Description |
-|---|---|---|
-| `id` | yes | stable identifier |
-| `kind` | yes | `fs` |
-| `source` | no | path to the source file/dir, relative to the feature directory. Defaults to `files/<basename(path)>` if omitted. |
-| `path` | yes | absolute or `~`-relative target path |
-| `entry_type` | yes | `file` or `dir` |
-| `op` | yes | `link` (symlink) or `copy` |
-
-`fs` resources have no `desired_backend` (backend-independent).
+**Meaning:**
+- No `desired_backend` (fs operations are backend-independent)
+- `source` defaults to `files/<basename(path)>` if omitted
+- `op` values: `link` (symlink) or `copy`
 
 ## Backend Resolution
 

@@ -10,6 +10,26 @@ decision table, plan data model, ordering rules, and determinism guarantee.
 Not covered: state schema (see `specs/data/state.md`),
 backend API (see `specs/api/backend.md`), executor behavior.
 
+## Document Boundary
+
+**What this document defines (source of truth):**
+- Planner purity boundary (must not execute, modify state, call backends)
+- Decision table (classification → operation mapping)
+- Ordering rules (dependency order, reverse order for destroy)
+- Determinism guarantee (identical inputs → identical plan)
+- Plan semantics (what each operation means)
+- Executor constraints (must not re-classify)
+
+**What Rust code defines (source of truth):**
+- Plan struct definition (`Plan`, `PlanAction`, `Operation` in `crates/model/src/plan.rs`)
+- Classification enum and planner algorithm (`crates/planner/src/lib.rs`)
+- Error types (`PlannerError` in `crates/planner/src/lib.rs`)
+
+**Cross-reference:**
+- Implementation: `crates/planner/src/lib.rs`
+- Data model: `crates/model/src/plan.rs`
+- For field-level structure documentation, see rustdoc: `cargo doc --open`
+
 ## Planner Boundary
 
 Planner is **pure**.
