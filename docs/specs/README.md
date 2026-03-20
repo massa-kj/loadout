@@ -18,7 +18,8 @@ what invariants must hold. They do not explain rationale or implementation detai
 
 **API specs** — Interface contracts for pluggable components.
 
-* `api/backend.md` — Backend plugin interface
+* `api/backend.md` — Backend plugin interface (JSON stdin/stdout protocol)
+* `api/feature-host.md` — Feature script interface (environment variable protocol)
 
 **Algorithm specs** — Input/output contracts for pure computation modules.
 

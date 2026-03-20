@@ -104,6 +104,29 @@ No `install.sh` / `uninstall.sh` scripts are needed — the executor handles all
 - Feature is easy to describe as a list
 - You want plan-level accuracy (noop detection, replace)
 
+### Backend Resolution
+
+Declarative resources (packages and runtimes) require a **backend** to perform installation.
+
+**Builtin backends** are Rust-native implementations compiled into the `loadout` binary:
+- `core/brew` (Homebrew, macOS/Linux)
+- `core/apt` (APT, Debian/Ubuntu)
+- `core/mise` (mise, runtime version manager)
+- `core/npm` (npm packages)
+- `core/uv` (Python uv)
+- `core/scoop` (Scoop, Windows)
+- `core/winget` (winget, Windows)
+
+**Script backends** are community extensions implemented as shell scripts (see [`guides/backends.md`](backends.md)):
+- Located in `backends/<name>/` directories
+- Communicate via JSON stdin/stdout protocol
+- Useful for project-specific or custom package managers
+
+Backend selection is controlled by **policy** files (`policies/<platform>.yaml`).
+Features declare what they need; policy determines which backend satisfies the requirement.
+
+For backend implementation details, see [`guides/backends.md`](backends.md) and [`specs/api/backend.md`](../specs/api/backend.md).
+
 ### Declarative feature.yaml example
 
 ```yaml

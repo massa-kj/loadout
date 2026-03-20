@@ -5,6 +5,25 @@
 The Feature Index is the parsed, merged, and validated representation of all available features.
 It is produced by the Feature Index Builder and consumed by the Resolver and FeatureCompiler.
 
+## Document Boundary
+
+**What this document defines (source of truth):**
+- Feature Index purpose and pipeline position
+- Separation of concerns (Resolver reads `dep.*` only, FeatureCompiler reads full spec)
+- Construction rules (merge order, normalization, validation)
+- Platform resolution order (wsl → linux, etc.)
+- Permitted/forbidden operations per consumer
+
+**What Rust code defines (source of truth):**
+- `FeatureIndex`, `FeatureMeta`, `DepSpec`, `FeatureSpec` types (`crates/model/src/feature_index.rs`)
+- Feature Index Builder implementation (`crates/feature-index/src/lib.rs`)
+- Field types and deserialization logic
+
+**Cross-reference:**
+- Implementation: `crates/feature-index/src/lib.rs`
+- Data model: `crates/model/src/feature_index.rs`
+- For field-level structure documentation, see rustdoc: `cargo doc --open`
+
 ## Position in Pipeline
 
 ```
@@ -52,38 +71,52 @@ Source Registry + feature.yaml files
 
 Feature keys are canonical IDs of the form `<source_id>/<name>` (e.g. `core/git`).
 
-## Fields
+## Schema Overview
 
-### Top-level per feature
+```json
+{
+  "schema_version": 1,
+  "features": {
+    "<canonical_feature_id>": {
+      "spec_version": 1,
+      "mode": "script | declarative",
+      "description": "<human readable>",
+      "source_dir": "<absolute path to feature directory>",
+      "dep": {
+        "depends": [ "<canonical_feature_id>", "..." ],
+        "requires": [ { "name": "<capability>" } ],
+        "provides": [ { "name": "<capability>" } ]
+      },
+      "spec": {
+        "resources": [ ... ]
+      }
+    }
+  }
+}
+```
 
-| Field | Required | Description |
-|---|---|---|
-| `spec_version` | yes | Feature schema version. Must be `1`. Builder aborts if absent or unknown. |
-| `mode` | yes | `script` or `declarative`. Defaults to `script` if absent in feature.yaml but must be normalized by Builder. |
-| `description` | no | Human-readable description string. |
-| `source_dir` | yes | Absolute path to the feature directory (resolved by source registry). |
-| `dep` | yes | Dependency fields (see below). May be empty object if no deps. |
-| `spec` | conditional | Present for `declarative` mode features. May be absent for `script` mode features. |
+For detailed field types, see `crates/model/src/feature_index.rs` (rustdoc).
 
-### dep fields
+## Key Fields and Semantics
 
-Only these fields may be read by the Resolver. FeatureCompiler and Planner must not add fields here.
+**`mode`**
+- Values: `script` or `declarative`
+- `script` mode: Feature uses `install.sh` / `uninstall.sh` scripts
+- `declarative` mode: Feature declares resources in `spec.resources` (no scripts)
 
-| Field | Description |
-|---|---|
-| `dep.depends[]` | Canonical feature IDs this feature depends on explicitly. |
-| `dep.requires[]` | Capability names this feature requires from another feature. |
-| `dep.provides[]` | Capability names this feature exposes to others. |
+**`dep` fields (Resolver reads these only)**
+- `dep.depends`: Explicit feature dependencies (canonical IDs)
+- `dep.requires`: Capability names this feature needs (abstract dependencies)
+- `dep.provides`: Capability names this feature exposes (abstract provision)
 
-All `dep.depends` entries must be full canonical IDs after normalization.
-The Feature Index Builder normalizes bare names to `<same_source>/<name>` before inclusion.
+**`spec` fields (FeatureCompiler reads these)**
+- Present for `declarative` mode features
+- Contains `resources` array (mirrors DesiredResourceGraph format without `desired_backend`)
 
-### spec fields (declarative mode)
-
-`spec.resources` lists the resources that FeatureCompiler will expand into DesiredResourceGraph entries.
-
-Resource format mirrors DesiredResourceGraph entries, except `desired_backend` is absent here
-(it is resolved by FeatureCompiler using policy).
+**Platform resolution order:**
+- WSL: `feature.wsl.yaml` → `feature.linux.yaml` → `feature.yaml`
+- Linux: `feature.linux.yaml` → `feature.yaml`
+- Windows: `feature.windows.yaml` → `feature.yaml`
 
 ## Construction Rules
 
