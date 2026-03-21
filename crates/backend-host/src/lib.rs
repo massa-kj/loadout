@@ -321,11 +321,8 @@ fn serialise_resource(resource: &DesiredResource) -> String {
 ///
 /// Scripts receive parameters via environment variables (primary protocol)
 /// and optionally via JSON on stdin (for complex cases requiring jq).
-fn build_command_with_env(
-    script: &std::path::Path,
-    resource: &DesiredResource,
-) -> Command {
-    let mut cmd = Command::new("sh");
+fn build_command_with_env(script: &std::path::Path, resource: &DesiredResource) -> Command {
+    let mut cmd = Command::new("bash");
     cmd.arg(script);
 
     // Common environment variables
