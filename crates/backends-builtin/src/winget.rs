@@ -66,5 +66,8 @@ impl Backend for WingetBackend {
 /// Return `true` if the package `id` is listed in `winget list`.
 fn is_installed(id: &str) -> Result<bool, BackendError> {
     // `winget list --exact --id <id>` exits 0 when found.
-    cmd::check("winget", &["list", "--exact", "--id", id, "--accept-source-agreements"])
+    cmd::check(
+        "winget",
+        &["list", "--exact", "--id", id, "--accept-source-agreements"],
+    )
 }

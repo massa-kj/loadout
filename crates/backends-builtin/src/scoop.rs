@@ -55,5 +55,9 @@ fn is_installed(name: &str) -> Result<bool, BackendError> {
     // `scoop list <name>` exits 0 whether or not the package is installed,
     // but returns empty / header-only output when not found.
     // We look for the name in stdout to determine actual presence.
-    Ok(out.success && out.stdout.to_ascii_lowercase().contains(&name.to_ascii_lowercase()))
+    Ok(out.success
+        && out
+            .stdout
+            .to_ascii_lowercase()
+            .contains(&name.to_ascii_lowercase()))
 }

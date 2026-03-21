@@ -54,8 +54,7 @@ impl Backend for AptBackend {
 
 /// Return `true` if `name` is installed and fully configured via dpkg.
 fn is_installed(name: &str) -> Result<bool, BackendError> {
-    let out =
-        cmd::run("dpkg-query", &["-W", "--showformat=${Status}", name])?;
+    let out = cmd::run("dpkg-query", &["-W", "--showformat=${Status}", name])?;
     // dpkg status for a properly installed package: "install ok installed"
     Ok(out.success && out.stdout.contains("install ok installed"))
 }

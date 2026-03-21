@@ -119,9 +119,7 @@ pub fn runtime_name_version(
     resource: &backend_host::Resource,
 ) -> Result<(&str, &str), BackendError> {
     match &resource.kind {
-        DesiredResourceKind::Runtime { name, version, .. } => {
-            Ok((name.as_str(), version.as_str()))
-        }
+        DesiredResourceKind::Runtime { name, version, .. } => Ok((name.as_str(), version.as_str())),
         k => Err(BackendError::NotSupported {
             kind: kind_label(k).to_string(),
         }),

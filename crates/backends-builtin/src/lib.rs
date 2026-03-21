@@ -56,9 +56,9 @@ use platform::Platform;
 pub fn register_builtins(registry: &mut BackendRegistry, platform: &Platform) {
     match platform {
         Platform::Linux | Platform::Wsl => {
-            registry.register(id("core/brew"), Box::new(brew::BrewBackend));
+            // registry.register(id("core/brew"), Box::new(brew::BrewBackend));
             registry.register(id("core/apt"), Box::new(apt::AptBackend));
-            registry.register(id("core/mise"), Box::new(mise::MiseBackend));
+            // registry.register(id("core/mise"), Box::new(mise::MiseBackend));
             registry.register(id("core/npm"), Box::new(npm::NpmBackend));
             registry.register(id("core/uv"), Box::new(uv::UvBackend));
         }
