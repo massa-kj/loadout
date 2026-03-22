@@ -1,0 +1,18 @@
+# Config with a versioned runtime (node@20).
+# Verifies: version is recorded in state.
+# Used by: version_install scenario, version_upgrade scenario (first apply)
+
+profile:
+  features:
+    brew: {}
+    mise: {}
+    node:
+      version: "20"
+
+policy:
+  package:
+    default_backend: core/brew
+  runtime:
+    default_backend: core/mise
+  fs:
+    backup: false

@@ -111,7 +111,7 @@ clean_image() {
 open_shell() {
     log_step "Opening interactive shell in bootstrapped container..."
     log_info "Bootstrap is already done. You can run:"
-    log_info "  ./loadout apply profiles/linux.yaml"
+    log_info "  ./loadout apply --config ./tests/environment/linux/docker/fixtures/config-base.yaml"
     log_info "  ./tests/environment/linux/docker/scenarios/minimal.sh"
     echo ""
 
@@ -123,7 +123,7 @@ open_base_shell() {
     log_step "Opening interactive shell in base container (pre-bootstrap)..."
     log_info "Bootstrap has not run yet. You can run:"
     log_info "  ./platforms/linux/bootstrap.sh"
-    log_info "  ./loadout apply profiles/linux.yaml"
+    log_info "  ./loadout apply --config ./tests/environment/linux/docker/fixtures/config-base.yaml"
     echo ""
 
     docker run --rm -it "$IMAGE_BASE" /bin/bash

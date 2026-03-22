@@ -1,0 +1,18 @@
+# Config with version bumped to node@22.
+# Verifies: version mismatch triggers reinstall, state updated.
+# Used by: version_upgrade scenario (second apply)
+
+profile:
+  features:
+    brew: {}
+    mise: {}
+    node:
+      version: "22"
+
+policy:
+  package:
+    default_backend: core/brew
+  runtime:
+    default_backend: core/mise
+  fs:
+    backup: false

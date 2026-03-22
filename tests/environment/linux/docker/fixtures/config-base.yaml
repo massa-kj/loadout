@@ -1,0 +1,16 @@
+# Minimal feature set: verifies state creation, file tracking, and no duplicates.
+# Used by: minimal, lifecycle, idempotent, uninstall scenarios (base phase)
+
+profile:
+  features:
+    brew: {}
+    fzf: {}
+
+policy:
+  package:
+    default_backend: core/brew
+  runtime:
+    default_backend: core/mise
+  fs:
+    # Disable backups inside test containers — no need to preserve originals.
+    backup: false

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="/loadout"
-PROFILE="$ROOT/tests/environment/linux/docker/fixtures/profile-base.yaml"
+CONFIG="$ROOT/tests/environment/linux/docker/fixtures/config-base.yaml"
 export XDG_CONFIG_HOME="/tmp/loadout-xdg-config"
 export XDG_STATE_HOME="/tmp/loadout-xdg-state"
 STATE_FILE="$XDG_STATE_HOME/loadout/state.json"
@@ -11,13 +11,10 @@ echo "==> Minimal scenario"
 
 cd "$ROOT"
 
-# Use test-specific policy that does not require a package-manager feature.
-export LOADOUT_POLICY_FILE="$ROOT/tests/environment/linux/docker/fixtures/policy-apt.yaml"
-
 rm -rf /root/.bashrc /root/.bashrc.d
 
 echo "==> Running apply"
-./loadout apply "$PROFILE"
+./loadout apply --config "$CONFIG"
 
 echo "==> Checking state file existence"
 test -f "$STATE_FILE"

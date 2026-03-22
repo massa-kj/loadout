@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="/loadout"
-PROFILE_MIXED="$ROOT/tests/environment/linux/docker/fixtures/profile-version-mixed.yaml"
+CONFIG_MIXED="$ROOT/tests/environment/linux/docker/fixtures/config-version-mixed.yaml"
 export XDG_CONFIG_HOME="/tmp/loadout-xdg-config"
 export XDG_STATE_HOME="/tmp/loadout-xdg-state"
 STATE_FILE="$XDG_STATE_HOME/loadout/state.json"
@@ -11,11 +11,8 @@ echo "==> Version mixed scenario"
 
 cd "$ROOT"
 
-# Use test-specific policy (no backup, standard backends)
-export LOADOUT_POLICY_FILE="$ROOT/tests/environment/linux/docker/fixtures/policy.yaml"
-
 echo "==> Running apply with mixed features"
-./loadout apply "$PROFILE_MIXED"
+./loadout apply --config "$CONFIG_MIXED"
 
 echo "==> Checking state file existence"
 test -f "$STATE_FILE"

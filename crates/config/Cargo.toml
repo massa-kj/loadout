@@ -8,6 +8,7 @@ publish = false
 model = { path = "../model" }
 io = { path = "../io" }
 thiserror = "2"
+serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 serde_json = "1"

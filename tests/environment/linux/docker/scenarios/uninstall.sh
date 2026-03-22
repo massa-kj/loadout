@@ -2,9 +2,9 @@
 set -euo pipefail
 
 ROOT="/loadout"
-PROFILE_FULL="$ROOT/tests/environment/linux/docker/fixtures/profile-full.yaml"
-PROFILE_PARTIAL="$ROOT/tests/environment/linux/docker/fixtures/profile-base.yaml"
-PROFILE_EMPTY="$ROOT/tests/environment/linux/docker/fixtures/profile-empty.yaml"
+CONFIG_FULL="$ROOT/tests/environment/linux/docker/fixtures/config-full.yaml"
+CONFIG_PARTIAL="$ROOT/tests/environment/linux/docker/fixtures/config-base.yaml"
+CONFIG_EMPTY="$ROOT/tests/environment/linux/docker/fixtures/config-empty.yaml"
 export XDG_CONFIG_HOME="/tmp/loadout-xdg-config"
 export XDG_STATE_HOME="/tmp/loadout-xdg-state"
 STATE_FILE="$XDG_STATE_HOME/loadout/state.json"
@@ -13,13 +13,10 @@ echo "==> Uninstall scenario"
 
 cd "$ROOT"
 
-# Use test-specific policy that does not require a package-manager feature.
-export LOADOUT_POLICY_FILE="$ROOT/tests/environment/linux/docker/fixtures/policy-apt.yaml"
-
 rm -rf /root/.bashrc /root/.bashrc.d
 
 echo "==> First apply (install phase)"
-./loadout apply "$PROFILE_FULL"
+./loadout apply --config "$CONFIG_FULL"
 
 echo "==> Ensuring state exists"
 test -f "$STATE_FILE"
@@ -43,8 +40,8 @@ echo "do not delete" > "$SENTINEL"
 # Test 1: Partial uninstall
 echo ""
 echo "==> Test 1: Partial uninstall"
-echo "==> Running apply with partial profile"
-./loadout apply "$PROFILE_PARTIAL"
+echo "==> Running apply with partial config"
+./loadout apply --config "$CONFIG_PARTIAL"
 
 echo "==> Verifying bash and git remain"
 if ! jq -e '.features["core/bash"]' "$STATE_FILE" > /dev/null; then
@@ -81,8 +78,8 @@ echo "==> Partial uninstall passed"
 # Test 2: Full uninstall
 echo ""
 echo "==> Test 2: Full uninstall"
-echo "==> Running apply with empty profile (full uninstall)"
-./loadout apply "$PROFILE_EMPTY"
+echo "==> Running apply with empty config (full uninstall)"
+./loadout apply --config "$CONFIG_EMPTY"
 
 echo "==> Checking state file valid"
 jq empty "$STATE_FILE" > /dev/null
@@ -120,8 +117,8 @@ echo "==> Full uninstall passed"
 # Test 3: Uninstall idempotency
 echo ""
 echo "==> Test 3: Uninstall idempotency"
-echo "==> Running apply with empty profile again"
-./loadout apply "$PROFILE_EMPTY"
+echo "==> Running apply with empty config again"
+./loadout apply --config "$CONFIG_EMPTY"
 
 echo "==> Ensuring state still empty"
 REMAINING2=$(jq '.features | keys | length' "$STATE_FILE")

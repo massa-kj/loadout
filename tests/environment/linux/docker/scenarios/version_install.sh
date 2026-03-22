@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="/loadout"
-PROFILE_VERSION="$ROOT/tests/environment/linux/docker/fixtures/profile-version-v20.yaml"
+CONFIG_VERSION="$ROOT/tests/environment/linux/docker/fixtures/config-version-v20.yaml"
 export XDG_CONFIG_HOME="/tmp/loadout-xdg-config"
 export XDG_STATE_HOME="/tmp/loadout-xdg-state"
 STATE_FILE="$XDG_STATE_HOME/loadout/state.json"
@@ -11,11 +11,8 @@ echo "==> Version install scenario"
 
 cd "$ROOT"
 
-# Use test-specific policy (no backup, standard backends)
-export LOADOUT_POLICY_FILE="$ROOT/tests/environment/linux/docker/fixtures/policy.yaml"
-
 echo "==> Running apply with version-specified features"
-./loadout apply "$PROFILE_VERSION"
+./loadout apply --config "$CONFIG_VERSION"
 
 # Activate brew and mise for tests
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"

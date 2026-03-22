@@ -75,6 +75,7 @@ version = "0.1.0"
 dependencies = [
  "io",
  "model",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror",

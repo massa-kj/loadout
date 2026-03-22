@@ -10,24 +10,37 @@ Not covered: how to write or manage profiles (see `guides/usage.md`).
 
 ## Schema
 
+A profile is embedded as the `profile:` section within a `config.yaml` file:
+
 ```yaml
-features:
-  <feature_id>: {}
-  <feature_id>:
-    version: "<string>"
+# configs/linux.yaml
+profile:
+  features:
+    <feature_id>: {}
+    <feature_id>:
+      version: "<string>"
+
+policy:    # optional — may be omitted; defaults to Policy::default()
+  ...
 ```
 
-Top-level key is `features`. All other top-level keys are reserved.
+The `profile.features` key is required.
+All other keys under `profile:` are reserved.
 
 ## File Location
 
-Profile directory is platform-defined:
+Config files are located in a platform-defined directory:
 
-* Linux/WSL: `$XDG_CONFIG_HOME/loadout/profiles/`
-* Linux/WSL fallback: `~/.config/loadout/profiles/`
-* Windows: `%APPDATA%\loadout\profiles\`
+* Linux/WSL: `$XDG_CONFIG_HOME/loadout/configs/`
+* Linux/WSL fallback: `~/.config/loadout/configs/`
+* Windows: `%APPDATA%\loadout\configs\`
 
-`LOADOUT_PROFILES_DIR` may override the directory path.
+The config is selected with `--config` / `-c`:
+
+```
+loadout apply -c linux       →  {config_home}/configs/linux.yaml
+loadout apply -c ./work.yaml →  ./work.yaml  (any value containing .yaml)
+```
 
 ### `features` (required)
 
@@ -86,29 +99,37 @@ See `specs/algorithms/planner.md` for the full classification rules.
 
 ## Examples
 
-Minimal profile — feature with no configuration:
+Minimal config — profile with no feature configuration:
 
 ```yaml
-features:
-  git: {}
-  bash: {}
+# configs/linux.yaml
+profile:
+  features:
+    git: {}
+    bash: {}
 ```
 
 Equivalent canonical form after normalization:
 
 ```yaml
-features:
-  core/git: {}
-  core/bash: {}
+profile:
+  features:
+    core/git: {}
+    core/bash: {}
 ```
 
 Feature with version:
 
 ```yaml
-features:
-  node:
-    version: "22.17.1"
-  python:
-    version: "3.12"
-  user/myfeat: {}
+profile:
+  features:
+    node:
+      version: "22.17.1"
+    python:
+      version: "3.12"
+    user/myfeat: {}
+
+policy:
+  runtime:
+    default_backend: mise
 ```

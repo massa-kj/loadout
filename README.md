@@ -22,37 +22,34 @@ Key goals:
 
 ## Quick Start
 
-Define your environment in a profile:
+Declare your environment in a single config file:
 
 ```yaml
-# profiles/wsl.yaml
-features:
-  git: {}
-  neovim: {}
-  node:
-    version: "22.17.1"
-```
+# configs/wsl.yaml
+profile:
+  features:
+    git: {}
+    neovim: {}
+    node:
+      version: "22.17.1"
 
-Define installation strategy with policy:
-
-```yaml
-# policies/default.yaml
-package:
-  default_backend: brew
-runtime:
-  default_backend: mise
+policy:
+  package:
+    default_backend: brew
+  runtime:
+    default_backend: mise
 ```
 
 Preview changes without applying:
 
 ```bash
-./loadout plan profiles/wsl.yaml
+./loadout plan -c wsl
 ```
 
 Apply to your machine:
 
 ```bash
-./loadout apply profiles/wsl.yaml
+./loadout apply -c wsl
 ```
 
 Re-running apply is safe. Features already in the correct state are skipped.

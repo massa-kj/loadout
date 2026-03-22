@@ -20,7 +20,7 @@ COPY . .
 # Make scripts executable
 RUN chmod +x loadout \
     && chmod +x platforms/linux/bootstrap.sh \
-    && chmod +x cmd/apply.sh \
+    && cp target/debug/loadout target \
     && find tests/environment/linux/docker/scenarios -type f -name "*.sh" -exec chmod +x {} \;
 
 CMD ["/bin/bash"]

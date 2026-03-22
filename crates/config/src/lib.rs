@@ -13,6 +13,8 @@
 use std::collections::HashSet;
 use std::path::Path;
 
+use serde::Deserialize;
+
 pub use model::{
     policy::{BackendOverride, BackendPolicy, FsPolicy, Policy},
     profile::{Profile, ProfileFeatureConfig},
@@ -135,6 +137,57 @@ fn validate_backend_policy_field(field: &str, value: Option<&str>) -> Result<(),
         }
     }
     Ok(())
+}
+
+// ─── Unified config ──────────────────────────────────────────────────────────
+
+/// Load a unified `config.yaml` and return the resolved `Profile` and `Policy`.
+///
+/// serde ignores unknown top-level keys by default (no `deny_unknown_fields`),
+/// so future sections added to the format will not break existing versions.
+///
+/// - `profile` section: required. Normalized the same way as `load_profile`.
+/// - `policy` section: optional. Absent → `Policy::default()` (no overrides).
+///
+/// # Format
+///
+/// ```yaml
+/// profile:
+///   features:
+///     fzf: {}
+///     user/myapp: {}
+///
+/// policy:                    # optional
+///   package:
+///     default_backend: brew
+///
+/// future_section: ...        # silently ignored
+/// ```
+pub fn load_config(path: &Path) -> Result<(Profile, Policy), ConfigError> {
+    /// Intermediate struct for deserializing config.yaml.
+    /// Unknown top-level keys are silently ignored (serde default behaviour,
+    /// no `deny_unknown_fields` attribute).
+    #[derive(Deserialize)]
+    struct RawConfig {
+        profile: Option<Profile>,
+        policy: Option<Policy>,
+    }
+
+    let raw: RawConfig = io::load_yaml(path)?;
+
+    // profile is required.
+    let raw_profile = raw.profile.ok_or_else(|| ConfigError::InvalidProfile {
+        reason: "config.yaml must contain a 'profile' section".into(),
+    })?;
+    let profile = validate_and_normalize_profile(raw_profile)?;
+
+    // policy is optional; absent → Policy::default().
+    let policy = match raw.policy {
+        Some(p) => validate_policy(p)?,
+        None => Policy::default(),
+    };
+
+    Ok((profile, policy))
 }
 
 // ─── Sources ─────────────────────────────────────────────────────────────────
@@ -397,5 +450,101 @@ mod tests {
         let p = write_yaml_file(dir.path(), "sources.yaml", yaml);
         let spec = load_sources(&p).unwrap();
         assert!(matches!(spec.sources[0].allow, Some(AllowSpec::All(_))));
+    }
+
+    // ── load_config tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn config_profile_and_policy_parsed() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "\
+profile:
+  features:
+    fzf: {}
+    user/myapp: {}
+
+policy:
+  package:
+    default_backend: brew
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", yaml);
+        let (profile, policy) = load_config(&p).unwrap();
+        assert!(profile.features.contains_key("core/fzf"), "bare 'fzf' must become 'core/fzf'");
+        assert!(profile.features.contains_key("user/myapp"));
+        assert_eq!(
+            policy.package.unwrap().default_backend.as_deref(),
+            Some("brew")
+        );
+    }
+
+    #[test]
+    fn config_policy_optional_defaults_to_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "profile:\n  features:\n    git: {}\n";
+        let p = write_yaml_file(dir.path(), "config.yaml", yaml);
+        let (profile, policy) = load_config(&p).unwrap();
+        assert!(profile.features.contains_key("core/git"));
+        assert!(policy.package.is_none());
+        assert!(policy.runtime.is_none());
+    }
+
+    #[test]
+    fn config_extra_unknown_keys_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "\
+profile:
+  features:
+    git: {}
+future_section:
+  some_key: value
+another_unknown: 42
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", yaml);
+        // Must not error on unknown top-level keys.
+        assert!(load_config(&p).is_ok());
+    }
+
+    #[test]
+    fn config_invalid_profile_propagates_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "profile:\n  features:\n    a/b/c: {}\n";
+        let p = write_yaml_file(dir.path(), "config.yaml", yaml);
+        let err = load_config(&p).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidProfile { .. }));
+    }
+
+    #[test]
+    fn config_missing_profile_section_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "policy:\n  package:\n    default_backend: brew\n";
+        let p = write_yaml_file(dir.path(), "config.yaml", yaml);
+        let err = load_config(&p).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidProfile { .. }));
+    }
+
+    #[test]
+    fn config_invalid_policy_propagates_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "\
+profile:
+  features:
+    git: {}
+policy:
+  package:
+    default_backend: \"\"
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", yaml);
+        let err = load_config(&p).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidPolicy { .. }));
+    }
+
+    #[test]
+    fn config_version_config_forwarded() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "profile:\n  features:\n    node:\n      version: \"20\"\n";
+        let p = write_yaml_file(dir.path(), "config.yaml", yaml);
+        let (profile, _) = load_config(&p).unwrap();
+        let cfg = profile.features.get("core/node").unwrap();
+        assert_eq!(cfg.version.as_deref(), Some("20"));
     }
 }

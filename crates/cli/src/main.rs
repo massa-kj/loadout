@@ -1,18 +1,22 @@
-// crates/cli/src/main.rs — loadout CLI entry point (Phase 4)
+// crates/cli/src/main.rs — loadout CLI entry point
 //
 // This binary implements all subcommands directly in Rust by calling the `app`
 // crate. No shell scripts are spawned for core commands.
 //
 // Subcommands:
-//   apply   <profile>             Apply a profile (install/update/remove features)
-//   plan    <profile> [--verbose] Show what apply would do without changes
-//   migrate [--dry-run]           Migrate state file to the current schema version
+//   apply  --config|-c <name|path> [--sources <path>] [--verbose]
+//   plan   --config|-c <name|path> [--sources <path>] [--verbose]
+//   migrate [--dry-run]
 //
-// Repository root resolution (for features/, backends/, policies/):
+// Config resolution (--config / -c):
+//   --config linux           → $XDG_CONFIG_HOME/loadout/configs/linux.yaml
+//   --config ./work.yaml     → ./work.yaml  (any value containing .yaml)
+//
+// Repository root resolution (for features/, backends/):
 //   1. LOADOUT_ROOT environment variable (explicit override)
-//   2. Parent of the binary's directory (tarball layout: bin/loadout → ../)
+//   2. Parent of the binary’s directory (tarball layout: bin/loadout → ../)
 //
-// See: docs/architecture/layers.md (cmd / app boundary)
+// See: docs/adr/config-unification-plan.md, docs/architecture/layers.md
 
 use std::path::{Path, PathBuf};
 use std::{env, process};
@@ -25,14 +29,23 @@ Usage: loadout <command> [options]
 A declarative environment management system.
 
 Available commands:
-  apply <profile>              Apply a loadout profile to the system
-  plan  <profile> [--verbose]  Show what apply would do (no changes made)
-  migrate [--dry-run]          Migrate state file to the latest schema version
+  apply  -c <name|path> [options]   Apply a loadout config to the system
+  plan   -c <name|path> [options]   Show what apply would do (no changes made)
+  migrate [--dry-run]               Migrate state file to the latest schema version
+
+Options for apply / plan:
+  -c, --config <name|path>   Config to use (required)
+  --sources <path>           Sources spec override (CI / verification use only)
+  --verbose                  Show per-feature detail
+
+Config resolution:
+  -c linux         →  $XDG_CONFIG_HOME/loadout/configs/linux.yaml
+  -c ./work.yaml   →  ./work.yaml  (any value containing .yaml)
 
 Examples:
-  loadout apply profiles/linux.yaml
-  loadout plan  profiles/linux.yaml
-  loadout plan  profiles/linux.yaml --verbose
+  loadout apply -c linux
+  loadout plan  -c linux --verbose
+  loadout apply -c ./configs/work.yaml
   loadout migrate --dry-run\
 ";
 
@@ -71,14 +84,16 @@ fn main() {
 // ── apply ─────────────────────────────────────────────────────────────────────
 
 fn cmd_apply(args: &[String]) {
-    let profile_path = require_profile_arg(args, "apply");
     let verbose = args.contains(&"--verbose".to_string());
+    let mut ctx = build_app_context();
 
-    let ctx = build_app_context();
+    let config_path = parse_config_arg(args, "apply", &ctx.dirs);
+    ctx.sources_override = parse_flag_value(args, "--sources").map(PathBuf::from);
 
-    println!("Applying profile: {}", profile_path.display());
+    let config_id = config_id_from_path(&config_path);
+    println!("Using config: {config_id}");
 
-    let result = app::apply(&ctx, &profile_path, &mut |event| {
+    let result = app::apply(&ctx, &config_path, &mut |event| {
         use app::Event;
         match event {
             Event::FeatureStart { id } => {
@@ -106,9 +121,9 @@ fn cmd_apply(args: &[String]) {
         Ok(report) => {
             println!();
             if report.failed.is_empty() {
-                println!("Profile applied successfully.");
+                println!("Config applied successfully.");
             } else {
-                println!("Profile applied with errors.");
+                println!("Config applied with errors.");
             }
             if !report.executed.is_empty() {
                 println!();
@@ -137,12 +152,16 @@ fn cmd_apply(args: &[String]) {
 // ── plan ──────────────────────────────────────────────────────────────────────
 
 fn cmd_plan(args: &[String]) {
-    let profile_path = require_profile_arg(args, "plan");
     let verbose = args.contains(&"--verbose".to_string());
+    let mut ctx = build_app_context();
 
-    let ctx = build_app_context();
+    let config_path = parse_config_arg(args, "plan", &ctx.dirs);
+    ctx.sources_override = parse_flag_value(args, "--sources").map(PathBuf::from);
 
-    match app::plan(&ctx, &profile_path) {
+    let config_id = config_id_from_path(&config_path);
+    println!("Using config: {config_id}");
+
+    match app::plan(&ctx, &config_path) {
         Ok(plan) => {
             print_plan(&plan, verbose);
         }
@@ -344,14 +363,59 @@ fn exe_dir() -> PathBuf {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Require the first non-flag positional argument as a profile path.
-fn require_profile_arg(args: &[String], subcommand: &str) -> PathBuf {
-    args.iter()
-        .find(|a| !a.starts_with('-'))
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            eprintln!("error: {subcommand} requires a <profile> argument");
-            eprintln!("Usage: loadout {subcommand} <profile.yaml>");
+/// Require `--config` / `-c` from args and resolve to a `PathBuf`.
+///
+/// Resolution rules (see module-level comment):
+/// - Value contains `.yaml` or `.yml` → treat as a literal file path.
+/// - Otherwise → `{config_home}/configs/{value}.yaml`.
+fn parse_config_arg(args: &[String], subcommand: &str, dirs: &platform::Dirs) -> PathBuf {
+    let value = parse_flag_value(args, "--config").or_else(|| parse_flag_value(args, "-c"));
+    match value {
+        Some(value) => resolve_config_path(&value, dirs),
+        None => {
+            eprintln!("error: {subcommand} requires -c / --config <name|path>");
+            eprintln!("  name example:  loadout {subcommand} -c local");
+            eprintln!("  path example:  loadout {subcommand} -c ./configs/work.yaml");
             process::exit(1);
-        })
+        }
+    }
+}
+
+/// Parse the value of a named flag: `--flag value` or `--flag=value`.
+fn parse_flag_value(args: &[String], flag: &str) -> Option<String> {
+    let eq_prefix = format!("{flag}=");
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if arg == flag {
+            return iter.next().cloned();
+        }
+        if let Some(val) = arg.strip_prefix(&eq_prefix) {
+            return Some(val.to_string());
+        }
+    }
+    None
+}
+
+/// Resolve a `--config` value to a `PathBuf`.
+///
+/// - Contains `.yaml` or `.yml` → literal path.
+/// - Otherwise → `{config_home}/configs/{value}.yaml`.
+fn resolve_config_path(value: &str, dirs: &platform::Dirs) -> PathBuf {
+    if value.contains(".yaml") || value.contains(".yml") {
+        PathBuf::from(value)
+    } else {
+        dirs.config_home
+            .join("configs")
+            .join(format!("{value}.yaml"))
+    }
+}
+
+/// Derive a human-readable config id from a path.
+///
+/// Returns the file stem (e.g. `linux` from `.../configs/linux.yaml`).
+fn config_id_from_path(path: &Path) -> String {
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| path.display().to_string())
 }

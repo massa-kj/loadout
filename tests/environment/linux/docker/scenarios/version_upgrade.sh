@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT="/loadout"
-PROFILE_V20="$ROOT/tests/environment/linux/docker/fixtures/profile-version-v20.yaml"
-PROFILE_V22="$ROOT/tests/environment/linux/docker/fixtures/profile-version-v22.yaml"
+CONFIG_V20="$ROOT/tests/environment/linux/docker/fixtures/config-version-v20.yaml"
+CONFIG_V22="$ROOT/tests/environment/linux/docker/fixtures/config-version-v22.yaml"
 export XDG_CONFIG_HOME="/tmp/loadout-xdg-config"
 export XDG_STATE_HOME="/tmp/loadout-xdg-state"
 STATE_FILE="$XDG_STATE_HOME/loadout/state.json"
@@ -12,11 +12,8 @@ echo "==> Version upgrade scenario"
 
 cd "$ROOT"
 
-# Use test-specific policy (no backup, standard backends)
-export LOADOUT_POLICY_FILE="$ROOT/tests/environment/linux/docker/fixtures/policy.yaml"
-
 echo "==> First apply (Node 20)"
-./loadout apply "$PROFILE_V20"
+./loadout apply --config "$CONFIG_V20"
 
 # Activate brew and mise for tests
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"
@@ -38,7 +35,7 @@ fi
 
 echo ""
 echo "==> Second apply (Node 22 - should trigger reinstall)"
-./loadout apply "$PROFILE_V22"
+./loadout apply --config "$CONFIG_V22"
 
 echo "==> Verifying Node 22 installed"
 NODE_VERSION_2=$(jq -r '.features["core/node"].resources[] | select(.kind == "runtime") | .runtime.version' "$STATE_FILE")

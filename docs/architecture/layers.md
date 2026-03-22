@@ -3,9 +3,9 @@
 ## Layer Overview
 
 ```
-platforms  →  profiles  →  loadout  →  app  →  core  →  features
-                                          ↓
-                                        state
+platforms  →  configs  →  loadout  →  app  →  core  →  features
+                                         ↓
+                                       state
 ```
 
 Each layer has strict responsibility constraints.
@@ -21,11 +21,12 @@ Responsibilities: detect OS, set environment variables, install minimal dependen
 
 Must NOT: interpret profiles, install features, modify state, resolve dependencies.
 
-### profiles
+### configs
 
-Declare desired environment composition.
+Declare desired environment composition and implementation strategy.
 
-Responsibilities: list enabled features, provide optional configuration values (e.g. version).
+Responsibilities: list enabled features, provide optional configuration values (e.g. version),
+optionally specify backend selection and backup strategy.
 
 Must NOT: contain logic, OS branching, commands, or install details.
 
@@ -80,8 +81,10 @@ The system executes a deterministic pipeline from user declarations to state com
 Orchestrator (app)
     ↓
 Load Configuration
-  ├─ Profile         (profile.yaml — desired features, versions)
-  ├─ Policy          (policy.yaml — backend selection, backup strategy)
+  ├─ Config          (config.yaml — profile section + policy section)
+  ├─   Profile        (desired features, versions — decoded from config.profile)
+  ├─   Policy         (backend selection, backup strategy — decoded from config.policy
+  │                    or Policy::default() when section is absent)
   ├─ Sources         (sources.yaml — plugin locations, admission control)
   └─ State           (state.json — installed resources, backends, versions)
     ↓
@@ -143,8 +146,8 @@ State Commit
 
 ### Data Structure Roles
 
-- **Profile**: User's desired environment (feature list, versions, enable/disable)
-- **Policy**: User's implementation strategy (backend selection, backup policy)
+- **Profile**: User's desired environment (feature list, versions, enable/disable) — the `profile:` section of a config file
+- **Policy**: User's implementation strategy (backend selection, backup policy) — the optional `policy:` section of a config file; absent → `Policy::default()`
 - **Sources**: Plugin locations and security allow-lists
 - **State**: Single authority for installed resources (backend, version, fs paths)
 - **FeatureIndex**: Normalized feature metadata (depends, capabilities, resources)
@@ -194,8 +197,8 @@ loadout/
 │   │   ├── apply.sh           # Install/upgrade operation
 │   │   ├── remove.sh          # Uninstall operation
 │   │   └── status.sh          # Query installation state
-├── profiles/                  # Repository examples
-├── policies/                  # Repository examples
+├── configs/                   # Repository example config files
+│   └── <platform>.yaml        # profile + policy sections
 ├── tools/                     # Development tools
 └── tests/                     # End-to-end tests (Rust unit tests in crates/)
 ```

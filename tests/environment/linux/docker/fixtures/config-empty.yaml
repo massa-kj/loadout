@@ -1,0 +1,13 @@
+# Empty profile: removes all features.
+# Used by: lifecycle, uninstall scenarios (full uninstall phase)
+
+profile:
+  features: {}
+
+policy:
+  package:
+    default_backend: core/brew
+  runtime:
+    default_backend: core/mise
+  fs:
+    backup: false

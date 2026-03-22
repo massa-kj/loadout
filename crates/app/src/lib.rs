@@ -37,9 +37,9 @@ pub use model::plan::Plan;
 /// and collected in [`ExecutorReport::failed`], not surfaced as `AppError`.
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
-    /// The profile YAML file was not found.
-    #[error("profile not found: {}", path.display())]
-    ProfileNotFound { path: PathBuf },
+    /// The config YAML file was not found.
+    #[error("config not found: {}", path.display())]
+    ConfigNotFound { path: PathBuf },
 
     /// A configuration file (profile, policy, sources) could not be loaded.
     #[error("config error: {0}")]
@@ -77,7 +77,7 @@ pub enum AppError {
 /// Stable, run-level context shared by all use cases.
 ///
 /// Contains the repository root, platform, and resolved base directories.
-/// Use-case-specific paths (e.g. the profile file) are passed as arguments.
+/// Use-case-specific paths (e.g. the config file) are passed as arguments.
 pub struct AppContext {
     /// Repository root — where `features/`, `backends/`, `policies/` live.
     pub repo_root: PathBuf,
@@ -87,6 +87,11 @@ pub struct AppContext {
 
     /// Resolved XDG / AppData base directories.
     pub dirs: platform::Dirs,
+
+    /// Optional override for the sources spec path.
+    /// When `Some`, this path is used instead of `{config_home}/sources.yaml`.
+    /// Intended for CI / verification use only (mirrors `--sources` CLI flag).
+    pub sources_override: Option<PathBuf>,
 }
 
 impl AppContext {
@@ -96,24 +101,13 @@ impl AppContext {
             repo_root,
             platform,
             dirs,
+            sources_override: None,
         }
     }
 
     /// Absolute path to the authoritative state file: `{state_home}/state.json`.
     pub fn state_path(&self) -> PathBuf {
         self.dirs.state_home.join("state.json")
-    }
-
-    /// Absolute path to the platform default policy: `{repo_root}/policies/default.{platform}.yaml`.
-    pub fn default_policy_path(&self) -> PathBuf {
-        let suffix = match &self.platform {
-            platform::Platform::Linux => "linux",
-            platform::Platform::Windows => "windows",
-            platform::Platform::Wsl => "wsl",
-        };
-        self.repo_root
-            .join("policies")
-            .join(format!("default.{suffix}.yaml"))
     }
 
     /// Absolute path to the user sources file: `{config_home}/sources.yaml`.
@@ -127,17 +121,20 @@ impl AppContext {
 // plan() use case
 // ---------------------------------------------------------------------------
 
-/// Compute the plan for the given profile without executing any actions.
+/// Compute the plan for the given config without executing any actions.
+///
+/// `config_path` must point to a unified `config.yaml` containing both the
+/// `profile` and (optionally) the `policy` section.
 ///
 /// Returns the [`Plan`] that describes what `apply()` would do.
 /// All stages are read-only; no state is modified.
-pub fn plan(ctx: &AppContext, profile_path: &Path) -> Result<Plan, AppError> {
+pub fn plan(ctx: &AppContext, config_path: &Path) -> Result<Plan, AppError> {
     let PipelineOutput {
         order,
         graph,
         state,
         ..
-    } = run_pipeline(ctx, profile_path)?;
+    } = run_pipeline(ctx, config_path)?;
     let p = planner::plan(&graph, &state, &order)?;
     Ok(p)
 }
@@ -148,6 +145,9 @@ pub fn plan(ctx: &AppContext, profile_path: &Path) -> Result<Plan, AppError> {
 
 /// Execute the plan: install, update, and remove features as needed.
 ///
+/// `config_path` must point to a unified `config.yaml` containing both the
+/// `profile` and (optionally) the `policy` section.
+///
 /// Feature-level failures do not abort the run; they are reported via `on_event`
 /// and collected in [`ExecutorReport::failed`].
 ///
@@ -155,7 +155,7 @@ pub fn plan(ctx: &AppContext, profile_path: &Path) -> Result<Plan, AppError> {
 /// violation, or a pipeline stage failure before execution begins).
 pub fn apply(
     ctx: &AppContext,
-    profile_path: &Path,
+    config_path: &Path,
     on_event: &mut dyn FnMut(Event),
 ) -> Result<ExecutorReport, AppError> {
     let PipelineOutput {
@@ -164,7 +164,7 @@ pub fn apply(
         graph,
         mut state,
         ..
-    } = run_pipeline(ctx, profile_path)?;
+    } = run_pipeline(ctx, config_path)?;
 
     let p = planner::plan(&graph, &state, &order)?;
 
@@ -205,48 +205,45 @@ struct PipelineOutput {
 /// Run the read-only stages common to both `plan()` and `apply()`.
 ///
 /// Steps:
-///   1. Validate profile file exists.
-///   2. Load profile → `Profile`.
-///   3. Load policy (optional) → `Policy`.
-///   4. Load sources (optional) → `SourcesSpec`.
-///   5. Build `FeatureIndex` from source roots.
-///   6. Map profile features to `CanonicalFeatureId`s (skip unknown).
-///   7. Resolve dependency order.
-///   8. Compile: `FeatureIndex + Policy + order` → `DesiredResourceGraph`.
-///   9. Load (or initialise) state.
-fn run_pipeline(ctx: &AppContext, profile_path: &Path) -> Result<PipelineOutput, AppError> {
-    // Step 1: profile file must exist.
-    if !profile_path.exists() {
-        return Err(AppError::ProfileNotFound {
-            path: profile_path.to_path_buf(),
+///   1. Validate config file exists.
+///   2. Load config → `Profile` + `Policy` via `config::load_config`.
+///   3. Load sources (optional) → `SourcesSpec`.
+///   4. Build `FeatureIndex` from source roots.
+///   5. Map profile features to `CanonicalFeatureId`s (skip unknown).
+///   6. Resolve dependency order.
+///   7. Compile: `FeatureIndex + Policy + order` → `DesiredResourceGraph`.
+///   8. Load (or initialise) state.
+fn run_pipeline(ctx: &AppContext, config_path: &Path) -> Result<PipelineOutput, AppError> {
+    // Step 1: config file must exist.
+    if !config_path.exists() {
+        return Err(AppError::ConfigNotFound {
+            path: config_path.to_path_buf(),
         });
     }
 
-    // Step 2: load profile (normalises bare names to "core/<name>").
-    let profile = config::load_profile(profile_path)?;
+    // Step 2: load config — profile is required, policy is optional (defaults to
+    // Policy::default() if the 'policy' section is absent from the file).
+    let (profile, policy) = config::load_config(config_path)?;
 
-    // Step 3: load policy if present; default to empty (no backend overrides).
-    let policy = load_policy_optional(ctx)?;
-
-    // Step 4: load sources if present; default to empty (core + user only).
+    // Step 3: load sources if present; default to empty (core + user only).
     let sources = load_sources_optional(ctx)?;
 
-    // Step 5: build feature index from all source roots.
+    // Step 4: build feature index from all source roots.
     let source_roots = build_source_roots(ctx, &sources);
     let fi_platform = to_fi_platform(&ctx.platform);
     let index = feature_index::build(&source_roots, &fi_platform)?;
 
-    // Step 6: convert profile keys to CanonicalFeatureIds; skip those absent from index.
+    // Step 5: convert profile keys to CanonicalFeatureIds; skip those absent from index.
     // An empty desired list is valid: it means "uninstall everything in state".
     let desired_ids = profile_to_desired_ids(&profile, &index);
 
-    // Step 7: resolve dependency order (topological sort).
+    // Step 6: resolve dependency order (topological sort).
     let order = resolver::resolve(&index, &desired_ids)?;
 
-    // Step 8: compile desired resource graph.
+    // Step 7: compile desired resource graph.
     let graph = compiler::compile(&index, &policy, &order)?;
 
-    // Step 9: load state (state::load returns empty state if file absent).
+    // Step 8: load state (state::load returns empty state if file absent).
     let state = state::load(&ctx.state_path())?;
 
     Ok(PipelineOutput {
@@ -310,18 +307,14 @@ fn build_source_roots(
     roots
 }
 
-/// Load the platform policy; return an empty `Policy` if the file is absent.
-fn load_policy_optional(ctx: &AppContext) -> Result<config::Policy, AppError> {
-    let path = ctx.default_policy_path();
-    if path.exists() {
-        Ok(config::load_policy(&path)?)
-    } else {
-        Ok(config::Policy::default())
-    }
-}
-
 /// Load the sources spec; return an empty `SourcesSpec` if the file is absent.
+///
+/// If `ctx.sources_override` is set, that path is used exclusively (no fallback).
+/// This mirrors the `--sources` CLI flag, intended for CI / verification use only.
 fn load_sources_optional(ctx: &AppContext) -> Result<config::SourcesSpec, AppError> {
+    if let Some(ref path) = ctx.sources_override {
+        return Ok(config::load_sources(path)?);
+    }
     let path = ctx.sources_path();
     if path.exists() {
         Ok(config::load_sources(&path)?)
@@ -450,6 +443,7 @@ mod tests {
                 data_home: root.join("data"),
                 state_home: root.join("state"),
             },
+            sources_override: None,
         }
     }
 
@@ -468,15 +462,14 @@ mod tests {
         make_executable(&uninstall_sh);
     }
 
-    /// Write a minimal profile YAML referencing the given feature names.
-    fn write_profile(dir: &Path, filename: &str, features: &[&str]) -> PathBuf {
-        let content = format!(
-            "features:\n{}",
-            features
-                .iter()
-                .map(|f| format!("  {f}: {{}}\n"))
-                .collect::<String>()
-        );
+    /// Write a minimal config.yaml referencing the given feature names.
+    /// The profile section is required; no policy section is written (uses Policy::default()).
+    fn write_config(dir: &Path, filename: &str, features: &[&str]) -> PathBuf {
+        let features_str: String = features
+            .iter()
+            .map(|f| format!("    {f}: {{}}\n"))
+            .collect();
+        let content = format!("profile:\n  features:\n{features_str}");
         let path = dir.join(filename);
         write(&path, &content);
         path
@@ -485,39 +478,39 @@ mod tests {
     /// Collect all events emitted during apply.
     fn collect_apply(
         ctx: &AppContext,
-        profile_path: &Path,
+        config_path: &Path,
     ) -> (Result<ExecutorReport, AppError>, Vec<Event>) {
         let mut events = vec![];
-        let result = apply(ctx, profile_path, &mut |e| events.push(e));
+        let result = apply(ctx, config_path, &mut |e| events.push(e));
         (result, events)
     }
 
     // --- Tests ---
 
-    /// Missing profile returns ProfileNotFound.
+    /// Missing config returns ConfigNotFound.
     #[test]
-    fn plan_missing_profile_returns_error() {
+    fn plan_missing_config_returns_error() {
         let tmp = tempfile::tempdir().unwrap();
         let ctx = make_ctx(&tmp);
-        let profile_path = tmp.path().join("nonexistent.yaml");
+        let config_path = tmp.path().join("nonexistent.yaml");
 
-        let err = plan(&ctx, &profile_path).unwrap_err();
+        let err = plan(&ctx, &config_path).unwrap_err();
         assert!(
-            matches!(err, AppError::ProfileNotFound { .. }),
-            "expected ProfileNotFound, got {err:?}"
+            matches!(err, AppError::ConfigNotFound { .. }),
+            "expected ConfigNotFound, got {err:?}"
         );
     }
 
-    /// Profile with unrecognised features: recognised list is empty → plan has no actions.
+    /// Config with unrecognised features: recognised list is empty → plan has no actions.
     #[test]
     fn plan_unknown_features_produce_empty_plan() {
         let tmp = tempfile::tempdir().unwrap();
         let ctx = make_ctx(&tmp);
-        // Feature referenced in profile does not exist in index → desired IDs empty.
-        let profile_path = write_profile(tmp.path(), "profile.yaml", &["core/nonexistent"]);
+        // Feature referenced in config does not exist in index → desired IDs empty.
+        let config_path = write_config(tmp.path(), "config.yaml", &["core/nonexistent"]);
 
         // Should succeed: empty desired produces a plan with no actions.
-        let p = plan(&ctx, &profile_path).unwrap();
+        let p = plan(&ctx, &config_path).unwrap();
         assert!(
             p.actions.is_empty(),
             "plan should have no actions for unknown features"
@@ -530,9 +523,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let ctx = make_ctx(&tmp);
         write_script_feature(tmp.path(), "git");
-        let profile_path = write_profile(tmp.path(), "profile.yaml", &["core/git"]);
+        let config_path = write_config(tmp.path(), "config.yaml", &["core/git"]);
 
-        let p = plan(&ctx, &profile_path).unwrap();
+        let p = plan(&ctx, &config_path).unwrap();
         assert_eq!(p.actions.len(), 1);
         let action = &p.actions[0];
         assert_eq!(action.feature.as_str(), "core/git");
@@ -545,9 +538,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let ctx = make_ctx(&tmp);
         write_script_feature(tmp.path(), "git");
-        let profile_path = write_profile(tmp.path(), "profile.yaml", &["core/git"]);
+        let config_path = write_config(tmp.path(), "config.yaml", &["core/git"]);
 
-        let (result, events) = collect_apply(&ctx, &profile_path);
+        let (result, events) = collect_apply(&ctx, &config_path);
 
         let report = result.unwrap();
         assert_eq!(report.executed.len(), 1, "expected one feature executed");
@@ -575,14 +568,14 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let ctx = make_ctx(&tmp);
         write_script_feature(tmp.path(), "git");
-        let profile_path = write_profile(tmp.path(), "profile.yaml", &["core/git"]);
+        let config_path = write_config(tmp.path(), "config.yaml", &["core/git"]);
 
         // First apply: installs.
-        let (r1, _) = collect_apply(&ctx, &profile_path);
+        let (r1, _) = collect_apply(&ctx, &config_path);
         r1.unwrap();
 
         // Second apply: state already reflects desired; should be a noop.
-        let (r2, events2) = collect_apply(&ctx, &profile_path);
+        let (r2, events2) = collect_apply(&ctx, &config_path);
         let report2 = r2.unwrap();
 
         // No actions executed: feature is already in state.
@@ -598,17 +591,17 @@ mod tests {
         assert_eq!(start_count, 0, "no FeatureStart events on noop");
     }
 
-    /// apply() missing profile propagates ProfileNotFound.
+    /// apply() missing config propagates ConfigNotFound.
     #[test]
-    fn apply_missing_profile_returns_error() {
+    fn apply_missing_config_returns_error() {
         let tmp = tempfile::tempdir().unwrap();
         let ctx = make_ctx(&tmp);
-        let profile_path = tmp.path().join("does_not_exist.yaml");
+        let config_path = tmp.path().join("does_not_exist.yaml");
 
-        let (result, _) = collect_apply(&ctx, &profile_path);
+        let (result, _) = collect_apply(&ctx, &config_path);
         assert!(matches!(
             result.unwrap_err(),
-            AppError::ProfileNotFound { .. }
+            AppError::ConfigNotFound { .. }
         ));
     }
 
@@ -619,16 +612,16 @@ mod tests {
         let ctx = make_ctx(&tmp);
         write_script_feature(tmp.path(), "git");
         write_script_feature(tmp.path(), "node");
-        let profile_path = write_profile(tmp.path(), "profile.yaml", &["core/git", "core/node"]);
+        let config_path = write_config(tmp.path(), "config.yaml", &["core/git", "core/node"]);
 
-        let (result, _) = collect_apply(&ctx, &profile_path);
+        let (result, _) = collect_apply(&ctx, &config_path);
         let report = result.unwrap();
 
         assert_eq!(report.executed.len(), 2);
         assert!(report.failed.is_empty());
     }
 
-    /// apply() removes a feature that is in state but not in the profile.
+    /// apply() removes a feature that is in state but not in the config.
     #[test]
     fn apply_removes_undesired_feature_from_state() {
         let tmp = tempfile::tempdir().unwrap();
@@ -637,12 +630,12 @@ mod tests {
         write_script_feature(tmp.path(), "node");
 
         // First apply: install git + node.
-        let profile_both = write_profile(tmp.path(), "both.yaml", &["core/git", "core/node"]);
-        collect_apply(&ctx, &profile_both).0.unwrap();
+        let config_both = write_config(tmp.path(), "both.yaml", &["core/git", "core/node"]);
+        collect_apply(&ctx, &config_both).0.unwrap();
 
         // Second apply: only git desired → node should be destroyed.
-        let profile_git_only = write_profile(tmp.path(), "git_only.yaml", &["core/git"]);
-        let (result, _) = collect_apply(&ctx, &profile_git_only);
+        let config_git_only = write_config(tmp.path(), "git_only.yaml", &["core/git"]);
+        let (result, _) = collect_apply(&ctx, &config_git_only);
         let report = result.unwrap();
 
         // One action executed (Destroy node).
@@ -661,25 +654,16 @@ mod tests {
         );
     }
 
-    /// AppContext::default_policy_path returns the correct path for Linux.
+    /// Config without a policy section → Policy::default() is used (no error).
     #[test]
-    fn app_context_policy_path_linux() {
-        let tmp = tempfile::tempdir().unwrap();
-        let ctx = make_ctx(&tmp);
-        let expected = tmp.path().join("policies").join("default.linux.yaml");
-        assert_eq!(ctx.default_policy_path(), expected);
-    }
-
-    /// Optional policy missing → empty policy (no error).
-    #[test]
-    fn plan_with_no_policy_file_uses_default_policy() {
+    fn plan_without_policy_section_uses_default_policy() {
         let tmp = tempfile::tempdir().unwrap();
         let ctx = make_ctx(&tmp);
         write_script_feature(tmp.path(), "git");
-        let profile_path = write_profile(tmp.path(), "profile.yaml", &["core/git"]);
+        let config_path = write_config(tmp.path(), "config.yaml", &["core/git"]);
 
-        // No policies/ dir → load_policy_optional should return empty policy.
-        let p = plan(&ctx, &profile_path).unwrap();
+        // write_config omits the policy section → Policy::default() is used.
+        let p = plan(&ctx, &config_path).unwrap();
         assert_eq!(p.actions.len(), 1);
     }
 
@@ -707,12 +691,12 @@ mod tests {
         write_script_feature(tmp.path(), "git");
 
         // First apply: install both.
-        let profile_both = write_profile(tmp.path(), "both.yaml", &["core/badfeature", "core/git"]);
-        collect_apply(&ctx, &profile_both).0.unwrap();
+        let config_both = write_config(tmp.path(), "both.yaml", &["core/badfeature", "core/git"]);
+        collect_apply(&ctx, &config_both).0.unwrap();
 
         // Second apply: only git desired → badfeature must be destroyed (fails), git is noop.
-        let profile_git_only = write_profile(tmp.path(), "git.yaml", &["core/git"]);
-        let (result, events) = collect_apply(&ctx, &profile_git_only);
+        let config_git_only = write_config(tmp.path(), "git.yaml", &["core/git"]);
+        let (result, events) = collect_apply(&ctx, &config_git_only);
         let report = result.unwrap(); // Must not be a fatal error.
 
         // badfeature destruction failed → shows up in failed list.

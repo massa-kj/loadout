@@ -1,0 +1,15 @@
+# Broader feature set: used for expand phase in lifecycle and uninstall scenarios.
+
+profile:
+  features:
+    brew: {}
+    fzf: {}
+    ripgrep: {}
+
+policy:
+  package:
+    default_backend: core/brew
+  runtime:
+    default_backend: core/mise
+  fs:
+    backup: false

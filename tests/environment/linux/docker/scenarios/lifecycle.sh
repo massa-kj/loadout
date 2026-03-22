@@ -2,9 +2,9 @@
 set -euo pipefail
 
 ROOT="/loadout"
-PROFILE_BASE="$ROOT/tests/environment/linux/docker/fixtures/profile-base.yaml"
-PROFILE_FULL="$ROOT/tests/environment/linux/docker/fixtures/profile-full.yaml"
-PROFILE_EMPTY="$ROOT/tests/environment/linux/docker/fixtures/profile-empty.yaml"
+CONFIG_BASE="$ROOT/tests/environment/linux/docker/fixtures/config-base.yaml"
+CONFIG_FULL="$ROOT/tests/environment/linux/docker/fixtures/config-full.yaml"
+CONFIG_EMPTY="$ROOT/tests/environment/linux/docker/fixtures/config-empty.yaml"
 export XDG_CONFIG_HOME="/tmp/loadout-xdg-config"
 export XDG_STATE_HOME="/tmp/loadout-xdg-state"
 STATE_FILE="$XDG_STATE_HOME/loadout/state.json"
@@ -13,13 +13,10 @@ echo "==> Lifecycle scenario"
 
 cd "$ROOT"
 
-# Use test-specific policy that does not require a package-manager feature.
-export LOADOUT_POLICY_FILE="$ROOT/tests/environment/linux/docker/fixtures/policy-apt.yaml"
-
 rm -rf /root/.bashrc /root/.bashrc.d
 
 echo "==> Phase 1: base apply"
-./loadout apply "$PROFILE_BASE"
+./loadout apply --config "$CONFIG_BASE"
 
 echo "==> Validating state file existence"
 test -f "$STATE_FILE"
@@ -58,11 +55,11 @@ jq -e '.features | to_entries[] | .value.resources[]? | select(.kind == "fs") | 
 } || true
 
 echo "==> Phase 2: expand to full profile"
-./loadout apply "$PROFILE_FULL"
+./loadout apply --config "$CONFIG_FULL"
 
 echo "==> Ensuring extra feature was installed"
-if ! jq -e '.features["core/tmux"]' "$STATE_FILE" > /dev/null; then
-  echo "tmux was not installed in full profile"
+if ! jq -e '.features["core/ripgrep"]' "$STATE_FILE" > /dev/null; then
+  echo "ripgrep was not installed in full config"
   exit 1
 fi
 
@@ -70,7 +67,7 @@ echo "==> Snapshotting full state"
 cp "$STATE_FILE" /tmp/state_full_before.json
 
 echo "==> Phase 3: reapply full profile"
-./loadout apply "$PROFILE_FULL"
+./loadout apply --config "$CONFIG_FULL"
 
 echo "==> Verifying full-profile idempotency"
 if ! diff -u /tmp/state_full_before.json "$STATE_FILE"; then
@@ -87,7 +84,7 @@ SENTINEL="/tmp/loadout_sentinel"
 echo "do not delete" > "$SENTINEL"
 
 echo "==> Phase 4: shrink back to base profile"
-./loadout apply "$PROFILE_BASE"
+./loadout apply --config "$CONFIG_BASE"
 
 echo "==> Verifying base features remain"
 if ! jq -e '.features["core/bash"]' "$STATE_FILE" > /dev/null; then
@@ -119,7 +116,7 @@ if [[ -n "$REMAINING_PACKAGES" ]]; then
 fi
 
 echo "==> Phase 5: full uninstall"
-./loadout apply "$PROFILE_EMPTY"
+./loadout apply --config "$CONFIG_EMPTY"
 
 echo "==> Checking state file valid"
 jq empty "$STATE_FILE" > /dev/null

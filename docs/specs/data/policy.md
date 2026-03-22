@@ -11,36 +11,45 @@ or how to configure policies (see `guides/usage.md`).
 
 ## Schema
 
+Policy is embedded as the optional `policy:` section within a `config.yaml` file.
+When the `policy:` section is absent, `Policy::default()` is used (no backend selection, backup enabled).
+
 ```yaml
-policy: "<policy_id>"
+# configs/linux.yaml
+profile:
+  features:
+    ...
 
-package:
-  default_backend: <backend_id>
-  overrides:
-    <package_name>:
-      backend: <backend_id>
+policy:        # optional section
+  package:
+    default_backend: <backend_id>
+    overrides:
+      <package_name>:
+        backend: <backend_id>
 
-runtime:
-  default_backend: <backend_id>
-  overrides:
-    <runtime_name>:
-      backend: <backend_id>
+  runtime:
+    default_backend: <backend_id>
+    overrides:
+      <runtime_name>:
+        backend: <backend_id>
 
-fs:
-  backup: true | false
-  backup_dir: "<path>"
+  fs:
+    backup: true | false
+    backup_dir: "<path>"
 ```
 
 ## File Location
 
-Policy file path is platform-defined:
+Policy is a section within the config file selected by `--config` / `-c`.
+No standalone policy file is used.
 
-* Linux/WSL: `$XDG_CONFIG_HOME/loadout/policies/default.<platform>.yaml`
-* Linux/WSL fallback: `~/.config/loadout/policies/default.<platform>.yaml`
-* Generic fallback when platform-specific file is absent: `default.yaml`
-* Windows: `%APPDATA%\loadout\policies\default.<platform>.yaml`
+Config file location:
 
-`LOADOUT_POLICY_FILE` may override the file path.
+* Linux/WSL: `$XDG_CONFIG_HOME/loadout/configs/`
+* Linux/WSL fallback: `~/.config/loadout/configs/`
+* Windows: `%APPDATA%\loadout\configs\`
+
+See `specs/data/profile.md` for config resolution rules.
 
 ## Backend Resolution Model
 
