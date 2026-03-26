@@ -360,7 +360,8 @@ mod tests {
         let dirs = make_dirs(&tmp);
         let platform = current_platform();
 
-        let err = run_uninstall(&meta, &make_feature_id("core/brew"), &dirs, &platform).unwrap_err();
+        let err =
+            run_uninstall(&meta, &make_feature_id("core/brew"), &dirs, &platform).unwrap_err();
         assert!(matches!(err, FeatureHostError::ScriptNotFound { .. }));
     }
 
@@ -372,7 +373,8 @@ mod tests {
         let dirs = make_dirs(&tmp);
         let platform = current_platform();
 
-        let err = run_uninstall(&meta, &make_feature_id("core/brew"), &dirs, &platform).unwrap_err();
+        let err =
+            run_uninstall(&meta, &make_feature_id("core/brew"), &dirs, &platform).unwrap_err();
         assert!(matches!(
             err,
             FeatureHostError::ScriptFailed { exit_code: 3, .. }
@@ -385,7 +387,7 @@ mod tests {
     fn env_vars_are_injected_into_script() {
         let tmp = tempfile::tempdir().unwrap();
         let platform = current_platform();
-        
+
         // Write platform-appropriate script to print env vars
         let script_body = match platform {
             Platform::Windows => {
@@ -400,10 +402,10 @@ Write-Output "$env:LOADOUT_STATE_HOME""#
                 r#"printf '%s\n' "$LOADOUT_FEATURE_ID" "$LOADOUT_CONFIG_HOME" "$LOADOUT_DATA_HOME" "$LOADOUT_STATE_HOME""#
             }
         };
-        
+
         write_ok_script(tmp.path(), "install.sh", script_body);
         let meta = make_meta(tmp.path().to_str().unwrap());
-        
+
         // Use platform-appropriate paths
         let (cfg_path, data_path, state_path) = match platform {
             Platform::Windows => (
@@ -417,7 +419,7 @@ Write-Output "$env:LOADOUT_STATE_HOME""#
                 PathBuf::from("/tmp/state/loadout"),
             ),
         };
-        
+
         let dirs = Dirs {
             config_home: cfg_path.clone(),
             data_home: data_path.clone(),
@@ -434,11 +436,13 @@ Write-Output "$env:LOADOUT_STATE_HOME""#
             "LOADOUT_CONFIG_HOME missing"
         );
         assert!(
-            out.stdout.contains(&data_path.to_string_lossy().to_string()),
+            out.stdout
+                .contains(&data_path.to_string_lossy().to_string()),
             "LOADOUT_DATA_HOME missing"
         );
         assert!(
-            out.stdout.contains(&state_path.to_string_lossy().to_string()),
+            out.stdout
+                .contains(&state_path.to_string_lossy().to_string()),
             "LOADOUT_STATE_HOME missing"
         );
     }

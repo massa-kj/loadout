@@ -16,9 +16,9 @@ use std::path::Path;
 use serde::Deserialize;
 
 pub use model::{
-    strategy::{BackendOverride, BackendStrategy, FsStrategy, Strategy},
     profile::{Profile, ProfileFeatureConfig},
     sources::{AllowList, AllowSpec, SourceEntry, SourceType, SourcesSpec, WildcardAll},
+    strategy::{BackendOverride, BackendStrategy, FsStrategy, Strategy},
 };
 use thiserror::Error;
 
@@ -469,7 +469,10 @@ strategy:
 ";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let (profile, strategy) = load_config(&p).unwrap();
-        assert!(profile.features.contains_key("core/fzf"), "bare 'fzf' must become 'core/fzf'");
+        assert!(
+            profile.features.contains_key("core/fzf"),
+            "bare 'fzf' must become 'core/fzf'"
+        );
         assert!(profile.features.contains_key("user/myapp"));
         assert_eq!(
             strategy.package.unwrap().default_backend.as_deref(),

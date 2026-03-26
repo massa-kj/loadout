@@ -456,7 +456,7 @@ mod tests {
             &feat_dir.join("feature.yaml"),
             "spec_version: 1\nmode: script\n",
         );
-        
+
         let platform = platform::detect_platform();
         match platform {
             platform::Platform::Windows => {
