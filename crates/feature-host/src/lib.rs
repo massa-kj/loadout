@@ -286,10 +286,14 @@ mod tests {
     #[test]
     fn install_script_stderr_captured_on_success() {
         let tmp = tempfile::tempdir().unwrap();
-        write_ok_script(tmp.path(), "install.sh", "echo warn >&2");
+        let platform = current_platform();
+        let body = match platform {
+            Platform::Windows => "[Console]::Error.WriteLine('warn')",
+            Platform::Linux | Platform::Wsl => "echo warn >&2",
+        };
+        write_ok_script(tmp.path(), "install.sh", body);
         let meta = make_meta(tmp.path().to_str().unwrap());
         let dirs = make_dirs(&tmp);
-        let platform = current_platform();
 
         let out = run_install(&meta, &make_feature_id("core/mise"), &dirs, &platform).unwrap();
         assert!(out.stderr.contains("warn"));
@@ -298,14 +302,14 @@ mod tests {
     #[test]
     fn install_script_nonzero_exit_returns_error() {
         let tmp = tempfile::tempdir().unwrap();
-        write_ok_script(
-            tmp.path(),
-            "install.sh",
-            "echo 'install failed' >&2\nexit 2",
-        );
+        let platform = current_platform();
+        let body = match platform {
+            Platform::Windows => "[Console]::Error.WriteLine('install failed')\nexit 2",
+            Platform::Linux | Platform::Wsl => "echo 'install failed' >&2\nexit 2",
+        };
+        write_ok_script(tmp.path(), "install.sh", body);
         let meta = make_meta(tmp.path().to_str().unwrap());
         let dirs = make_dirs(&tmp);
-        let platform = current_platform();
 
         let err = run_install(&meta, &make_feature_id("core/brew"), &dirs, &platform).unwrap_err();
         assert!(matches!(
