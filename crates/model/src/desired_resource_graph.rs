@@ -50,7 +50,7 @@ pub struct DesiredResource {
 /// Kind-specific data for a desired resource (post-compiler, backend resolved).
 ///
 /// `desired_backend` is present for `Package` and `Runtime` because FeatureCompiler
-/// has already resolved policy. The Planner uses this field for backend-mismatch detection.
+/// has already resolved strategy. The Planner uses this field for backend-mismatch detection.
 ///
 /// `Fs` resources have no backend; they are handled directly by the `fs` module.
 ///
@@ -61,7 +61,7 @@ pub enum DesiredResourceKind {
     /// A package to be installed via a resolved backend.
     ///
     /// Packages are named artifacts installed by package managers.
-    /// Policy has already determined which backend should be used.
+    /// Strategy has already determined which backend should be used.
     Package {
         /// Package name as known to the backend (e.g., `"git"`, `"neovim"`).
         name: String,

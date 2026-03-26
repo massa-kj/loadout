@@ -20,7 +20,7 @@ profile:
     <feature_id>:
       version: "<string>"
 
-policy:    # optional — may be omitted; defaults to Policy::default()
+strategy:    # optional — may be omitted; defaults to Strategy::default()
   ...
 ```
 
@@ -63,7 +63,7 @@ Optional fields:
 A profile declares intent: which features should be present and with what configuration.
 
 A profile does NOT describe how to install features, which backend to use,
-or any platform-specific behavior. That belongs to policy and feature scripts.
+or any platform-specific behavior. That belongs to strategy and feature scripts.
 
 Features absent from the profile are treated as "not desired".
 If such a feature exists in state, the planner will classify it as `destroy`.
@@ -86,7 +86,7 @@ The normalized canonical IDs are what planner, resolver, executor, and state use
 
 ## Interaction with Planner
 
-The profile is one of three inputs to the planner (alongside state and policy).
+The profile is one of three inputs to the planner (alongside state and strategy).
 
 The planner uses the profile as the "desired state":
 
@@ -129,7 +129,7 @@ profile:
       version: "3.12"
     user/myfeat: {}
 
-policy:
+strategy:
   runtime:
     default_backend: mise
 ```

@@ -1,7 +1,7 @@
 //! Profile data type.
 //!
 //! A profile declares intent: which features should be present and with what configuration.
-//! Profile is one of three inputs to the planner (alongside state and policy).
+//! Profile is one of three inputs to the planner (alongside state and strategy).
 //!
 //! See: `docs/specs/data/profile.md`
 

@@ -19,7 +19,7 @@ Core logic (resolver, planner, compiler, executor, state, backend dispatch, feat
 
 * **Scope achieved:**
   - Single Rust binary (`loadout`)
-  - Strongtyping for all data models (State, Profile, Policy, Plan, etc.)
+  - Strongtyping for all data models (State, Profile, Strategy, Plan, etc.)
   - Cross-platform without shell/PowerShell duality for core logic
   - 16 crates with comprehensive test coverage (202 tests)
   - Plugin interfaces stabilized (JSON stdin/stdout protocol for backends)

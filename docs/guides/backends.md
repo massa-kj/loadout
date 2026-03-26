@@ -69,7 +69,7 @@ Examples:
 - `core/custom` (script backend in repo `backends/custom/`)
 - `user/mypkg` (script backend in user config `backends/mypkg/`)
 
-Bare backend names in policy files are normalized to `core/<name>`.
+Bare backend names in strategy files are normalized to `core/<name>`.
 
 ---
 
@@ -250,9 +250,9 @@ See [`specs/api/backend.md`](../specs/api/backend.md) for complete protocol docu
 
 ## Common Pitfalls
 
-### ❌ Do NOT read policy inside a backend
+### ❌ Do NOT read strategy inside a backend
 
-Policy is resolved by the FeatureCompiler **before** your backend is called.
+Strategy is resolved by the FeatureCompiler **before** your backend is called.
 The resource data you receive via environment variables already reflects the resolved `desired_backend`.
 
 ### ❌ Do NOT write state inside a backend
@@ -312,10 +312,10 @@ spec:
       name: testpkg
 ```
 
-2. Create a policy that selects your backend:
+2. Create a strategy that selects your backend:
 
 ```yaml
-# test-policy.yaml
+# test-strategy.yaml
 packages:
   testpkg: user/mybackend
 ```
@@ -323,8 +323,8 @@ packages:
 3. Run:
 
 ```bash
-loadout plan --profile test-profile.yaml --policy test-policy.yaml
-loadout apply --profile test-profile.yaml --policy test-policy.yaml
+loadout plan --profile test-profile.yaml --strategy test-strategy.yaml
+loadout apply --profile test-profile.yaml --strategy test-strategy.yaml
 ```
 
 4. Verify:
@@ -393,7 +393,7 @@ mytool install $name
 
 Place backend directory in `$XDG_CONFIG_HOME/loadout/backends/<name>/` (Linux/macOS) or `%LOCALAPPDATA%\loadout\backends\<name>\` (Windows).
 
-Reference in policy as `user/<name>`.
+Reference in strategy as `user/<name>`.
 
 ### For external source backends
 
@@ -407,7 +407,7 @@ sources:
     path: .
 ```
 
-3. Reference in policy as `mycorp/<name>`
+3. Reference in strategy as `mycorp/<name>`
 
 ---
 

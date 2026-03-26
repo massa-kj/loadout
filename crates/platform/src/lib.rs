@@ -63,7 +63,7 @@ impl std::fmt::Display for Arch {
 /// All paths are absolute and include the `loadout` namespace suffix.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dirs {
-    /// Configuration home: profile, policy, sources.yaml.
+    /// Configuration home: profile, strategy, sources.yaml.
     /// Linux/WSL: `$XDG_CONFIG_HOME/loadout`  (default `~/.config/loadout`)
     /// Windows:   `%APPDATA%\loadout`
     pub config_home: PathBuf,

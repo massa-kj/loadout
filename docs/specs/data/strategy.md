@@ -1,18 +1,18 @@
-# Policy Specification
+# Strategy Specification
 
 ## Scope
 
-This document defines the normative contract for policy files.
+This document defines the normative contract for strategy files.
 
 Covered: schema, backend resolution model, override rules, and resolution order.
 
 Not covered: how backends work (see `specs/api/backend.md`),
-or how to configure policies (see `guides/usage.md`).
+or how to configure strategies (see `guides/usage.md`).
 
 ## Schema
 
-Policy is embedded as the optional `policy:` section within a `config.yaml` file.
-When the `policy:` section is absent, `Policy::default()` is used (no backend selection, backup enabled).
+Strategy is embedded as the optional `strategy:` section within a `config.yaml` file.
+When the `strategy:` section is absent, `Strategy::default()` is used (no backend selection, backup enabled).
 
 ```yaml
 # configs/linux.yaml
@@ -20,7 +20,7 @@ profile:
   features:
     ...
 
-policy:        # optional section
+strategy:      # optional section
   package:
     default_backend: <backend_id>
     overrides:
@@ -40,8 +40,8 @@ policy:        # optional section
 
 ## File Location
 
-Policy is a section within the config file selected by `--config` / `-c`.
-No standalone policy file is used.
+Strategy is a section within the config file selected by `--config` / `-c`.
+No standalone strategy file is used.
 
 Config file location:
 
@@ -53,7 +53,7 @@ See `specs/data/profile.md` for config resolution rules.
 
 ## Backend Resolution Model
 
-Policy determines which backend is used for each resource installation.
+Strategy determines which backend is used for each resource installation.
 
 Backend identifiers accept the same two forms as feature identifiers:
 

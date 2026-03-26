@@ -6,7 +6,7 @@
 //! - `ScriptBackend`: subprocess-based backend that loads `apply.sh` / `remove.sh` /
 //!   `status.sh` from a directory and invokes them with the resource as JSON on stdin
 //!
-//! Plugin isolation: backends must not read policy or state directly.
+//! Plugin isolation: backends must not read strategy or state directly.
 //! Resource routing is handled by the executor via the registry.
 //!
 //! See: `docs/specs/api/backend.md`

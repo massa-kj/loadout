@@ -19,7 +19,7 @@ See `specs/algorithms/planner.md` for the full contract.
 
 Backend plugins must not:
 
-* read policy directly
+* read strategy directly
 * write state directly
 * communicate with other plugins
 * produce side effects outside their designated install/uninstall scope
@@ -71,7 +71,7 @@ The following are forbidden under any circumstance:
 * Filesystem scanning during uninstall to discover removal targets
 * Cross-feature resource ownership (two features tracking the same `fs.path`)
 * Deep dependency graphs or runtime-computed dependencies
-* Backend plugins reading policy or writing state directly
+* Backend plugins reading strategy or writing state directly
 
 Violations require architectural review — they cannot be justified by convenience.
 

@@ -41,7 +41,7 @@ To implement a backend:
 docs/
 ├── README.md
 ├── specs/
-│   ├── data/        profile, policy, state contracts
+│   ├── data/        profile, strategy, state contracts
 │   ├── api/         backend plugin interface
 │   └── algorithms/  planner, resolver
 ├── architecture/

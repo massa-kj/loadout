@@ -1,6 +1,6 @@
 //! Feature compiler: resolves backends and produces DesiredResourceGraph.
 //!
-//! The compiler takes a FeatureIndex, Policy, and ResolvedFeatureOrder and produces
+//! The compiler takes a FeatureIndex, Strategy, and ResolvedFeatureOrder and produces
 //! a DesiredResourceGraph with all `desired_backend` fields resolved. This is the
 //! only place where backend resolution happens; Planner must not re-resolve backends.
 //!
@@ -15,7 +15,7 @@ use model::desired_resource_graph::{
 use model::feature_index::FsOp as SpecFsOp;
 use model::feature_index::{FeatureIndex, FeatureMode, SpecFsEntryType, SpecResourceKind};
 use model::id::{CanonicalBackendId, ResolvedFeatureOrder};
-use model::policy::{BackendPolicy, Policy};
+use model::strategy::{BackendStrategy, Strategy};
 
 pub use model::desired_resource_graph::{
     DesiredResource as CompiledResource, DesiredResourceGraph as CompiledGraph,
@@ -35,11 +35,11 @@ pub enum CompilerError {
     FeatureNotFound { id: String },
 
     /// No backend could be resolved for a resource.
-    /// Either `policy.<kind>.default_backend` is absent and there is no matching override,
-    /// or the policy section itself is absent.
+    /// Either `strategy.<kind>.default_backend` is absent and there is no matching override,
+    /// or the strategy section itself is absent.
     #[error(
         "no backend for {kind} resource '{resource_id}' in feature '{feature_id}': \
-         add a default_backend or an override in policy"
+         add a default_backend or an override in strategy"
     )]
     NoBackend {
         feature_id: String,
@@ -56,7 +56,7 @@ pub enum CompilerError {
 ///
 /// Processes features in `resolved_order`. Script-mode features are excluded from
 /// the output (they have no resources to compile). For declarative-mode features,
-/// each resource's `desired_backend` is resolved via `policy`.
+/// each resource's `desired_backend` is resolved via `strategy`.
 ///
 /// # Errors
 ///
@@ -65,7 +65,7 @@ pub enum CompilerError {
 /// can be resolved for a package or runtime resource.
 pub fn compile(
     feature_index: &FeatureIndex,
-    policy: &Policy,
+    strategy: &Strategy,
     resolved_order: &ResolvedFeatureOrder,
 ) -> Result<DesiredResourceGraph, CompilerError> {
     let mut features: HashMap<String, FeatureDesiredResources> = HashMap::new();
@@ -107,7 +107,7 @@ pub fn compile(
 
         let mut resources: Vec<DesiredResource> = Vec::new();
         for resource in &spec.resources {
-            let kind = compile_resource(resource, policy, id_str)?;
+            let kind = compile_resource(resource, strategy, id_str)?;
             resources.push(DesiredResource {
                 id: resource.id.clone(),
                 kind,
@@ -130,13 +130,13 @@ pub fn compile(
 /// Compile a single SpecResource into a DesiredResourceKind.
 fn compile_resource(
     resource: &model::feature_index::SpecResource,
-    policy: &Policy,
+    strategy: &Strategy,
     feature_id: &str,
 ) -> Result<DesiredResourceKind, CompilerError> {
     match &resource.kind {
         SpecResourceKind::Package { name } => {
             let backend = resolve_backend(
-                policy.package.as_ref(),
+                strategy.package.as_ref(),
                 name,
                 feature_id,
                 &resource.id,
@@ -150,7 +150,7 @@ fn compile_resource(
 
         SpecResourceKind::Runtime { name, version } => {
             let backend = resolve_backend(
-                policy.runtime.as_ref(),
+                strategy.runtime.as_ref(),
                 name,
                 feature_id,
                 &resource.id,
@@ -177,9 +177,9 @@ fn compile_resource(
     }
 }
 
-/// Resolve a backend ID from a policy section by checking overrides first, then default.
+/// Resolve a backend ID from a strategy section by checking overrides first, then default.
 fn resolve_backend(
-    policy_section: Option<&BackendPolicy>,
+    strategy_section: Option<&BackendStrategy>,
     resource_name: &str,
     feature_id: &str,
     resource_id: &str,
@@ -191,7 +191,7 @@ fn resolve_backend(
         kind: kind_name.to_string(),
     };
 
-    let bp = policy_section.ok_or_else(no_backend)?;
+    let bp = strategy_section.ok_or_else(no_backend)?;
 
     // Per-resource override takes priority over default.
     if let Some(entry) = bp.overrides.get(resource_name) {
@@ -232,7 +232,7 @@ mod tests {
         SpecResourceKind, FEATURE_INDEX_SCHEMA_VERSION,
     };
     use model::id::CanonicalFeatureId;
-    use model::policy::{BackendOverride, BackendPolicy, Policy};
+    use model::strategy::{BackendOverride, BackendStrategy, Strategy};
     use std::collections::HashMap;
 
     // --- Builder helpers ----------------------------------------------------
@@ -309,14 +309,14 @@ mod tests {
         }
     }
 
-    fn backend_policy_default(default: &str) -> BackendPolicy {
-        BackendPolicy {
+    fn backend_strategy_default(default: &str) -> BackendStrategy {
+        BackendStrategy {
             default_backend: Some(default.to_string()),
             overrides: HashMap::new(),
         }
     }
 
-    fn backend_policy_with_override(default: &str, name: &str, backend: &str) -> BackendPolicy {
+    fn backend_strategy_with_override(default: &str, name: &str, backend: &str) -> BackendStrategy {
         let mut overrides = HashMap::new();
         overrides.insert(
             name.to_string(),
@@ -324,7 +324,7 @@ mod tests {
                 backend: backend.to_string(),
             },
         );
-        BackendPolicy {
+        BackendStrategy {
             default_backend: Some(default.to_string()),
             overrides,
         }
@@ -336,10 +336,10 @@ mod tests {
     #[test]
     fn script_feature_is_included_with_empty_resources() {
         let index = make_index(vec![("core/bash", script_meta())]);
-        let policy = Policy::default();
+        let strategy = Strategy::default();
         let order = vec![make_feature_id("core/bash")];
 
-        let graph = compile(&index, &policy, &order).unwrap();
+        let graph = compile(&index, &strategy, &order).unwrap();
         assert_eq!(graph.features.len(), 1);
         assert!(graph.features["core/bash"].resources.is_empty());
     }
@@ -351,13 +351,13 @@ mod tests {
             "core/git",
             declarative_meta(vec![package_resource("package:git", "git")]),
         )]);
-        let policy = Policy {
-            package: Some(backend_policy_default("core/brew")),
+        let strategy = Strategy {
+            package: Some(backend_strategy_default("core/brew")),
             ..Default::default()
         };
         let order = vec![make_feature_id("core/git")];
 
-        let graph = compile(&index, &policy, &order).unwrap();
+        let graph = compile(&index, &strategy, &order).unwrap();
         let resources = &graph.features["core/git"].resources;
         assert_eq!(resources.len(), 1);
         match &resources[0].kind {
@@ -379,8 +379,8 @@ mod tests {
             "core/ripgrep",
             declarative_meta(vec![package_resource("package:ripgrep", "ripgrep")]),
         )]);
-        let policy = Policy {
-            package: Some(backend_policy_with_override(
+        let strategy = Strategy {
+            package: Some(backend_strategy_with_override(
                 "core/brew",
                 "ripgrep",
                 "core/cargo",
@@ -389,7 +389,7 @@ mod tests {
         };
         let order = vec![make_feature_id("core/ripgrep")];
 
-        let graph = compile(&index, &policy, &order).unwrap();
+        let graph = compile(&index, &strategy, &order).unwrap();
         match &graph.features["core/ripgrep"].resources[0].kind {
             DesiredResourceKind::Package {
                 desired_backend, ..
@@ -407,13 +407,13 @@ mod tests {
             "core/node",
             declarative_meta(vec![runtime_resource("runtime:node", "node", "20")]),
         )]);
-        let policy = Policy {
-            runtime: Some(backend_policy_default("core/mise")),
+        let strategy = Strategy {
+            runtime: Some(backend_strategy_default("core/mise")),
             ..Default::default()
         };
         let order = vec![make_feature_id("core/node")];
 
-        let graph = compile(&index, &policy, &order).unwrap();
+        let graph = compile(&index, &strategy, &order).unwrap();
         match &graph.features["core/node"].resources[0].kind {
             DesiredResourceKind::Runtime {
                 name,
@@ -435,8 +435,8 @@ mod tests {
             "core/python",
             declarative_meta(vec![runtime_resource("runtime:python", "python", "3.12")]),
         )]);
-        let policy = Policy {
-            runtime: Some(backend_policy_with_override(
+        let strategy = Strategy {
+            runtime: Some(backend_strategy_with_override(
                 "core/mise",
                 "python",
                 "core/uv",
@@ -445,7 +445,7 @@ mod tests {
         };
         let order = vec![make_feature_id("core/python")];
 
-        let graph = compile(&index, &policy, &order).unwrap();
+        let graph = compile(&index, &strategy, &order).unwrap();
         match &graph.features["core/python"].resources[0].kind {
             DesiredResourceKind::Runtime {
                 desired_backend, ..
@@ -468,10 +468,10 @@ mod tests {
                 SpecFsOp::Link,
             )]),
         )]);
-        let policy = Policy::default();
+        let strategy = Strategy::default();
         let order = vec![make_feature_id("core/git")];
 
-        let graph = compile(&index, &policy, &order).unwrap();
+        let graph = compile(&index, &strategy, &order).unwrap();
         match &graph.features["core/git"].resources[0].kind {
             DesiredResourceKind::Fs {
                 path,
@@ -500,10 +500,10 @@ mod tests {
                 SpecFsOp::Copy,
             )]),
         )]);
-        let policy = Policy::default();
+        let strategy = Strategy::default();
         let order = vec![make_feature_id("core/nvim")];
 
-        let graph = compile(&index, &policy, &order).unwrap();
+        let graph = compile(&index, &strategy, &order).unwrap();
         match &graph.features["core/nvim"].resources[0].kind {
             DesiredResourceKind::Fs { entry_type, op, .. } => {
                 assert_eq!(*entry_type, FsEntryType::Dir);
@@ -520,8 +520,8 @@ mod tests {
             "core/git",
             declarative_meta(vec![package_resource("package:git", "git")]),
         )]);
-        let policy = Policy {
-            package: Some(BackendPolicy {
+        let strategy = Strategy {
+            package: Some(BackendStrategy {
                 default_backend: None,
                 overrides: HashMap::new(),
             }),
@@ -529,25 +529,25 @@ mod tests {
         };
         let order = vec![make_feature_id("core/git")];
 
-        let err = compile(&index, &policy, &order).unwrap_err();
+        let err = compile(&index, &strategy, &order).unwrap_err();
         assert!(matches!(err, CompilerError::NoBackend { .. }));
     }
 
-    /// Absent policy section for the resource kind → NoBackend error.
+    /// Absent strategy section for the resource kind → NoBackend error.
     #[test]
-    fn absent_policy_section_returns_no_backend() {
+    fn absent_strategy_section_returns_no_backend() {
         let index = make_index(vec![(
             "core/node",
             declarative_meta(vec![runtime_resource("runtime:node", "node", "20")]),
         )]);
-        // policy.runtime is None
-        let policy = Policy {
-            package: Some(backend_policy_default("core/brew")),
+        // strategy.runtime is None
+        let strategy = Strategy {
+            package: Some(backend_strategy_default("core/brew")),
             ..Default::default()
         };
         let order = vec![make_feature_id("core/node")];
 
-        let err = compile(&index, &policy, &order).unwrap_err();
+        let err = compile(&index, &strategy, &order).unwrap_err();
         assert!(matches!(err, CompilerError::NoBackend { .. }));
     }
 
@@ -555,10 +555,10 @@ mod tests {
     #[test]
     fn feature_not_in_index_returns_error() {
         let index = make_index(vec![]);
-        let policy = Policy::default();
+        let strategy = Strategy::default();
         let order = vec![make_feature_id("core/missing")];
 
-        let err = compile(&index, &policy, &order).unwrap_err();
+        let err = compile(&index, &strategy, &order).unwrap_err();
         assert!(matches!(err, CompilerError::FeatureNotFound { id } if id == "core/missing"));
     }
 
@@ -576,9 +576,9 @@ mod tests {
             ),
             ("core/bash", script_meta()),
         ]);
-        let policy = Policy {
-            package: Some(backend_policy_default("core/brew")),
-            runtime: Some(backend_policy_default("core/mise")),
+        let strategy = Strategy {
+            package: Some(backend_strategy_default("core/brew")),
+            runtime: Some(backend_strategy_default("core/mise")),
             ..Default::default()
         };
         let order = vec![
@@ -587,7 +587,7 @@ mod tests {
             make_feature_id("core/node"),
         ];
 
-        let graph = compile(&index, &policy, &order).unwrap();
+        let graph = compile(&index, &strategy, &order).unwrap();
         // bash is now included with empty resources; git and node have resources
         assert_eq!(graph.features.len(), 3);
         assert!(graph.features.contains_key("core/git"));
@@ -599,10 +599,10 @@ mod tests {
     #[test]
     fn output_schema_version_is_canonical() {
         let index = make_index(vec![("core/bash", script_meta())]);
-        let policy = Policy::default();
+        let strategy = Strategy::default();
         let order = vec![make_feature_id("core/bash")];
 
-        let graph = compile(&index, &policy, &order).unwrap();
+        let graph = compile(&index, &strategy, &order).unwrap();
         assert_eq!(graph.schema_version, DESIRED_RESOURCE_GRAPH_SCHEMA_VERSION);
     }
 }

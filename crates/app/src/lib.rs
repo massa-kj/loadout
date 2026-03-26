@@ -6,7 +6,7 @@
 //! ```text
 //! load_sources → SourcesSpec
 //! load_profile → Profile
-//! load_policy  → Policy
+//! load_strategy  → Strategy
 //! build_feature_index → FeatureIndex
 //! filter_desired_features → Vec<CanonicalFeatureId>
 //! resolver::resolve → ResolvedFeatureOrder
@@ -41,7 +41,7 @@ pub enum AppError {
     #[error("config not found: {}", path.display())]
     ConfigNotFound { path: PathBuf },
 
-    /// A configuration file (profile, policy, sources) could not be loaded.
+    /// A configuration file (profile, strategy, sources) could not be loaded.
     #[error("config error: {0}")]
     Config(#[from] config::ConfigError),
 
@@ -79,7 +79,7 @@ pub enum AppError {
 /// Contains the repository root, platform, and resolved base directories.
 /// Use-case-specific paths (e.g. the config file) are passed as arguments.
 pub struct AppContext {
-    /// Repository root — where `features/`, `backends/`, `policies/` live.
+    /// Repository root — where `features/`, `backends/`, `strategies/` live.
     pub repo_root: PathBuf,
 
     /// Platform variant: Linux, Windows, or WSL.
@@ -124,7 +124,7 @@ impl AppContext {
 /// Compute the plan for the given config without executing any actions.
 ///
 /// `config_path` must point to a unified `config.yaml` containing both the
-/// `profile` and (optionally) the `policy` section.
+/// `profile` and (optionally) the `strategy` section.
 ///
 /// Returns the [`Plan`] that describes what `apply()` would do.
 /// All stages are read-only; no state is modified.
@@ -146,7 +146,7 @@ pub fn plan(ctx: &AppContext, config_path: &Path) -> Result<Plan, AppError> {
 /// Execute the plan: install, update, and remove features as needed.
 ///
 /// `config_path` must point to a unified `config.yaml` containing both the
-/// `profile` and (optionally) the `policy` section.
+/// `profile` and (optionally) the `strategy` section.
 ///
 /// Feature-level failures do not abort the run; they are reported via `on_event`
 /// and collected in [`ExecutorReport::failed`].
@@ -179,6 +179,7 @@ pub fn apply(
         index: &index,
         registry: &registry,
         dirs: &ctx.dirs,
+        platform: &ctx.platform,
         state_path: &ctx.state_path(),
     };
 
@@ -195,7 +196,7 @@ struct PipelineOutput {
     #[allow(dead_code)]
     profile: config::Profile,
     #[allow(dead_code)]
-    policy: config::Policy,
+    strategy: config::Strategy,
     index: model::FeatureIndex,
     order: model::ResolvedFeatureOrder,
     graph: model::desired_resource_graph::DesiredResourceGraph,
@@ -206,12 +207,12 @@ struct PipelineOutput {
 ///
 /// Steps:
 ///   1. Validate config file exists.
-///   2. Load config → `Profile` + `Policy` via `config::load_config`.
+///   2. Load config → `Profile` + `Strategy` via `config::load_config`.
 ///   3. Load sources (optional) → `SourcesSpec`.
 ///   4. Build `FeatureIndex` from source roots.
 ///   5. Map profile features to `CanonicalFeatureId`s (skip unknown).
 ///   6. Resolve dependency order.
-///   7. Compile: `FeatureIndex + Policy + order` → `DesiredResourceGraph`.
+///   7. Compile: `FeatureIndex + Strategy + order` → `DesiredResourceGraph`.
 ///   8. Load (or initialise) state.
 fn run_pipeline(ctx: &AppContext, config_path: &Path) -> Result<PipelineOutput, AppError> {
     // Step 1: config file must exist.
@@ -221,9 +222,9 @@ fn run_pipeline(ctx: &AppContext, config_path: &Path) -> Result<PipelineOutput, 
         });
     }
 
-    // Step 2: load config — profile is required, policy is optional (defaults to
-    // Policy::default() if the 'policy' section is absent from the file).
-    let (profile, policy) = config::load_config(config_path)?;
+    // Step 2: load config — profile is required, strategy is optional (defaults to
+    // Strategy::default() if the 'strategy' section is absent from the file).
+    let (profile, strategy) = config::load_config(config_path)?;
 
     // Step 3: load sources if present; default to empty (core + user only).
     let sources = load_sources_optional(ctx)?;
@@ -241,14 +242,14 @@ fn run_pipeline(ctx: &AppContext, config_path: &Path) -> Result<PipelineOutput, 
     let order = resolver::resolve(&index, &desired_ids)?;
 
     // Step 7: compile desired resource graph.
-    let graph = compiler::compile(&index, &policy, &order)?;
+    let graph = compiler::compile(&index, &strategy, &order)?;
 
     // Step 8: load state (state::load returns empty state if file absent).
     let state = state::load(&ctx.state_path())?;
 
     Ok(PipelineOutput {
         profile,
-        policy,
+        strategy,
         index,
         order,
         graph,
@@ -437,7 +438,7 @@ mod tests {
         let root = tmp.path().to_path_buf();
         AppContext {
             repo_root: root.clone(),
-            platform: platform::Platform::Linux,
+            platform: platform::detect_platform(),
             dirs: platform::Dirs {
                 config_home: root.join("config"),
                 data_home: root.join("data"),
@@ -448,22 +449,37 @@ mod tests {
     }
 
     /// Write a minimal script-mode feature to `{repo_root}/features/{name}/`.
+    /// Creates platform-appropriate scripts: .sh on Linux/WSL, .ps1 on Windows.
     fn write_script_feature(root: &Path, name: &str) {
         let feat_dir = root.join("features").join(name);
         write(
             &feat_dir.join("feature.yaml"),
             "spec_version: 1\nmode: script\n",
         );
-        let install_sh = feat_dir.join("install.sh");
-        write(&install_sh, "#!/usr/bin/env sh\nexit 0\n");
-        make_executable(&install_sh);
-        let uninstall_sh = feat_dir.join("uninstall.sh");
-        write(&uninstall_sh, "#!/usr/bin/env sh\nexit 0\n");
-        make_executable(&uninstall_sh);
+        
+        let platform = platform::detect_platform();
+        match platform {
+            platform::Platform::Windows => {
+                // PowerShell scripts
+                let install_ps1 = feat_dir.join("install.ps1");
+                write(&install_ps1, "exit 0\n");
+                let uninstall_ps1 = feat_dir.join("uninstall.ps1");
+                write(&uninstall_ps1, "exit 0\n");
+            }
+            platform::Platform::Linux | platform::Platform::Wsl => {
+                // Shell scripts
+                let install_sh = feat_dir.join("install.sh");
+                write(&install_sh, "#!/usr/bin/env sh\nexit 0\n");
+                make_executable(&install_sh);
+                let uninstall_sh = feat_dir.join("uninstall.sh");
+                write(&uninstall_sh, "#!/usr/bin/env sh\nexit 0\n");
+                make_executable(&uninstall_sh);
+            }
+        }
     }
 
     /// Write a minimal config.yaml referencing the given feature names.
-    /// The profile section is required; no policy section is written (uses Policy::default()).
+    /// The profile section is required; no strategy section is written (uses Strategy::default()).
     fn write_config(dir: &Path, filename: &str, features: &[&str]) -> PathBuf {
         let features_str: String = features
             .iter()
@@ -654,15 +670,15 @@ mod tests {
         );
     }
 
-    /// Config without a policy section → Policy::default() is used (no error).
+    /// Config without a strategy section → Strategy::default() is used (no error).
     #[test]
-    fn plan_without_policy_section_uses_default_policy() {
+    fn plan_without_strategy_section_uses_default_strategy() {
         let tmp = tempfile::tempdir().unwrap();
         let ctx = make_ctx(&tmp);
         write_script_feature(tmp.path(), "git");
         let config_path = write_config(tmp.path(), "config.yaml", &["core/git"]);
 
-        // write_config omits the policy section → Policy::default() is used.
+        // write_config omits the strategy section → Strategy::default() is used.
         let p = plan(&ctx, &config_path).unwrap();
         assert_eq!(p.actions.len(), 1);
     }

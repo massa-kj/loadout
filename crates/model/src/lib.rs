@@ -8,16 +8,16 @@ pub mod error;
 pub mod feature_index;
 pub mod id;
 pub mod plan;
-pub mod policy;
 pub mod profile;
 pub mod sources;
 pub mod state;
+pub mod strategy;
 
 pub use desired_resource_graph::DesiredResourceGraph;
 pub use feature_index::FeatureIndex;
 pub use id::{CanonicalBackendId, CanonicalFeatureId, ResolvedFeatureOrder, SourceId};
 pub use plan::Plan;
-pub use policy::Policy;
 pub use profile::Profile;
 pub use sources::SourcesSpec;
 pub use state::State;
+pub use strategy::Strategy;

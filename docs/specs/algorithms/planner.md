@@ -51,7 +51,7 @@ Planner operates only on:
 Feature identifiers in `desired_resource_graph`, `state`, and planner output are canonical IDs of the form
 `<source_id>/<name>`. Planner does not normalize bare names; normalization happens before planner input construction.
 
-Planner must NOT receive `profile` or `policy` directly.
+Planner must NOT receive `profile` or `strategy` directly.
 Backend resolution (`desired_backend` per resource) must be completed by FeatureCompiler before planning.
 
 Planner must NOT depend on current time, environment randomness, or live backend results.
@@ -67,7 +67,7 @@ Diff → Classification → Decision
 
 **Diff** — structural comparison of `desired_resource_graph` vs `state`.
 Determines: features added, removed, changed (resource set mismatch, backend mismatch).
-Planner never reads policy; `desired_backend` is already embedded in `desired_resource_graph`.
+Planner never reads strategy; `desired_backend` is already embedded in `desired_resource_graph`.
 
 **Classification** — converts diff into normalized cases.
 Each feature is classified into exactly one of:

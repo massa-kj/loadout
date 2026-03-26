@@ -1,38 +1,38 @@
-//! Policy data type.
+//! Strategy data type.
 //!
-//! A policy declares implementation strategy: which backend to use per resource kind,
+//! A strategy declares implementation strategy: which backend to use per resource kind,
 //! filesystem backup settings, etc.
 //!
-//! See: `docs/specs/data/policy.md`
+//! See: `docs/specs/data/strategy.md`
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// User-declared implementation strategy.
 ///
-/// `policy` (the policy ID string) is optional metadata and not used by core logic.
+/// `strategy` (the strategy ID string) is optional metadata and not used by core logic.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct Policy {
-    /// Optional policy identifier label.
+pub struct Strategy {
+    /// Optional strategy identifier label.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub policy: Option<String>,
+    pub strategy: Option<String>,
 
     /// Backend selection for `package` resources.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub package: Option<BackendPolicy>,
+    pub package: Option<BackendStrategy>,
 
     /// Backend selection for `runtime` resources.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub runtime: Option<BackendPolicy>,
+    pub runtime: Option<BackendStrategy>,
 
     /// Filesystem operation settings.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub fs: Option<FsPolicy>,
+    pub fs: Option<FsStrategy>,
 }
 
-/// Backend resolution policy for a resource kind (package or runtime).
+/// Backend resolution strategy for a resource kind (package or runtime).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct BackendPolicy {
+pub struct BackendStrategy {
     /// Default backend to use when no per-resource override matches.
     /// Must be present unless every resource has an explicit override.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -50,9 +50,9 @@ pub struct BackendOverride {
     pub backend: String,
 }
 
-/// Filesystem operation policy.
+/// Filesystem operation strategy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct FsPolicy {
+pub struct FsStrategy {
     /// Whether to back up existing files before overwriting.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backup: Option<bool>,
@@ -69,7 +69,7 @@ mod tests {
     #[test]
     fn round_trip_full() {
         let json = r#"{
-            "policy": "linux-default",
+            "strategy": "linux-default",
             "package": {
                 "default_backend": "brew",
                 "overrides": {
@@ -84,7 +84,7 @@ mod tests {
                 "backup_dir": "~/.backup/loadout"
             }
         }"#;
-        let p: Policy = serde_json::from_str(json).unwrap();
+        let p: Strategy = serde_json::from_str(json).unwrap();
         let pkg = p.package.unwrap();
         assert_eq!(pkg.default_backend.as_deref(), Some("brew"));
         assert_eq!(pkg.overrides["ripgrep"].backend, "cargo");
@@ -94,7 +94,7 @@ mod tests {
     #[test]
     fn round_trip_empty() {
         let json = r#"{}"#;
-        let p: Policy = serde_json::from_str(json).unwrap();
+        let p: Strategy = serde_json::from_str(json).unwrap();
         assert!(p.package.is_none());
     }
 }

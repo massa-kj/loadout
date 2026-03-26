@@ -10,7 +10,7 @@ what invariants must hold. They do not explain rationale or implementation detai
 **Data specs** — Schemas, semantics, and invariants for persistent data formats.
 
 * `data/profile.md` — Profile schema and feature declaration semantics
-* `data/policy.md` — Policy schema and backend resolution rules
+* `data/strategy.md` — Strategy schema and backend resolution rules
 * `data/state.md` — State schema, invariants, and commit rules
 * `data/sources.md` — Source registry schema and allow-list rules
 * `data/feature_index.md` — Feature Index schema (dep fields + spec; input to Resolver and FeatureCompiler)
@@ -38,7 +38,7 @@ but existing required operations must remain backward-compatible.
 
 1. `data/state.md` — understand the authority model first
 2. `data/profile.md` — understand input declaration
-3. `data/policy.md` — understand backend selection
+3. `data/strategy.md` — understand backend selection
 4. `data/sources.md` — understand source admission and lookup
 5. `algorithms/planner.md` — understand how decisions are made
 6. `api/backend.md` — understand the execution adapter contract

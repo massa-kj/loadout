@@ -1,13 +1,13 @@
 //! Configuration loading, validation, and normalization.
 //!
 //! This crate bridges raw YAML files on disk and domain model types in the `model` crate.
-//! It handles three kinds of config files: profiles, policies, and sources.
+//! It handles three kinds of config files: profiles, strategies, and sources.
 //!
 //! **Phase 3 contract**: path resolution (XDG, AppData) is NOT handled here.
 //! Callers supply explicit `&Path` values. Platform-aware path discovery belongs to
 //! the `platform` crate (Phase 4).
 //!
-//! See: `docs/specs/data/profile.md`, `docs/specs/data/policy.md`,
+//! See: `docs/specs/data/profile.md`, `docs/specs/data/strategy.md`,
 //!      `docs/specs/data/sources.md`
 
 use std::collections::HashSet;
@@ -16,7 +16,7 @@ use std::path::Path;
 use serde::Deserialize;
 
 pub use model::{
-    policy::{BackendOverride, BackendPolicy, FsPolicy, Policy},
+    strategy::{BackendOverride, BackendStrategy, FsStrategy, Strategy},
     profile::{Profile, ProfileFeatureConfig},
     sources::{AllowList, AllowSpec, SourceEntry, SourceType, SourcesSpec, WildcardAll},
 };
@@ -31,8 +31,8 @@ pub enum ConfigError {
     #[error("invalid profile: {reason}")]
     InvalidProfile { reason: String },
 
-    #[error("invalid policy: {reason}")]
-    InvalidPolicy { reason: String },
+    #[error("invalid strategy: {reason}")]
+    InvalidStrategy { reason: String },
 
     #[error("invalid sources: {reason}")]
     InvalidSources { reason: String },
@@ -94,44 +94,44 @@ fn validate_and_normalize_profile(raw: Profile) -> Result<Profile, ConfigError> 
     Ok(normalized)
 }
 
-// ─── Policy ─────────────────────────────────────────────────────────────────
+// ─── Strategy ───────────────────────────────────────────────────────────────
 
-/// Load and validate a policy from a YAML file.
-pub fn load_policy(path: &Path) -> Result<Policy, ConfigError> {
-    let raw: Policy = io::load_yaml(path)?;
-    validate_policy(raw)
+/// Load and validate a strategy from a YAML file.
+pub fn load_strategy(path: &Path) -> Result<Strategy, ConfigError> {
+    let raw: Strategy = io::load_yaml(path)?;
+    validate_strategy(raw)
 }
 
-fn validate_policy(policy: Policy) -> Result<Policy, ConfigError> {
-    if let Some(ref pkg) = policy.package {
-        validate_backend_policy_field("package.default_backend", pkg.default_backend.as_deref())?;
+fn validate_strategy(strategy: Strategy) -> Result<Strategy, ConfigError> {
+    if let Some(ref pkg) = strategy.package {
+        validate_backend_strategy_field("package.default_backend", pkg.default_backend.as_deref())?;
         for (name, ov) in &pkg.overrides {
             if ov.backend.is_empty() {
-                return Err(ConfigError::InvalidPolicy {
+                return Err(ConfigError::InvalidStrategy {
                     reason: format!("package.overrides[{name}].backend must not be empty"),
                 });
             }
         }
     }
 
-    if let Some(ref rt) = policy.runtime {
-        validate_backend_policy_field("runtime.default_backend", rt.default_backend.as_deref())?;
+    if let Some(ref rt) = strategy.runtime {
+        validate_backend_strategy_field("runtime.default_backend", rt.default_backend.as_deref())?;
         for (name, ov) in &rt.overrides {
             if ov.backend.is_empty() {
-                return Err(ConfigError::InvalidPolicy {
+                return Err(ConfigError::InvalidStrategy {
                     reason: format!("runtime.overrides[{name}].backend must not be empty"),
                 });
             }
         }
     }
 
-    Ok(policy)
+    Ok(strategy)
 }
 
-fn validate_backend_policy_field(field: &str, value: Option<&str>) -> Result<(), ConfigError> {
+fn validate_backend_strategy_field(field: &str, value: Option<&str>) -> Result<(), ConfigError> {
     if let Some(v) = value {
         if v.is_empty() {
-            return Err(ConfigError::InvalidPolicy {
+            return Err(ConfigError::InvalidStrategy {
                 reason: format!("{field} must not be empty string if present"),
             });
         }
@@ -141,13 +141,13 @@ fn validate_backend_policy_field(field: &str, value: Option<&str>) -> Result<(),
 
 // ─── Unified config ──────────────────────────────────────────────────────────
 
-/// Load a unified `config.yaml` and return the resolved `Profile` and `Policy`.
+/// Load a unified `config.yaml` and return the resolved `Profile` and `Strategy`.
 ///
 /// serde ignores unknown top-level keys by default (no `deny_unknown_fields`),
 /// so future sections added to the format will not break existing versions.
 ///
 /// - `profile` section: required. Normalized the same way as `load_profile`.
-/// - `policy` section: optional. Absent → `Policy::default()` (no overrides).
+/// - `strategy` section: optional. Absent → `Strategy::default()` (no overrides).
 ///
 /// # Format
 ///
@@ -157,20 +157,20 @@ fn validate_backend_policy_field(field: &str, value: Option<&str>) -> Result<(),
 ///     fzf: {}
 ///     user/myapp: {}
 ///
-/// policy:                    # optional
+/// strategy:                  # optional
 ///   package:
 ///     default_backend: brew
 ///
 /// future_section: ...        # silently ignored
 /// ```
-pub fn load_config(path: &Path) -> Result<(Profile, Policy), ConfigError> {
+pub fn load_config(path: &Path) -> Result<(Profile, Strategy), ConfigError> {
     /// Intermediate struct for deserializing config.yaml.
     /// Unknown top-level keys are silently ignored (serde default behaviour,
     /// no `deny_unknown_fields` attribute).
     #[derive(Deserialize)]
     struct RawConfig {
         profile: Option<Profile>,
-        policy: Option<Policy>,
+        strategy: Option<Strategy>,
     }
 
     let raw: RawConfig = io::load_yaml(path)?;
@@ -181,13 +181,13 @@ pub fn load_config(path: &Path) -> Result<(Profile, Policy), ConfigError> {
     })?;
     let profile = validate_and_normalize_profile(raw_profile)?;
 
-    // policy is optional; absent → Policy::default().
-    let policy = match raw.policy {
-        Some(p) => validate_policy(p)?,
-        None => Policy::default(),
+    // strategy is optional; absent → Strategy::default().
+    let strategy = match raw.strategy {
+        Some(p) => validate_strategy(p)?,
+        None => Strategy::default(),
     };
 
-    Ok((profile, policy))
+    Ok((profile, strategy))
 }
 
 // ─── Sources ─────────────────────────────────────────────────────────────────
@@ -341,52 +341,52 @@ mod tests {
         assert_eq!(cfg.version.as_deref(), Some("20"));
     }
 
-    // ── Policy tests ───────────────────────────────────────────────────────
+    // ── Strategy tests ─────────────────────────────────────────────────────
 
     #[test]
-    fn policy_load_minimal() {
+    fn strategy_load_minimal() {
         let dir = tempfile::tempdir().unwrap();
         let p = write_yaml_file(
             dir.path(),
-            "policy.yaml",
+            "strategy.yaml",
             "package:\n  default_backend: brew\n",
         );
-        let policy = load_policy(&p).unwrap();
+        let strategy = load_strategy(&p).unwrap();
         assert_eq!(
-            policy.package.unwrap().default_backend.as_deref(),
+            strategy.package.unwrap().default_backend.as_deref(),
             Some("brew")
         );
     }
 
     #[test]
-    fn policy_empty_default_backend_rejected() {
+    fn strategy_empty_default_backend_rejected() {
         let dir = tempfile::tempdir().unwrap();
         let p = write_yaml_file(
             dir.path(),
-            "policy.yaml",
+            "strategy.yaml",
             "package:\n  default_backend: \"\"\n",
         );
-        let err = load_policy(&p).unwrap_err();
-        assert!(matches!(err, ConfigError::InvalidPolicy { .. }));
+        let err = load_strategy(&p).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidStrategy { .. }));
     }
 
     #[test]
-    fn policy_empty_override_backend_rejected() {
+    fn strategy_empty_override_backend_rejected() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "package:\n  overrides:\n    ripgrep:\n      backend: \"\"\n";
-        let p = write_yaml_file(dir.path(), "policy.yaml", yaml);
-        let err = load_policy(&p).unwrap_err();
-        assert!(matches!(err, ConfigError::InvalidPolicy { .. }));
+        let p = write_yaml_file(dir.path(), "strategy.yaml", yaml);
+        let err = load_strategy(&p).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidStrategy { .. }));
     }
 
     #[test]
-    fn policy_no_defaults_ok() {
-        // Policy with no package/runtime fields at all is valid.
+    fn strategy_no_defaults_ok() {
+        // Strategy with no package/runtime fields at all is valid.
         let dir = tempfile::tempdir().unwrap();
-        let p = write_yaml_file(dir.path(), "policy.yaml", "{}\n");
-        let policy = load_policy(&p).unwrap();
-        assert!(policy.package.is_none());
-        assert!(policy.runtime.is_none());
+        let p = write_yaml_file(dir.path(), "strategy.yaml", "{}\n");
+        let strategy = load_strategy(&p).unwrap();
+        assert!(strategy.package.is_none());
+        assert!(strategy.runtime.is_none());
     }
 
     // ── Sources tests ──────────────────────────────────────────────────────
@@ -455,7 +455,7 @@ mod tests {
     // ── load_config tests ──────────────────────────────────────────────────
 
     #[test]
-    fn config_profile_and_policy_parsed() {
+    fn config_profile_and_strategy_parsed() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "\
 profile:
@@ -463,29 +463,29 @@ profile:
     fzf: {}
     user/myapp: {}
 
-policy:
+strategy:
   package:
     default_backend: brew
 ";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
-        let (profile, policy) = load_config(&p).unwrap();
+        let (profile, strategy) = load_config(&p).unwrap();
         assert!(profile.features.contains_key("core/fzf"), "bare 'fzf' must become 'core/fzf'");
         assert!(profile.features.contains_key("user/myapp"));
         assert_eq!(
-            policy.package.unwrap().default_backend.as_deref(),
+            strategy.package.unwrap().default_backend.as_deref(),
             Some("brew")
         );
     }
 
     #[test]
-    fn config_policy_optional_defaults_to_empty() {
+    fn config_strategy_optional_defaults_to_empty() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "profile:\n  features:\n    git: {}\n";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
-        let (profile, policy) = load_config(&p).unwrap();
+        let (profile, strategy) = load_config(&p).unwrap();
         assert!(profile.features.contains_key("core/git"));
-        assert!(policy.package.is_none());
-        assert!(policy.runtime.is_none());
+        assert!(strategy.package.is_none());
+        assert!(strategy.runtime.is_none());
     }
 
     #[test]
@@ -516,26 +516,26 @@ another_unknown: 42
     #[test]
     fn config_missing_profile_section_errors() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = "policy:\n  package:\n    default_backend: brew\n";
+        let yaml = "strategy:\n  package:\n    default_backend: brew\n";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let err = load_config(&p).unwrap_err();
         assert!(matches!(err, ConfigError::InvalidProfile { .. }));
     }
 
     #[test]
-    fn config_invalid_policy_propagates_error() {
+    fn config_invalid_strategy_propagates_error() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "\
 profile:
   features:
     git: {}
-policy:
+strategy:
   package:
     default_backend: \"\"
 ";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let err = load_config(&p).unwrap_err();
-        assert!(matches!(err, ConfigError::InvalidPolicy { .. }));
+        assert!(matches!(err, ConfigError::InvalidStrategy { .. }));
     }
 
     #[test]

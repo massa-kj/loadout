@@ -46,7 +46,7 @@ Provide infrastructure primitives.
 Includes: resolver, planner, executor, state, backend_registry, source_registry, env, fs, logger, runner.
 
 Must NOT: contain feature-specific logic, contain backend-specific logic,
-let plugins read policy or write state directly.
+let plugins read strategy or write state directly.
 
 ### features
 
@@ -62,7 +62,7 @@ Execute package and runtime operations as adapters.
 
 Responsibilities: install/uninstall packages and runtimes, report installed versions.
 
-Must NOT: read policy, write state, contain orchestration logic.
+Must NOT: read strategy, write state, contain orchestration logic.
 
 ### state
 
@@ -81,10 +81,10 @@ The system executes a deterministic pipeline from user declarations to state com
 Orchestrator (app)
     ↓
 Load Configuration
-  ├─ Config          (config.yaml — profile section + policy section)
+  ├─ Config          (config.yaml — profile section + strategy section)
   ├─   Profile        (desired features, versions — decoded from config.profile)
-  ├─   Policy         (backend selection, backup strategy — decoded from config.policy
-  │                    or Policy::default() when section is absent)
+  ├─   Strategy       (backend selection, backup strategy — decoded from config.strategy
+  │                    or Strategy::default() when section is absent)
   ├─ Sources         (sources.yaml — plugin locations, admission control)
   └─ State           (state.json — installed resources, backends, versions)
     ↓
@@ -102,7 +102,7 @@ Resolver
     ↓ ResolvedFeatureOrder (ordered list of feature IDs)
 FeatureCompiler
   ├─ resource expansion (from feature specs)
-  └─ backend resolution (using Policy + platform defaults)
+  └─ backend resolution (using Strategy + platform defaults)
     ↓ DesiredResourceGraph (resources with desired_backend embedded)
 Planner
   (diff with State, classify, decide: create/destroy/replace/noop/blocked)
@@ -129,17 +129,17 @@ State Commit
 - **State is both input and output**: Input = current reality, Output = recorded effects.
 - **Source registry**: Influences lookup and admission only; must not introduce hidden fallback or side effects.
 - **Resolver**: Reads only `dep` fields from Feature Index; must not read `resources` fields.
-- **FeatureCompiler**: Applies policy to resolve `desired_backend` for each resource; the result is embedded in DesiredResourceGraph.
+- **FeatureCompiler**: Applies strategy to resolve `desired_backend` for each resource; the result is embedded in DesiredResourceGraph.
 
 ### Phase Characteristics
 
 | Phase | Purity | Inputs | Outputs |
 |---|---|---|---|
-| Load | Impure (I/O) | Filesystem | Profile, Policy, Sources, State |
+| Load | Impure (I/O) | Filesystem | Profile, Strategy, Sources, State |
 | SourceRegistry | Pure (lookup) | Sources | Source paths, allow-lists |
 | FeatureIndexBuilder | Impure (I/O) | Source paths, feature.yaml | FeatureIndex |
 | Resolver | Pure | Profile.features, FeatureIndex.dep | ResolvedFeatureOrder |
-| FeatureCompiler | Pure | ResolvedFeatureOrder, FeatureIndex, Policy | DesiredResourceGraph |
+| FeatureCompiler | Pure | ResolvedFeatureOrder, FeatureIndex, Strategy | DesiredResourceGraph |
 | Planner | Pure | DesiredResourceGraph, State, ResolvedFeatureOrder | Plan |
 | Executor | Impure (side effects) | Plan, DesiredResourceGraph, FeatureIndex, BackendRegistry | Effects |
 | State Commit | Impure (I/O) | Execution results | state.json |
@@ -147,7 +147,7 @@ State Commit
 ### Data Structure Roles
 
 - **Profile**: User's desired environment (feature list, versions, enable/disable) — the `profile:` section of a config file
-- **Policy**: User's implementation strategy (backend selection, backup policy) — the optional `policy:` section of a config file; absent → `Policy::default()`
+- **Strategy**: User's implementation strategy (backend selection, backup strategy) — the optional `strategy:` section of a config file; absent → `Strategy::default()`
 - **Sources**: Plugin locations and security allow-lists
 - **State**: Single authority for installed resources (backend, version, fs paths)
 - **FeatureIndex**: Normalized feature metadata (depends, capabilities, resources)
@@ -170,10 +170,10 @@ loadout/
 │   ├── model/                 # Core data types (State, Profile, Plan, etc.)
 │   ├── planner/               # Planner (pure function: desired+state → plan)
 │   ├── resolver/              # Dependency resolver (pure function)
-│   ├── compiler/              # FeatureCompiler (policy → desired_resource_graph)
+│   ├── compiler/              # FeatureCompiler (strategy → desired_resource_graph)
 │   ├── executor/              # Executor (impure: plan → effects → state commit)
 │   ├── state/                 # State persistence and atomic commit
-│   ├── config/                # Profile/policy loading and normalization
+│   ├── config/                # Profile/strategy loading and normalization
 │   ├── backend-host/          # Backend trait and ScriptBackend
 │   ├── backends-builtin/      # Builtin backends (brew, apt, mise, npm, etc.)
 │   ├── feature-host/          # Feature script execution
@@ -198,7 +198,7 @@ loadout/
 │   │   ├── remove.sh          # Uninstall operation
 │   │   └── status.sh          # Query installation state
 ├── configs/                   # Repository example config files
-│   └── <platform>.yaml        # profile + policy sections
+│   └── <platform>.yaml        # profile + strategy sections
 ├── tools/                     # Development tools
 └── tests/                     # End-to-end tests (Rust unit tests in crates/)
 ```
@@ -226,6 +226,6 @@ loadout/
 ## Layer Violation Examples
 
 * A feature script reading `state.json` directly → state authority violation
-* A backend reading policy to select its own strategy → plugin isolation violation
+* A backend reading strategy to select its own strategy → plugin isolation violation
 * The planner calling a backend to check if a package is installed → purity violation
 * A profile containing `if linux` branching → declaration layer violation

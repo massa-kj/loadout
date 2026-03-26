@@ -14,7 +14,7 @@ The source registry maps canonical IDs to concrete feature/backend directories.
 It makes source resolution explicit and deterministic.
 
 Core must not guess providers from filesystem location.
-Profile and policy inputs determine source selection via canonical IDs.
+Profile and Strategy inputs determine source selection via canonical IDs.
 
 ## Source Kinds
 

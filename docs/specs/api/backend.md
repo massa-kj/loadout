@@ -228,12 +228,12 @@ fi
 ## Isolation Rules
 
 Backend plugins **must NOT**:
-- Read `state.json` or policy files directly
+- Read `state.json` or strategy files directly
 - Communicate with other backend plugins
 - Produce side effects outside their declared resource scope
 - Contain orchestration logic or dependency resolution
 
-State and policy are managed by the executor; backends operate only on individual resources.
+State and strategy are managed by the executor; backends operate only on individual resources.
 
 ---
 

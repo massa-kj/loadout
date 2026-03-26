@@ -7,7 +7,7 @@ This document defines the normative contract for state.
 Covered: schema, resource kinds, identity rules, invariants, state transition rules,
 atomic commit rules, safety rules, and compatibility.
 
-Not covered: profile semantics, policy semantics, planner rules, backend selection.
+Not covered: profile semantics,strategy semantics, planner rules, backend selection.
 
 ## Document Boundary
 
@@ -36,7 +36,7 @@ State is the **single authority** for:
 2. What resources are safe to remove.
 3. What backend must be used for deterministic removal.
 
-State contains effects only. No desired state. No policy. No dependency graphs.
+State contains effects only. No desired state. No strategy No dependency graphs.
 
 ## File Location
 
@@ -248,7 +248,7 @@ Profile YAML may optionally be updated with canonical IDs via `--profiles` flag.
 
 ## Prohibited Content
 
-State must NOT contain: profile content, policy content, dependency graphs,
+State must NOT contain: profile content, strategy content, dependency graphs,
 runtime environment variables, or arbitrary plugin-defined keys at feature level.
 
 Plugins must not write arbitrary extensions into state directly.

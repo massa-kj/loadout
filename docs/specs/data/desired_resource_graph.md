@@ -29,7 +29,7 @@ It is produced by FeatureCompiler and consumed exclusively by Planner.
 ## Position in Pipeline
 
 ```
-Feature Index + Policy
+Feature Index + strategy
       ↓
   FeatureCompiler
       ↓
@@ -88,7 +88,7 @@ For detailed field definitions and types, see `crates/model/src/desired_resource
 ```
 
 **Meaning:**
-- `desired_backend` is resolved by FeatureCompiler using policy (source of truth)
+- `desired_backend` is resolved by FeatureCompiler using strategy (source of truth)
 - Planner uses this value for backend-mismatch detection
 
 ### runtime
@@ -127,7 +127,7 @@ For detailed field definitions and types, see `crates/model/src/desired_resource
 
 ## Backend Resolution
 
-`desired_backend` is resolved by FeatureCompiler using policy before producing this graph.
+`desired_backend` is resolved by FeatureCompiler using strategy before producing this graph.
 The Planner must NOT re-resolve backends. The value in `desired_backend` is authoritative.
 
 ## Immutability

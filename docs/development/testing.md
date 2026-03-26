@@ -23,7 +23,7 @@ Target crates:
 * `crates/source-registry` — canonical ID parsing, source path resolution, allow-list checks
 * `crates/compiler` — DesiredResourceGraph output format, platform override, backend resolution
 * `crates/executor` — resource routing by kind, all plan operations
-* `crates/model` — data structure validation (State, Profile, Policy, etc.)
+* `crates/model` — data structure validation (State, Profile, Strategy, etc.)
 
 Internal APIs must NOT be tested directly.
 Tests must validate behavior, not implementation details.
@@ -54,7 +54,7 @@ Tests that exercise path resolution must isolate XDG/AppData roots instead of mo
 
 ## Path Isolation Rules
 
-Tests must not rely on repository-local state/profile/policy paths as authoritative runtime paths.
+Tests must not rely on repository-local state/profile/strategy paths as authoritative runtime paths.
 
 Use:
 

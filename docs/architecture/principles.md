@@ -13,7 +13,7 @@ Profiles express intent — not procedures.
 Users declare what should exist; the system decides how to produce it.
 
 **Determinism**
-Given the same profile, policy, and state, execution must produce the same plan.
+Given the same profile, strategy, and state, execution must produce the same plan.
 No hidden randomness, no implicit fallback, no environment-dependent branching.
 Re-running apply must produce no duplicate resources and no inconsistent state.
 Idempotency is guaranteed by state diff, deterministic execution order, and shallow dependencies.

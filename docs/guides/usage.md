@@ -68,11 +68,11 @@ Place source content at:
 * external features/backends: data home `sources/<id>/features/`, `backends/`
 
 There is no implicit fallback across `core`, `user`, and external sources.
-If you want a non-core source, reference it explicitly in the profile or policy.
+If you want a non-core source, reference it explicitly in the profile or strategy.
 
 ## Policies
 
-See [policies default location](../specs/data/policy.md#File-Location).
+See [strategies default location](../specs/data/strategy.md#File-Location).
 
 ## State
 
