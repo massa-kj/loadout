@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/loadout"
-CONFIG_VERSION="$ROOT/tests/environment/linux/docker/fixtures/config-version-v20.yaml"
+ROOT="/tmp/loadout-repo"
+CONFIG_VERSION="$HOME/.config/loadout/configs/config-version-v20.yaml"
 export XDG_CONFIG_HOME="/tmp/loadout-xdg-config"
 export XDG_STATE_HOME="/tmp/loadout-xdg-state"
 STATE_FILE="$XDG_STATE_HOME/loadout/state.json"
@@ -12,7 +12,7 @@ echo "==> Version install scenario"
 cd "$ROOT"
 
 echo "==> Running apply with version-specified features"
-./loadout apply --config "$CONFIG_VERSION"
+loadout apply --config "$CONFIG_VERSION"
 
 # Activate brew and mise for tests
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/loadout"
-CONFIG="$ROOT/tests/environment/linux/docker/fixtures/config-base.yaml"
+ROOT="/tmp/loadout-repo"
+CONFIG="$HOME/.config/loadout/configs/config-base.yaml"
 export XDG_CONFIG_HOME="/tmp/loadout-xdg-config"
 export XDG_STATE_HOME="/tmp/loadout-xdg-state"
 STATE_FILE="$XDG_STATE_HOME/loadout/state.json"
@@ -14,7 +14,7 @@ cd "$ROOT"
 rm -rf /root/.bashrc /root/.bashrc.d
 
 echo "==> Running apply"
-./loadout apply --config "$CONFIG"
+loadout apply --config "$CONFIG"
 
 echo "==> Checking state file existence"
 test -f "$STATE_FILE"

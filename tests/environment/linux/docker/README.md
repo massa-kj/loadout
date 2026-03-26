@@ -104,11 +104,17 @@ The `Dockerfile` uses a two-stage build:
 
 | Stage | Image | Contents | Use case |
 |-------|-------|----------|----------|
-| `base` | `loadout-base` | OS deps + repo copy | Testing bootstrap itself |
-| `bootstrapped` | `loadout-test` | base + bootstrap run | Scenario tests (fast) |
+| `base` | `loadout-base` | Minimal OS + repo copy | Pre-release binary validation |
+| `installed` | `loadout-test` | base + loadout binary + features/backends | Scenario tests |
 
-Scenario tests use the `bootstrapped` image, so bootstrap overhead is paid once at
-build time rather than at every `docker run`.
+The `base` stage includes the repository at `/tmp/loadout-repo` for testing pre-release binaries.
+
+The `installed` stage includes:
+- loadout binary installed at `~/.local/bin/loadout`
+- features/ and backends/ directories at `~/.config/loadout/`
+- Test fixtures at `~/.config/loadout/configs/`
+
+Scenario tests use the `installed` image for fast execution.
 
 ## Quick Start
 
@@ -140,10 +146,10 @@ This will:
 ### Build images
 
 ```bash
-# Build bootstrapped image (used by scenario tests)
+# Build installed image (used by scenario tests)
 ./tests/environment/linux/docker/test.sh build
 
-# Build base image only (pre-bootstrap)
+# Build base image only (for pre-release binary validation)
 ./tests/environment/linux/docker/test.sh build-base
 ```
 
@@ -156,21 +162,23 @@ This will:
 ### Interactive shell (for debugging)
 
 ```bash
-# Shell in bootstrapped container (bootstrap already done)
+# Shell in installed container (loadout ready to use)
 ./tests/environment/linux/docker/test.sh shell
 
-# Shell in base container (before bootstrap)
+# Shell in base container (pre-installation, for binary validation)
 ./tests/environment/linux/docker/test.sh base-shell
 ```
 
 `shell` is useful for:
-- Testing apply command: `./loadout apply profiles/linux.yaml`
+- Testing plan command: `loadout plan -c ~/.config/loadout/configs/config-base.yaml`
+- Testing apply command: `loadout apply -c ~/.config/loadout/configs/config-base.yaml`
 - Running a scenario manually: `./tests/environment/linux/docker/scenarios/minimal.sh`
-- Inspecting state: `cat /tmp/loadout-xdg-state/loadout/state.json`
+- Inspecting state: `cat ~/.local/state/loadout/state.json`
 
 `base-shell` is useful for:
-- Debugging bootstrap itself: `./platforms/linux/bootstrap.sh`
-- Verifying pre-bootstrap environment
+- Testing pre-release binaries: `./target/debug/loadout --help`
+- Validating binary before installation
+- Testing from repository root without installation
 
 ## Expected Behavior
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/loadout"
-CONFIG_V20="$ROOT/tests/environment/linux/docker/fixtures/config-version-v20.yaml"
-CONFIG_V22="$ROOT/tests/environment/linux/docker/fixtures/config-version-v22.yaml"
+ROOT="/tmp/loadout-repo"
+CONFIG_V20="$HOME/.config/loadout/configs/config-version-v20.yaml"
+CONFIG_V22="$HOME/.config/loadout/configs/config-version-v22.yaml"
 export XDG_CONFIG_HOME="/tmp/loadout-xdg-config"
 export XDG_STATE_HOME="/tmp/loadout-xdg-state"
 STATE_FILE="$XDG_STATE_HOME/loadout/state.json"
@@ -13,7 +13,7 @@ echo "==> Version upgrade scenario"
 cd "$ROOT"
 
 echo "==> First apply (Node 20)"
-./loadout apply --config "$CONFIG_V20"
+loadout apply --config "$CONFIG_V20"
 
 # Activate brew and mise for tests
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"
@@ -35,7 +35,7 @@ fi
 
 echo ""
 echo "==> Second apply (Node 22 - should trigger reinstall)"
-./loadout apply --config "$CONFIG_V22"
+loadout apply --config "$CONFIG_V22"
 
 echo "==> Verifying Node 22 installed"
 NODE_VERSION_2=$(jq -r '.features["core/node"].resources[] | select(.kind == "runtime") | .runtime.version' "$STATE_FILE")

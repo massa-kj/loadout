@@ -36,8 +36,8 @@ Usage: $(basename "$0") <command>
 Run Docker-based integration tests for loadout.
 
 Commands:
-  build              Build bootstrapped test image (default for scenarios)
-  build-base         Build base image only (for bootstrap testing)
+  build              Build installed test image (default for scenarios)
+  build-base         Build base image (minimal OS + repo for binary validation)
   lifecycle          Run consolidated lifecycle scenario
   minimal            Run minimal scenario (debug)
   idempotent         Run idempotent scenario (debug)
@@ -46,16 +46,16 @@ Commands:
   version-upgrade    Run version upgrade scenario
   version-mixed      Run version mixed scenario
   all                Run all scenarios (default)
-  shell              Open interactive shell in bootstrapped container
+  shell              Open interactive shell in installed container
   base-shell         Open interactive shell in base container
   clean              Remove test images
 
 Examples:
-  $(basename "$0") build            # Build bootstrapped image
+  $(basename "$0") build            # Build installed image
   $(basename "$0") minimal          # Run minimal test only
   $(basename "$0") all              # Run all scenarios
-  $(basename "$0") shell            # Shell with bootstrap done
-  $(basename "$0") base-shell       # Shell before bootstrap
+  $(basename "$0") shell            # Shell with loadout installed
+  $(basename "$0") base-shell       # Shell for binary validation
 
 EOF
     exit "$exit_code"
@@ -73,13 +73,13 @@ build_base_image() {
 
 # Build bootstrapped test image
 build_image() {
-    log_step "Building bootstrapped test image..."
-    log_info "Target: bootstrapped  →  $IMAGE_NAME"
+    log_step "Building installed test image..."
+    log_info "Target: installed  →  $IMAGE_NAME"
     log_info "Dockerfile: $DOCKERFILE"
 
-    docker build -f "$DOCKERFILE" --target bootstrapped -t "$IMAGE_NAME" .
+    docker build -f "$DOCKERFILE" --target installed -t "$IMAGE_NAME" .
 
-    log_step "Bootstrapped image build complete"
+    log_step "Installed image build complete"
 }
 
 # Run scenario
@@ -109,9 +109,10 @@ clean_image() {
 
 # Open interactive shell in bootstrapped container
 open_shell() {
-    log_step "Opening interactive shell in bootstrapped container..."
-    log_info "Bootstrap is already done. You can run:"
-    log_info "  ./loadout apply --config ./tests/environment/linux/docker/fixtures/config-base.yaml"
+    log_step "Opening interactive shell in installed container..."
+    log_info "loadout is installed at ~/.local/bin/loadout. You can run:"
+    log_info "  loadout plan -c ~/.config/loadout/configs/config-base.yaml"
+    log_info "  loadout apply -c ~/.config/loadout/configs/config-base.yaml"
     log_info "  ./tests/environment/linux/docker/scenarios/minimal.sh"
     echo ""
 
@@ -120,10 +121,11 @@ open_shell() {
 
 # Open interactive shell in base container (before bootstrap)
 open_base_shell() {
-    log_step "Opening interactive shell in base container (pre-bootstrap)..."
-    log_info "Bootstrap has not run yet. You can run:"
-    log_info "  ./platforms/linux/bootstrap.sh"
-    log_info "  ./loadout apply --config ./tests/environment/linux/docker/fixtures/config-base.yaml"
+    log_step "Opening interactive shell in base container (pre-installation)..."
+    log_info "Repository is available at /tmp/loadout-repo."
+    log_info "You can test pre-release binaries:"
+    log_info "  ./target/debug/loadout --help"
+    log_info "  ./target/debug/loadout plan -c tests/environment/linux/docker/fixtures/config-base.yaml"
     echo ""
 
     docker run --rm -it "$IMAGE_BASE" /bin/bash

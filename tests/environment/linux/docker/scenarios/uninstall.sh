@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/loadout"
-CONFIG_FULL="$ROOT/tests/environment/linux/docker/fixtures/config-full.yaml"
-CONFIG_PARTIAL="$ROOT/tests/environment/linux/docker/fixtures/config-base.yaml"
-CONFIG_EMPTY="$ROOT/tests/environment/linux/docker/fixtures/config-empty.yaml"
+ROOT="/tmp/loadout-repo"
+CONFIG_FULL="$HOME/.config/loadout/configs/config-full.yaml"
+CONFIG_PARTIAL="$HOME/.config/loadout/configs/config-base.yaml"
+CONFIG_EMPTY="$HOME/.config/loadout/configs/config-empty.yaml"
 export XDG_CONFIG_HOME="/tmp/loadout-xdg-config"
 export XDG_STATE_HOME="/tmp/loadout-xdg-state"
 STATE_FILE="$XDG_STATE_HOME/loadout/state.json"
@@ -16,7 +16,7 @@ cd "$ROOT"
 rm -rf /root/.bashrc /root/.bashrc.d
 
 echo "==> First apply (install phase)"
-./loadout apply --config "$CONFIG_FULL"
+loadout apply --config "$CONFIG_FULL"
 
 echo "==> Ensuring state exists"
 test -f "$STATE_FILE"
@@ -41,7 +41,7 @@ echo "do not delete" > "$SENTINEL"
 echo ""
 echo "==> Test 1: Partial uninstall"
 echo "==> Running apply with partial config"
-./loadout apply --config "$CONFIG_PARTIAL"
+loadout apply --config "$CONFIG_PARTIAL"
 
 echo "==> Verifying bash and git remain"
 if ! jq -e '.features["core/bash"]' "$STATE_FILE" > /dev/null; then
@@ -79,7 +79,7 @@ echo "==> Partial uninstall passed"
 echo ""
 echo "==> Test 2: Full uninstall"
 echo "==> Running apply with empty config (full uninstall)"
-./loadout apply --config "$CONFIG_EMPTY"
+loadout apply --config "$CONFIG_EMPTY"
 
 echo "==> Checking state file valid"
 jq empty "$STATE_FILE" > /dev/null
@@ -118,7 +118,7 @@ echo "==> Full uninstall passed"
 echo ""
 echo "==> Test 3: Uninstall idempotency"
 echo "==> Running apply with empty config again"
-./loadout apply --config "$CONFIG_EMPTY"
+loadout apply --config "$CONFIG_EMPTY"
 
 echo "==> Ensuring state still empty"
 REMAINING2=$(jq '.features | keys | length' "$STATE_FILE")

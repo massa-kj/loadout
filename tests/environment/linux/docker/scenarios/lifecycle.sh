@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/loadout"
-CONFIG_BASE="$ROOT/tests/environment/linux/docker/fixtures/config-base.yaml"
-CONFIG_FULL="$ROOT/tests/environment/linux/docker/fixtures/config-full.yaml"
-CONFIG_EMPTY="$ROOT/tests/environment/linux/docker/fixtures/config-empty.yaml"
+ROOT="/tmp/loadout-repo"
+CONFIG_BASE="$HOME/.config/loadout/configs/config-base.yaml"
+CONFIG_FULL="$HOME/.config/loadout/configs/config-full.yaml"
+CONFIG_EMPTY="$HOME/.config/loadout/configs/config-empty.yaml"
 export XDG_CONFIG_HOME="/tmp/loadout-xdg-config"
 export XDG_STATE_HOME="/tmp/loadout-xdg-state"
 STATE_FILE="$XDG_STATE_HOME/loadout/state.json"
@@ -16,7 +16,7 @@ cd "$ROOT"
 rm -rf /root/.bashrc /root/.bashrc.d
 
 echo "==> Phase 1: base apply"
-./loadout apply --config "$CONFIG_BASE"
+loadout apply --config "$CONFIG_BASE"
 
 echo "==> Validating state file existence"
 test -f "$STATE_FILE"
@@ -55,7 +55,7 @@ jq -e '.features | to_entries[] | .value.resources[]? | select(.kind == "fs") | 
 } || true
 
 echo "==> Phase 2: expand to full profile"
-./loadout apply --config "$CONFIG_FULL"
+loadout apply --config "$CONFIG_FULL"
 
 echo "==> Ensuring extra feature was installed"
 if ! jq -e '.features["core/ripgrep"]' "$STATE_FILE" > /dev/null; then
@@ -67,7 +67,7 @@ echo "==> Snapshotting full state"
 cp "$STATE_FILE" /tmp/state_full_before.json
 
 echo "==> Phase 3: reapply full profile"
-./loadout apply --config "$CONFIG_FULL"
+loadout apply --config "$CONFIG_FULL"
 
 echo "==> Verifying full-profile idempotency"
 if ! diff -u /tmp/state_full_before.json "$STATE_FILE"; then
@@ -84,7 +84,7 @@ SENTINEL="/tmp/loadout_sentinel"
 echo "do not delete" > "$SENTINEL"
 
 echo "==> Phase 4: shrink back to base profile"
-./loadout apply --config "$CONFIG_BASE"
+loadout apply --config "$CONFIG_BASE"
 
 echo "==> Verifying base features remain"
 if ! jq -e '.features["core/bash"]' "$STATE_FILE" > /dev/null; then
@@ -116,7 +116,7 @@ if [[ -n "$REMAINING_PACKAGES" ]]; then
 fi
 
 echo "==> Phase 5: full uninstall"
-./loadout apply --config "$CONFIG_EMPTY"
+loadout apply --config "$CONFIG_EMPTY"
 
 echo "==> Checking state file valid"
 jq empty "$STATE_FILE" > /dev/null
