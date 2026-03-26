@@ -690,18 +690,32 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let ctx = make_ctx(&tmp);
 
-        // Feature with a failing uninstall.sh.
+        // Feature with a failing uninstall script.
         let feat_dir = tmp.path().join("features").join("badfeature");
         write(
             &feat_dir.join("feature.yaml"),
             "spec_version: 1\nmode: script\n",
         );
-        let install_sh = feat_dir.join("install.sh");
-        write(&install_sh, "#!/usr/bin/env sh\nexit 0\n");
-        make_executable(&install_sh);
-        let uninstall_sh = feat_dir.join("uninstall.sh");
-        write(&uninstall_sh, "#!/usr/bin/env sh\nexit 1\n"); // Always fails.
-        make_executable(&uninstall_sh);
+        
+        let platform = platform::detect_platform();
+        match platform {
+            platform::Platform::Windows => {
+                // PowerShell scripts
+                let install_ps1 = feat_dir.join("install.ps1");
+                write(&install_ps1, "exit 0\n");
+                let uninstall_ps1 = feat_dir.join("uninstall.ps1");
+                write(&uninstall_ps1, "exit 1\n"); // Always fails
+            }
+            platform::Platform::Linux | platform::Platform::Wsl => {
+                // Shell scripts
+                let install_sh = feat_dir.join("install.sh");
+                write(&install_sh, "#!/usr/bin/env sh\nexit 0\n");
+                make_executable(&install_sh);
+                let uninstall_sh = feat_dir.join("uninstall.sh");
+                write(&uninstall_sh, "#!/usr/bin/env sh\nexit 1\n"); // Always fails
+                make_executable(&uninstall_sh);
+            }
+        }
 
         // A good feature that succeeds.
         write_script_feature(tmp.path(), "git");
