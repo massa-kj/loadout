@@ -113,7 +113,7 @@ fn cmd_apply(args: &[String]) {
         println!();
 
         match confirm_apply() {
-            Ok(()) => {}, // Continue to execution
+            Ok(()) => {} // Continue to execution
             Err(e) => {
                 eprintln!("error: {e}");
                 process::exit(1);

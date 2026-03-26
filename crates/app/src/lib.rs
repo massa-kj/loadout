@@ -170,10 +170,7 @@ pub fn plan(ctx: &AppContext, config_path: &Path) -> Result<Plan, AppError> {
 /// Returns an `ExecutionPlan` containing all data needed by `execute()`.
 ///
 /// All stages are read-only except for reading the state file.
-pub fn prepare_execution(
-    ctx: &AppContext,
-    config_path: &Path,
-) -> Result<ExecutionPlan, AppError> {
+pub fn prepare_execution(ctx: &AppContext, config_path: &Path) -> Result<ExecutionPlan, AppError> {
     let PipelineOutput {
         index,
         order,
@@ -758,7 +755,7 @@ mod tests {
             &feat_dir.join("feature.yaml"),
             "spec_version: 1\nmode: script\n",
         );
-        
+
         let platform = platform::detect_platform();
         match platform {
             platform::Platform::Windows => {
