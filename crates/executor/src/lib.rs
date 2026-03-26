@@ -27,6 +27,7 @@ use model::state::{
     FeatureState, FsDetails, FsEntryType, FsOp, PackageDetails, Resource, ResourceKind,
     RuntimeDetails, State,
 };
+use platform::Platform;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -105,6 +106,7 @@ pub struct ExecutionContext<'a> {
     pub index: &'a FeatureIndex,
     pub registry: &'a BackendRegistry,
     pub dirs: &'a Dirs,
+    pub platform: &'a Platform,
     pub state_path: &'a Path,
 }
 
@@ -225,7 +227,7 @@ fn execute_action(
     match op {
         Operation::Create => match meta.mode {
             FeatureMode::Script => {
-                feature_host::run_install(meta, feature_id, ctx.dirs)
+                feature_host::run_install(meta, feature_id, ctx.dirs, ctx.platform)
                     .map_err(FeatureError::from)?;
                 // Script features are recorded with empty resources.
                 state
@@ -251,7 +253,7 @@ fn execute_action(
         Operation::Destroy => {
             match meta.mode {
                 FeatureMode::Script => {
-                    feature_host::run_uninstall(meta, feature_id, ctx.dirs)
+                    feature_host::run_uninstall(meta, feature_id, ctx.dirs, ctx.platform)
                         .map_err(FeatureError::from)?;
                 }
                 FeatureMode::Declarative => {
@@ -268,9 +270,9 @@ fn execute_action(
             // Destroy old, then create new.
             match meta.mode {
                 FeatureMode::Script => {
-                    feature_host::run_uninstall(meta, feature_id, ctx.dirs)
+                    feature_host::run_uninstall(meta, feature_id, ctx.dirs, ctx.platform)
                         .map_err(FeatureError::from)?;
-                    feature_host::run_install(meta, feature_id, ctx.dirs)
+                    feature_host::run_install(meta, feature_id, ctx.dirs, ctx.platform)
                         .map_err(FeatureError::from)?;
                     state
                         .features
@@ -299,9 +301,9 @@ fn execute_action(
             // Remove via old backend (from state), apply via new backend (from graph).
             // Script features don't have a backend concept; treat as Replace.
             if meta.mode == FeatureMode::Script {
-                feature_host::run_uninstall(meta, feature_id, ctx.dirs)
+                feature_host::run_uninstall(meta, feature_id, ctx.dirs, ctx.platform)
                     .map_err(FeatureError::from)?;
-                feature_host::run_install(meta, feature_id, ctx.dirs)
+                feature_host::run_install(meta, feature_id, ctx.dirs, ctx.platform)
                     .map_err(FeatureError::from)?;
                 state
                     .features
@@ -824,6 +826,7 @@ mod tests {
         let registry = make_registry_ok(&["core/brew"]);
         let mut state = State::empty();
         let dirs = make_dirs(&tmp);
+        let platform = Platform::Linux;
 
         let ctx = ExecutionContext {
             plan: &plan,
@@ -831,6 +834,7 @@ mod tests {
             index: &index,
             registry: &registry,
             dirs: &dirs,
+            platform: &platform,
             state_path: &state_path,
         };
 
@@ -868,12 +872,14 @@ mod tests {
 
         let mut state = State::empty();
         let dirs = make_dirs(&tmp);
+        let platform = Platform::Linux;
         let ctx = ExecutionContext {
             plan: &plan,
             graph: &graph,
             index: &index,
             registry: &registry,
             dirs: &dirs,
+            platform: &platform,
             state_path: &state_path,
         };
 
@@ -924,12 +930,14 @@ mod tests {
         let index = make_index(vec![("core/git", declarative_meta())]);
         let registry = make_registry_ok(&["core/brew"]);
         let dirs = make_dirs(&tmp);
+        let platform = Platform::Linux;
         let ctx = ExecutionContext {
             plan: &plan,
             graph: &graph,
             index: &index,
             registry: &registry,
             dirs: &dirs,
+            platform: &platform,
             state_path: &state_path,
         };
 
@@ -973,12 +981,14 @@ mod tests {
         registry.register(backend_id("core/brew"), Box::new(FailBackend));
 
         let dirs = make_dirs(&tmp);
+        let platform = Platform::Linux;
         let ctx = ExecutionContext {
             plan: &plan,
             graph: &graph,
             index: &index,
             registry: &registry,
             dirs: &dirs,
+            platform: &platform,
             state_path: &state_path,
         };
 
@@ -1021,12 +1031,14 @@ mod tests {
 
         let mut state = State::empty();
         let dirs = make_dirs(&tmp);
+        let platform = Platform::Linux;
         let ctx = ExecutionContext {
             plan: &plan,
             graph: &graph,
             index: &index,
             registry: &registry,
             dirs: &dirs,
+            platform: &platform,
             state_path: &state_path,
         };
 
@@ -1086,12 +1098,14 @@ mod tests {
         let index = make_index(vec![("core/tools", declarative_meta())]);
         let registry = make_registry_ok(&["core/brew"]);
         let dirs = make_dirs(&tmp);
+        let platform = Platform::Linux;
         let ctx = ExecutionContext {
             plan: &plan,
             graph: &graph,
             index: &index,
             registry: &registry,
             dirs: &dirs,
+            platform: &platform,
             state_path: &state_path,
         };
 
@@ -1130,12 +1144,14 @@ mod tests {
         let registry = BackendRegistry::new();
         let mut state = State::empty();
         let dirs = make_dirs(&tmp);
+        let platform = Platform::Linux;
         let ctx = ExecutionContext {
             plan: &plan,
             graph: &graph,
             index: &index,
             registry: &registry,
             dirs: &dirs,
+            platform: &platform,
             state_path: &state_path,
         };
 
@@ -1178,12 +1194,14 @@ mod tests {
         let index = make_index(vec![("core/git", declarative_meta())]);
         let registry = make_registry_ok(&["core/brew", "core/apt"]);
         let dirs = make_dirs(&tmp);
+        let platform = Platform::Linux;
         let ctx = ExecutionContext {
             plan: &plan,
             graph: &graph,
             index: &index,
             registry: &registry,
             dirs: &dirs,
+            platform: &platform,
             state_path: &state_path,
         };
 
