@@ -27,6 +27,24 @@ pub use executor::{Event, ExecutorReport};
 pub use model::plan::Plan;
 
 // ---------------------------------------------------------------------------
+// ExecutionPlan
+// ---------------------------------------------------------------------------
+
+/// All data required to execute a plan.
+///
+/// Returned by `prepare_execution()` and consumed by `execute()`.
+/// This type allows the CLI layer to inspect the plan, display it to the user,
+/// and request confirmation before execution begins.
+pub struct ExecutionPlan {
+    pub plan: Plan,
+    pub graph: model::desired_resource_graph::DesiredResourceGraph,
+    pub index: model::FeatureIndex,
+    pub order: model::ResolvedFeatureOrder,
+    pub registry: backend_host::BackendRegistry,
+    pub state: state::State,
+}
+
+// ---------------------------------------------------------------------------
 // AppError
 // ---------------------------------------------------------------------------
 
@@ -143,7 +161,76 @@ pub fn plan(ctx: &AppContext, config_path: &Path) -> Result<Plan, AppError> {
 // apply() use case
 // ---------------------------------------------------------------------------
 
+/// Prepare execution: load config, resolve dependencies, compile, and plan.
+///
+/// This is the read-only portion of `apply()`, extracted to allow the CLI
+/// layer to inspect the plan, display it, and request user confirmation
+/// before execution begins.
+///
+/// Returns an `ExecutionPlan` containing all data needed by `execute()`.
+///
+/// All stages are read-only except for reading the state file.
+pub fn prepare_execution(
+    ctx: &AppContext,
+    config_path: &Path,
+) -> Result<ExecutionPlan, AppError> {
+    let PipelineOutput {
+        index,
+        order,
+        graph,
+        state,
+        ..
+    } = run_pipeline(ctx, config_path)?;
+
+    let plan = planner::plan(&graph, &state, &order)?;
+    let registry = build_backend_registry(ctx);
+
+    Ok(ExecutionPlan {
+        plan,
+        graph,
+        index,
+        order,
+        registry,
+        state,
+    })
+}
+
+/// Execute a prepared plan.
+///
+/// Takes ownership of `ExecutionPlan` and performs all side-effecting operations:
+/// - Calls feature-host (script mode) or backend-host (declarative mode)
+/// - Commits state after each successful feature
+///
+/// Feature-level failures are non-fatal and reported via `on_event` +
+/// `ExecutorReport::failed`.
+///
+/// Returns `Err` only for fatal conditions (state commit failure, invariant violation).
+pub fn execute(
+    ctx: &AppContext,
+    execution_plan: ExecutionPlan,
+    on_event: &mut dyn FnMut(Event),
+) -> Result<ExecutorReport, AppError> {
+    let mut state = execution_plan.state;
+
+    let exec_ctx = executor::ExecutionContext {
+        plan: &execution_plan.plan,
+        graph: &execution_plan.graph,
+        index: &execution_plan.index,
+        registry: &execution_plan.registry,
+        dirs: &ctx.dirs,
+        platform: &ctx.platform,
+        state_path: &ctx.state_path(),
+    };
+
+    let report = executor::execute(&exec_ctx, &mut state, on_event)?;
+    Ok(report)
+}
+
 /// Execute the plan: install, update, and remove features as needed.
+///
+/// This is a convenience wrapper around `prepare_execution()` + `execute()`.
+/// For use cases that require user confirmation or plan inspection, use
+/// `prepare_execution()` followed by `execute()` directly.
 ///
 /// `config_path` must point to a unified `config.yaml` containing both the
 /// `profile` and (optionally) the `strategy` section.
@@ -158,33 +245,8 @@ pub fn apply(
     config_path: &Path,
     on_event: &mut dyn FnMut(Event),
 ) -> Result<ExecutorReport, AppError> {
-    let PipelineOutput {
-        index,
-        order,
-        graph,
-        mut state,
-        ..
-    } = run_pipeline(ctx, config_path)?;
-
-    let p = planner::plan(&graph, &state, &order)?;
-
-    // Build backend registry by scanning backends/ directories on disk.
-    // Backends that cannot be loaded are silently skipped (non-fatal during
-    // the migration from the shell implementation to the new layout).
-    let registry = build_backend_registry(ctx);
-
-    let exec_ctx = executor::ExecutionContext {
-        plan: &p,
-        graph: &graph,
-        index: &index,
-        registry: &registry,
-        dirs: &ctx.dirs,
-        platform: &ctx.platform,
-        state_path: &ctx.state_path(),
-    };
-
-    let report = executor::execute(&exec_ctx, &mut state, on_event)?;
-    Ok(report)
+    let execution_plan = prepare_execution(ctx, config_path)?;
+    execute(ctx, execution_plan, on_event)
 }
 
 // ---------------------------------------------------------------------------

@@ -38,12 +38,16 @@ Options for apply / plan:
   --sources <path>           Sources spec override (CI / verification use only)
   --verbose                  Show per-feature detail
 
+Options for apply only:
+  -y, --yes                  Skip confirmation prompt
+
 Config resolution:
   -c linux         →  $XDG_CONFIG_HOME/loadout/configs/linux.yaml
   -c ./work.yaml   →  ./work.yaml  (any value containing .yaml)
 
 Examples:
   loadout apply -c linux
+  loadout apply -c linux --yes
   loadout plan  -c linux --verbose
   loadout apply -c ./configs/work.yaml
   loadout migrate --dry-run\
@@ -85,6 +89,7 @@ fn main() {
 
 fn cmd_apply(args: &[String]) {
     let verbose = args.contains(&"--verbose".to_string());
+    let yes = args.contains(&"-y".to_string()) || args.contains(&"--yes".to_string());
     let mut ctx = build_app_context();
 
     let config_path = parse_config_arg(args, "apply", &ctx.dirs);
@@ -93,7 +98,31 @@ fn cmd_apply(args: &[String]) {
     let config_id = config_id_from_path(&config_path);
     println!("Using config: {config_id}");
 
-    let result = app::apply(&ctx, &config_path, &mut |event| {
+    // Phase 1: Prepare execution (plan generation)
+    let execution_plan = match app::prepare_execution(&ctx, &config_path) {
+        Ok(plan) => plan,
+        Err(e) => {
+            eprintln!("error: {e}");
+            process::exit(1);
+        }
+    };
+
+    // Phase 2: Display plan and confirm (unless -y is specified or plan is empty)
+    if !execution_plan.plan.actions.is_empty() && !yes {
+        print_plan(&execution_plan.plan, verbose);
+        println!();
+
+        match confirm_apply() {
+            Ok(()) => {}, // Continue to execution
+            Err(e) => {
+                eprintln!("error: {e}");
+                process::exit(1);
+            }
+        }
+    }
+
+    // Phase 3: Execute the plan
+    let result = app::execute(&ctx, execution_plan, &mut |event| {
         use app::Event;
         match event {
             Event::FeatureStart { id } => {
@@ -224,6 +253,25 @@ fn print_plan(plan: &model::Plan, verbose: bool) {
         print!(", {} noop", plan.noops.len());
     }
     println!();
+}
+
+/// Ask user confirmation to proceed with apply.
+/// Returns Ok(()) if user confirms, Err if aborted.
+fn confirm_apply() -> Result<(), String> {
+    use std::io::{self, Write};
+
+    print!("Apply this plan? [y/N]: ");
+    io::stdout().flush().ok();
+
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .map_err(|e| format!("Failed to read input: {e}"))?;
+
+    match input.trim().to_lowercase().as_str() {
+        "y" | "yes" => Ok(()),
+        _ => Err("Aborted by user".to_string()),
+    }
 }
 
 // ── migrate ───────────────────────────────────────────────────────────────────

@@ -36,6 +36,11 @@ Coordinate execution flow.
 
 `plan`: load → resolve → compile → plan → display. Must NOT modify state.
 `apply`: load → resolve → compile → plan → execute → commit state.
+`prepare_execution`: load → resolve → compile → plan + registry → return ExecutionPlan. Enables confirmation prompts by CLI.
+`execute`: consume ExecutionPlan → execute → commit state.
+
+The `prepare_execution`/`execute` separation allows CLI to insert confirmation prompts between planning and execution.
+`apply` remains as a convenience wrapper around `prepare_execution` + `execute`.
 
 Must NOT: perform package management directly, re-classify after planner has decided.
 
