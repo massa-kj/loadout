@@ -15,7 +15,7 @@ use std::path::PathBuf;
 ///
 /// WSL is Linux with `WSL_DISTRO_NAME` set; it is treated separately because
 /// path conventions (Windows mounts, interop) differ from plain Linux.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Platform {
     Linux,
     Windows,

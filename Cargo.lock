@@ -33,6 +33,7 @@ name = "backend-host"
 version = "0.1.0"
 dependencies = [
  "model",
+ "platform",
  "serde",
  "serde_json",
  "serde_yaml",

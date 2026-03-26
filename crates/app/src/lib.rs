@@ -421,11 +421,17 @@ fn build_backend_registry(ctx: &AppContext) -> backend_host::BackendRegistry {
     // 1. Register builtin Rust backends for the current platform.
     backends_builtin::register_builtins(&mut registry, &ctx.platform);
     // 2. Script backends from disk can override / extend builtins.
-    load_backends_from_dir(&mut registry, &ctx.repo_root.join("backends"), "core");
+    load_backends_from_dir(
+        &mut registry,
+        &ctx.repo_root.join("backends"),
+        "core",
+        ctx.platform,
+    );
     load_backends_from_dir(
         &mut registry,
         &ctx.dirs.config_home.join("backends"),
         "user",
+        ctx.platform,
     );
     registry
 }
@@ -435,6 +441,7 @@ fn load_backends_from_dir(
     registry: &mut backend_host::BackendRegistry,
     backends_dir: &Path,
     source_id: &str,
+    platform: platform::Platform,
 ) {
     let Ok(entries) = std::fs::read_dir(backends_dir) else {
         return;
@@ -454,7 +461,7 @@ fn load_backends_from_dir(
             continue;
         };
 
-        match backend_host::ScriptBackend::load(path.clone()) {
+        match backend_host::ScriptBackend::load(platform, path.clone()) {
             Ok(backend) => {
                 registry.register(backend_id, Box::new(backend));
             }

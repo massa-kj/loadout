@@ -1121,7 +1121,7 @@ mod tests {
         );
     }
 
-    /// Create script feature: install.sh executed, empty resources recorded in state.
+    /// Create script feature: install script executed, empty resources recorded in state.
     #[test]
     fn create_script_feature_records_empty_resources() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1129,9 +1129,18 @@ mod tests {
         let feat_dir = tmp.path().join("feat");
         std::fs::create_dir_all(&feat_dir).unwrap();
 
-        // Write a minimal install.sh.
-        let script = feat_dir.join("install.sh");
-        std::fs::write(&script, "#!/usr/bin/env sh\nexit 0\n").unwrap();
+        // Write a minimal platform-appropriate install script.
+        let platform = platform::detect_platform();
+        let script_name = match platform {
+            Platform::Windows => "install.ps1",
+            Platform::Linux | Platform::Wsl => "install.sh",
+        };
+        let script_content = match platform {
+            Platform::Windows => "exit 0\n",
+            Platform::Linux | Platform::Wsl => "#!/usr/bin/env sh\nexit 0\n",
+        };
+        let script = feat_dir.join(script_name);
+        std::fs::write(&script, script_content).unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -1144,7 +1153,6 @@ mod tests {
         let registry = BackendRegistry::new();
         let mut state = State::empty();
         let dirs = make_dirs(&tmp);
-        let platform = Platform::Linux;
         let ctx = ExecutionContext {
             plan: &plan,
             graph: &graph,

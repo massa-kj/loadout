@@ -18,6 +18,7 @@ use std::process::{Command, Stdio};
 
 use model::desired_resource_graph::DesiredResource;
 use model::id::CanonicalBackendId;
+use platform::Platform;
 use serde::Deserialize;
 
 // ---------------------------------------------------------------------------
@@ -212,6 +213,7 @@ struct BackendMeta {
 /// - `status.sh`: exit 0 + stdout one of `installed`, `not_installed`, `unknown`.
 #[derive(Debug)]
 pub struct ScriptBackend {
+    platform: Platform,
     backend_dir: PathBuf,
     apply_script: PathBuf,
     remove_script: PathBuf,
@@ -225,7 +227,7 @@ impl ScriptBackend {
     /// `api_version`, and that all three scripts are present.
     ///
     /// Does **not** execute any scripts.
-    pub fn load(backend_dir: PathBuf) -> Result<Self, BackendError> {
+    pub fn load(platform: Platform, backend_dir: PathBuf) -> Result<Self, BackendError> {
         if !backend_dir.is_dir() {
             return Err(BackendError::DirNotFound {
                 path: backend_dir.display().to_string(),
@@ -242,10 +244,14 @@ impl ScriptBackend {
             });
         }
 
-        // Verify all required scripts exist.
-        let apply_script = backend_dir.join("apply.sh");
-        let remove_script = backend_dir.join("remove.sh");
-        let status_script = backend_dir.join("status.sh");
+        // Verify all required scripts exist (platform-specific extension).
+        let script_ext = match platform {
+            Platform::Windows => "ps1",
+            Platform::Linux | Platform::Wsl => "sh",
+        };
+        let apply_script = backend_dir.join(format!("apply.{}", script_ext));
+        let remove_script = backend_dir.join(format!("remove.{}", script_ext));
+        let status_script = backend_dir.join(format!("status.{}", script_ext));
 
         for script in [&apply_script, &remove_script, &status_script] {
             if !script.is_file() {
@@ -256,6 +262,7 @@ impl ScriptBackend {
         }
 
         Ok(Self {
+            platform,
             backend_dir,
             apply_script,
             remove_script,
@@ -272,19 +279,19 @@ impl ScriptBackend {
 impl Backend for ScriptBackend {
     fn apply(&self, resource: &DesiredResource) -> Result<(), BackendError> {
         let json = serialise_resource(resource);
-        run_script(&self.apply_script, resource, &json)?;
+        run_script(self.platform, &self.apply_script, resource, &json)?;
         Ok(())
     }
 
     fn remove(&self, resource: &DesiredResource) -> Result<(), BackendError> {
         let json = serialise_resource(resource);
-        run_script(&self.remove_script, resource, &json)?;
+        run_script(self.platform, &self.remove_script, resource, &json)?;
         Ok(())
     }
 
     fn status(&self, resource: &DesiredResource) -> Result<ResourceState, BackendError> {
         let json = serialise_resource(resource);
-        let stdout = run_script_with_output(&self.status_script, resource, &json)?;
+        let stdout = run_script_with_output(self.platform, &self.status_script, resource, &json)?;
         match stdout.trim() {
             "installed" => Ok(ResourceState::Installed),
             "not_installed" => Ok(ResourceState::NotInstalled),
@@ -321,9 +328,24 @@ fn serialise_resource(resource: &DesiredResource) -> String {
 ///
 /// Scripts receive parameters via environment variables (primary protocol)
 /// and optionally via JSON on stdin (for complex cases requiring jq).
-fn build_command_with_env(script: &std::path::Path, resource: &DesiredResource) -> Command {
-    let mut cmd = Command::new("bash");
-    cmd.arg(script);
+fn build_command_with_env(
+    platform: Platform,
+    script: &std::path::Path,
+    resource: &DesiredResource,
+) -> Command {
+    let mut cmd = match platform {
+        Platform::Windows => {
+            let mut c = Command::new("powershell");
+            c.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]);
+            c.arg(script);
+            c
+        }
+        Platform::Linux | Platform::Wsl => {
+            let mut c = Command::new("bash");
+            c.arg(script);
+            c
+        }
+    };
 
     // Common environment variables
     cmd.env("LOADOUT_RESOURCE_ID", &resource.id);
@@ -369,11 +391,12 @@ fn build_command_with_env(script: &std::path::Path, resource: &DesiredResource) 
 
 /// Run a script with environment variables and JSON on stdin. Returns `Err` on non-zero exit.
 fn run_script(
+    platform: Platform,
     script: &std::path::Path,
     resource: &DesiredResource,
     json: &str,
 ) -> Result<(), BackendError> {
-    let mut cmd = build_command_with_env(script, resource);
+    let mut cmd = build_command_with_env(platform, script, resource);
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::inherit())
         .stderr(Stdio::piped());
@@ -404,11 +427,12 @@ fn run_script(
 
 /// Run a script with environment variables and JSON on stdin. Returns stdout on success.
 fn run_script_with_output(
+    platform: Platform,
     script: &std::path::Path,
     resource: &DesiredResource,
     json: &str,
 ) -> Result<String, BackendError> {
-    let mut cmd = build_command_with_env(script, resource);
+    let mut cmd = build_command_with_env(platform, script, resource);
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -596,13 +620,14 @@ mod tests {
     #[test]
     fn script_backend_load_success() {
         let dir = make_script_backend_dir(1, &["apply.sh", "remove.sh", "status.sh"]);
-        let backend = ScriptBackend::load(dir.path().to_path_buf()).unwrap();
+        let backend = ScriptBackend::load(Platform::Linux, dir.path().to_path_buf()).unwrap();
         assert_eq!(backend.backend_dir(), &dir.path().to_path_buf());
     }
 
     #[test]
     fn script_backend_load_dir_not_found() {
-        let err = ScriptBackend::load(PathBuf::from("/nonexistent/backend")).unwrap_err();
+        let err = ScriptBackend::load(Platform::Linux, PathBuf::from("/nonexistent/backend"))
+            .unwrap_err();
         assert!(matches!(err, BackendError::DirNotFound { .. }));
     }
 
@@ -610,14 +635,14 @@ mod tests {
     fn script_backend_load_missing_backend_yaml() {
         let dir = tempfile::tempdir().unwrap();
         // No backend.yaml written
-        let err = ScriptBackend::load(dir.path().to_path_buf()).unwrap_err();
+        let err = ScriptBackend::load(Platform::Linux, dir.path().to_path_buf()).unwrap_err();
         assert!(matches!(err, BackendError::InvalidMeta { .. }));
     }
 
     #[test]
     fn script_backend_load_unsupported_api_version() {
         let dir = make_script_backend_dir(99, &["apply.sh", "remove.sh", "status.sh"]);
-        let err = ScriptBackend::load(dir.path().to_path_buf()).unwrap_err();
+        let err = ScriptBackend::load(Platform::Linux, dir.path().to_path_buf()).unwrap_err();
         assert!(matches!(
             err,
             BackendError::UnsupportedApiVersion { version: 99, .. }
@@ -628,7 +653,7 @@ mod tests {
     fn script_backend_load_missing_script() {
         // apply.sh and remove.sh present, status.sh missing
         let dir = make_script_backend_dir(1, &["apply.sh", "remove.sh"]);
-        let err = ScriptBackend::load(dir.path().to_path_buf()).unwrap_err();
+        let err = ScriptBackend::load(Platform::Linux, dir.path().to_path_buf()).unwrap_err();
         assert!(matches!(err, BackendError::ScriptNotFound { .. }));
     }
 
