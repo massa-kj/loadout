@@ -6,9 +6,7 @@
 #   bash install.sh [--version v0.1.0] [--prefix ~/.local]
 #
 # Layout after install:
-#   <prefix>/lib/loadout/bin/loadout   (binary)
-#   <prefix>/lib/loadout/cmd/*.sh      (dispatch scripts)
-#   <prefix>/bin/loadout               (symlink → ../lib/loadout/bin/loadout)
+#   <prefix>/bin/loadout   (binary)
 
 set -euo pipefail
 
@@ -79,28 +77,24 @@ curl -fsSL --output "${TMPDIR}/${TARBALL}" "${URL}"
 
 # ── Install ───────────────────────────────────────────────────────────────────
 
-LIB_DIR="${PREFIX}/lib/loadout"
 BIN_DIR="${PREFIX}/bin"
 
-# Remove previous installation
-rm -rf "${LIB_DIR}"
-mkdir -p "${LIB_DIR}" "${BIN_DIR}"
+# Create bin directory if needed
+mkdir -p "${BIN_DIR}"
 
-# Extract tarball (strip the top-level directory)
-tar -xzf "${TMPDIR}/${TARBALL}" -C "${LIB_DIR}" --strip-components=1
+# Extract tarball to temporary location
+EXTRACT_DIR="${TMPDIR}/extract"
+mkdir -p "${EXTRACT_DIR}"
+tar -xzf "${TMPDIR}/${TARBALL}" -C "${EXTRACT_DIR}" --strip-components=1
 
-# Make scripts executable
-chmod +x "${LIB_DIR}/bin/loadout"
-find "${LIB_DIR}/cmd" -name "*.sh" -exec chmod +x {} +
-
-# Symlink binary
-ln -sf "${LIB_DIR}/bin/loadout" "${BIN_DIR}/loadout"
+# Install binary
+cp "${EXTRACT_DIR}/loadout" "${BIN_DIR}/loadout"
+chmod +x "${BIN_DIR}/loadout"
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 
 echo ""
-echo "Installed to ${LIB_DIR}"
-echo "Binary available at ${BIN_DIR}/loadout"
+echo "Installed loadout to ${BIN_DIR}/loadout"
 echo ""
 
 if ! echo ":${PATH}:" | grep -q ":${BIN_DIR}:"; then

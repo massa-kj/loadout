@@ -75,10 +75,9 @@ jobs:
           TARGET="${{ matrix.target }}"
           ASSET="loadout-dev-${TARGET}"
 
-          mkdir -p "${ASSET}/bin" "${ASSET}/cmd"
-          cp "target/${TARGET}/release/loadout" "${ASSET}/bin/"
-          cp cmd/*.sh cmd/*.ps1 "${ASSET}/cmd/"
-          chmod +x "${ASSET}/bin/loadout" "${ASSET}/cmd/"*.sh
+          mkdir -p "${ASSET}"
+          cp "target/${TARGET}/release/loadout" "${ASSET}/"
+          chmod +x "${ASSET}/loadout"
 
           tar -czf "${ASSET}.tar.gz" "${ASSET}"
           echo "ASSET_PATH=${ASSET}.tar.gz" >> "$GITHUB_ENV"
@@ -91,9 +90,8 @@ jobs:
           $Target = "${{ matrix.target }}"
           $Asset  = "loadout-dev-${Target}"
 
-          New-Item -ItemType Directory -Path "${Asset}/bin", "${Asset}/cmd" | Out-Null
-          Copy-Item "target/${Target}/release/loadout.exe" "${Asset}/bin/"
-          Copy-Item cmd/*.sh, cmd/*.ps1 "${Asset}/cmd/"
+          New-Item -ItemType Directory -Path "${Asset}" | Out-Null
+          Copy-Item "target/${Target}/release/loadout.exe" "${Asset}/"
 
           Compress-Archive -Path "${Asset}" -DestinationPath "${Asset}.zip"
           "ASSET_PATH=${Asset}.zip" | Out-File -Append $env:GITHUB_ENV
