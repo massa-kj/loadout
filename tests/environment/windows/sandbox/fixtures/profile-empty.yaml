@@ -1,3 +1,0 @@
-# Empty profile: removes all features.
-# Used by: uninstall scenario (full uninstall phase)
-features: {}

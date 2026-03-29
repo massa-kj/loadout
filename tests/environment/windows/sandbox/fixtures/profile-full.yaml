@@ -1,7 +1,0 @@
-# Broader feature set: used for the initial install phase in the uninstall scenario.
-# Includes mise (beyond git/scoop) so that partial uninstall has something to remove.
-# Used by: uninstall scenario (first apply)
-features:
-  scoop: {}
-  fzf: {}
-  ripgrep: {}

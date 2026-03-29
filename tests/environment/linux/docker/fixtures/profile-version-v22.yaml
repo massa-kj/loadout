@@ -1,8 +1,0 @@
-# Profile with version bumped to node@22.
-# Verifies: version mismatch triggers reinstall, state updated.
-# Used by: version_upgrade scenario (second apply)
-features:
-  brew: {}
-  mise: {}
-  node:
-    version: "22"

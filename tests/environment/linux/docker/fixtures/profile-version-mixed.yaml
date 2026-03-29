@@ -1,8 +1,0 @@
-# Mixed profile: versioned (node) and non-versioned (bash, git) features together.
-# Verifies: versioned features record runtime.version; non-versioned do not.
-# Used by: version_mixed scenario
-features:
-  brew: {}
-  mise: {}
-  node:
-    version: "20"

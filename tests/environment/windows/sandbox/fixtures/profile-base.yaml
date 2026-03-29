@@ -1,5 +1,0 @@
-# Minimal feature set: verifies state creation, file tracking, and no duplicates.
-# Used by: minimal, idempotent scenarios
-features:
-  scoop: {}
-  fzf: {}
