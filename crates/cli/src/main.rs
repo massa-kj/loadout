@@ -333,13 +333,15 @@ fn cmd_activate(args: &[String]) {
 fn detect_shell() -> app::ShellKind {
     #[cfg(target_os = "windows")]
     {
-        return app::ShellKind::PowerShell;
+        app::ShellKind::PowerShell
     }
     #[cfg(not(target_os = "windows"))]
-    match std::env::var("SHELL").as_deref() {
-        Ok(s) if s.ends_with("zsh") => app::ShellKind::Zsh,
-        Ok(s) if s.ends_with("fish") => app::ShellKind::Fish,
-        _ => app::ShellKind::Bash,
+    {
+        match std::env::var("SHELL").as_deref() {
+            Ok(s) if s.ends_with("zsh") => app::ShellKind::Zsh,
+            Ok(s) if s.ends_with("fish") => app::ShellKind::Fish,
+            _ => app::ShellKind::Bash,
+        }
     }
 }
 
