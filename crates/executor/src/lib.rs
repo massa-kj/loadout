@@ -5,21 +5,29 @@
 //! - For each action, dispatch to `feature-host` (script mode) or `backend-host` (declarative)
 //! - Maintain per-feature atomicity: commit state only if all resources succeed
 //! - Emit `Event`s so callers (CLI / app) can show progress without coupling to I/O
+//! - Accumulate `ExecutionEnvContext` across actions so PATH and similar variables
+//!   propagate from earlier actions (e.g. brew) to later ones (e.g. npm)
 //!
 //! Error strategy:
 //! - Resource failure  → `Event::ResourceFailed` + feature aborts → `Event::FeatureFailed` → continue
 //! - State commit fail → `ExecutorError` (fatal, stops execution)
+//! - Required contributor fail → `ExecutorError` (fatal, stops execution)
+//! - Optional contributor fail → `Event::ContributorWarning`, execution continues
 //!
 //! Fs resources are handled directly by the executor in Phase 4.
 //! They will be extracted to a builtin `core/fs` backend in Phase 5.
 //!
 //! See: `docs/architecture/boundaries.md` (planner/executor boundary)
 
+pub mod activate;
+
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use backend_host::{BackendError, BackendRegistry};
 use feature_host::Dirs;
 use model::desired_resource_graph::{DesiredResource, DesiredResourceGraph, DesiredResourceKind};
+use model::env::{ExecutionEnvContext, ExecutionEnvDelta, ExecutionEnvPlan};
 use model::feature_index::{FeatureIndex, FeatureMode};
 use model::id::CanonicalFeatureId;
 use model::plan::{Operation, Plan, StrengthenDetails};
@@ -28,6 +36,137 @@ use model::state::{
     RuntimeDetails, State,
 };
 use platform::Platform;
+
+// ---------------------------------------------------------------------------
+// ExecutionEnvContributor trait
+// ---------------------------------------------------------------------------
+
+/// Context passed to [`ExecutionEnvContributor::execution_env_delta`].
+///
+/// Carries the platform and a snapshot of the current accumulated environment
+/// so contributors can probe the system or compute deltas based on what is
+/// already available.
+pub struct ExecutionEnvQuery<'a> {
+    pub platform: Platform,
+    /// Current state of accumulated env vars (read-only snapshot).
+    pub current_vars: &'a std::collections::BTreeMap<String, String>,
+}
+
+/// A source of execution environment mutations.
+///
+/// Implemented by:
+/// - builtin backend-adjacent structs (e.g. `BrewContributor`, `MiseContributor`)
+/// - runtime provider structs
+/// - feature contributors that have opted in via `feature.yaml`
+///
+/// Constraints for feature contributors:
+/// - May only contribute `PrependPath` / `AppendPath` mutations (command/runtime exposure)
+/// - Must not mutate global scalar variables (`Set` / `Unset` on shared keys is forbidden)
+/// - All mutations must be reversible (i.e. can be undone by `RemovePath`)
+///
+/// Contributors must **never** return shell fragments. Structured data only.
+pub trait ExecutionEnvContributor: Send + Sync {
+    /// Probe the system and return the environment delta this contributor provides.
+    fn execution_env_delta(
+        &self,
+        query: &ExecutionEnvQuery<'_>,
+    ) -> Result<ExecutionEnvDelta, ContributorError>;
+
+    /// If `true`, a failure from this contributor is fatal (hard fail).
+    /// If `false`, the failure is recorded as a warning and execution continues.
+    fn is_required(&self) -> bool {
+        true
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ContributorError
+// ---------------------------------------------------------------------------
+
+/// Error produced by an [`ExecutionEnvContributor`] invocation.
+#[derive(Debug, thiserror::Error)]
+#[error("contributor error: {reason}")]
+pub struct ContributorError {
+    pub reason: String,
+}
+
+impl ContributorError {
+    pub fn new(reason: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ContributorRegistry
+// ---------------------------------------------------------------------------
+
+/// Registry that maps backend keys to [`ExecutionEnvContributor`] implementations.
+///
+/// # Role: secondary Rust-only extension point
+///
+/// The **primary** mechanism for backend env contributions is `env_pre.sh` /
+/// `env_post.sh` shell scripts in the backend plugin directory (see
+/// `docs/specs/api/backend.md`). The executor calls `backend.env_pre()` and
+/// `backend.env_post()` directly, bypassing this registry entirely.
+///
+/// This registry exists as a **secondary extension point** for cases where shell
+/// scripts are not sufficient:
+/// - Rust unit tests that inject mock contributors without touching the filesystem
+/// - OS-level API probes that cannot be done in shell (e.g. Windows registry)
+/// - Future internal contributors generated from loadout metadata at runtime
+///
+/// # Registration
+///
+/// - **Pre-action**: contributor runs before calling a backend with the matching ID.
+/// - **Named (post-action)**: contributor runs when explicitly keyed in by e.g. a
+///   future post-apply hook. Currently unused in the primary execute path.
+///
+/// See `backends-builtin::register_contributors` for the entry point.
+#[derive(Default)]
+pub struct ContributorRegistry {
+    /// Backend-ID → contributor to evaluate *before* calling that backend.
+    pre_action: HashMap<String, Box<dyn ExecutionEnvContributor>>,
+    /// Named contributor key → contributor to evaluate *after* an action
+    /// signals it via `BackendApplyResult.post_contributors`.
+    named: HashMap<String, Box<dyn ExecutionEnvContributor>>,
+}
+
+impl ContributorRegistry {
+    /// Create an empty registry.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register a contributor to run before calls to `backend_id`.
+    pub fn register_pre_action(
+        &mut self,
+        backend_id: impl Into<String>,
+        contributor: Box<dyn ExecutionEnvContributor>,
+    ) {
+        self.pre_action.insert(backend_id.into(), contributor);
+    }
+
+    /// Register a named contributor for post-action lookup.
+    pub fn register_named(
+        &mut self,
+        key: impl Into<String>,
+        contributor: Box<dyn ExecutionEnvContributor>,
+    ) {
+        self.named.insert(key.into(), contributor);
+    }
+
+    /// Look up the pre-action contributor for a backend (may be absent).
+    pub fn pre_for_backend(&self, backend_id: &str) -> Option<&dyn ExecutionEnvContributor> {
+        self.pre_action.get(backend_id).map(|c| c.as_ref())
+    }
+
+    /// Look up a named contributor by key (may be absent).
+    pub fn named(&self, key: &str) -> Option<&dyn ExecutionEnvContributor> {
+        self.named.get(key).map(|c| c.as_ref())
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -51,6 +190,8 @@ pub enum Event {
         resource_id: String,
         error: String,
     },
+    /// An optional contributor failed; execution continues with a warning.
+    ContributorWarning { backend_id: String, reason: String },
 }
 
 /// Fatal executor errors (unrecoverable; stop all execution).
@@ -72,6 +213,10 @@ pub enum ExecutorError {
     /// A resource in the desired graph was not found for a feature that needs it.
     #[error("desired resources not found for feature: {id}")]
     DesiredResourcesNotFound { id: String },
+
+    /// A required contributor failed, making it unsafe to continue execution.
+    #[error("required contributor failed for backend '{backend_id}': {reason}")]
+    RequiredContributorFailed { backend_id: String, reason: String },
 }
 
 /// Result of a feature that executed successfully.
@@ -89,11 +234,33 @@ pub struct FailedFeature {
     pub error: String,
 }
 
+/// Per-action record of env contributor activity, included in the apply report.
+///
+/// Kept as an ephemeral artifact (not written to state) for debugging and
+/// future `loadout activate --from-last-apply` support.
+#[derive(Debug, Clone)]
+pub struct EnvArtifact {
+    /// Feature (action) that generated this record.
+    pub feature_id: String,
+    /// Phase: "pre" (before action) or "post" (after action).
+    pub phase: String,
+    /// Contributor key that was evaluated.
+    pub contributor_key: String,
+    /// The delta returned (mutations + evidence).
+    pub delta: ExecutionEnvDelta,
+    /// Variables that changed as a result of merging this delta.
+    pub changed_vars: Vec<(String, String)>,
+}
+
 /// Summary report produced by `execute()`.
 #[derive(Debug, Default)]
 pub struct ExecutorReport {
     pub executed: Vec<ExecutedFeature>,
     pub failed: Vec<FailedFeature>,
+    /// Env contributor invocation records for debugging (ephemeral, not in state).
+    pub env_artifacts: Vec<EnvArtifact>,
+    /// Final env context snapshot after all actions completed.
+    pub final_env_plan: ExecutionEnvPlan,
 }
 
 /// All inputs required for a single execution run.
@@ -105,6 +272,7 @@ pub struct ExecutionContext<'a> {
     pub graph: &'a DesiredResourceGraph,
     pub index: &'a FeatureIndex,
     pub registry: &'a BackendRegistry,
+    pub contributors: &'a ContributorRegistry,
     pub dirs: &'a Dirs,
     pub platform: &'a Platform,
     pub state_path: &'a Path,
@@ -125,6 +293,10 @@ pub fn execute(
     on_event: &mut dyn FnMut(Event),
 ) -> Result<ExecutorReport, ExecutorError> {
     let mut report = ExecutorReport::default();
+    // Seed the env context from the current process environment so that
+    // PrependPath/AppendPath mutations correctly extend the existing
+    // system PATH rather than replacing it with only the new entries.
+    let mut env_ctx = ExecutionEnvContext::from_process_env();
 
     for action in &ctx.plan.actions {
         let id_str = action.feature.as_str().to_string();
@@ -136,6 +308,9 @@ pub fn execute(
             &action.feature,
             &action.operation,
             &action.details,
+            &mut env_ctx,
+            &mut report.env_artifacts,
+            on_event,
         );
 
         match result {
@@ -182,6 +357,7 @@ pub fn execute(
         }
     }
 
+    report.final_env_plan = env_ctx.to_plan();
     Ok(report)
 }
 
@@ -207,12 +383,16 @@ impl From<feature_host::FeatureHostError> for FeatureError {
 // Per-action dispatch
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn execute_action(
     ctx: &ExecutionContext<'_>,
     state: &mut State,
     feature_id: &CanonicalFeatureId,
     op: &Operation,
     details: &Option<model::plan::ActionDetails>,
+    env_ctx: &mut ExecutionEnvContext,
+    artifacts: &mut Vec<EnvArtifact>,
+    on_event: &mut dyn FnMut(Event),
 ) -> Result<(), FeatureError> {
     let id_str = feature_id.as_str();
 
@@ -243,7 +423,14 @@ fn execute_action(
                             error: format!("desired resources not found for: {id_str}"),
                         })?;
 
-                let resources = apply_resources(ctx, id_str, &desired.resources)?;
+                let resources = apply_resources(
+                    ctx,
+                    id_str,
+                    &desired.resources,
+                    env_ctx,
+                    artifacts,
+                    on_event,
+                )?;
                 state
                     .features
                     .insert(id_str.to_string(), FeatureState { resources });
@@ -289,7 +476,14 @@ fn execute_action(
                             .ok_or_else(|| FeatureError::Feature {
                                 error: format!("desired resources not found for: {id_str}"),
                             })?;
-                    let resources = apply_resources(ctx, id_str, &desired.resources)?;
+                    let resources = apply_resources(
+                        ctx,
+                        id_str,
+                        &desired.resources,
+                        env_ctx,
+                        artifacts,
+                        on_event,
+                    )?;
                     state
                         .features
                         .insert(id_str.to_string(), FeatureState { resources });
@@ -319,7 +513,14 @@ fn execute_action(
                         .ok_or_else(|| FeatureError::Feature {
                             error: format!("desired resources not found for: {id_str}"),
                         })?;
-                let resources = apply_resources(ctx, id_str, &desired.resources)?;
+                let resources = apply_resources(
+                    ctx,
+                    id_str,
+                    &desired.resources,
+                    env_ctx,
+                    artifacts,
+                    on_event,
+                )?;
                 state
                     .features
                     .insert(id_str.to_string(), FeatureState { resources });
@@ -363,6 +564,9 @@ fn execute_action(
                 ctx,
                 id_str,
                 &to_add.iter().map(|r| (*r).clone()).collect::<Vec<_>>(),
+                env_ctx,
+                artifacts,
+                on_event,
             )?;
 
             // Merge new resources into existing state.
@@ -387,11 +591,14 @@ fn apply_resources(
     ctx: &ExecutionContext<'_>,
     feature_id: &str,
     desired: &[DesiredResource],
+    env_ctx: &mut ExecutionEnvContext,
+    artifacts: &mut Vec<EnvArtifact>,
+    on_event: &mut dyn FnMut(Event),
 ) -> Result<Vec<Resource>, FeatureError> {
     let mut resources = Vec::with_capacity(desired.len());
 
     for dr in desired {
-        match apply_one_resource(ctx, dr) {
+        match apply_one_resource(ctx, feature_id, dr, env_ctx, artifacts, on_event) {
             Ok(state_resource) => resources.push(state_resource),
             Err(e) => {
                 return Err(FeatureError::Resource {
@@ -405,21 +612,88 @@ fn apply_resources(
     Ok(resources)
 }
 
-/// Apply a single desired resource, returning its state representation.
+/// Apply a single desired resource and update the execution env context.
+///
+/// Before calling the backend, any registered pre-action contributor for that
+/// backend is evaluated and its delta is merged into `env_ctx`. The current
+/// env_ctx is then exported to subprocess-level env vars so the backend sees
+/// the cumulative environment. After a successful apply, any post-contributors
+/// signalled by [`BackendApplyResult::post_contributors`] are evaluated.
 fn apply_one_resource(
     ctx: &ExecutionContext<'_>,
+    feature_id: &str,
     dr: &DesiredResource,
+    env_ctx: &mut ExecutionEnvContext,
+    artifacts: &mut Vec<EnvArtifact>,
+    on_event: &mut dyn FnMut(Event),
 ) -> Result<Resource, String> {
     match &dr.kind {
         DesiredResourceKind::Package {
             name,
             desired_backend,
         } => {
+            let backend_key = desired_backend.as_str();
             let backend = ctx
                 .registry
                 .get(desired_backend)
                 .map_err(|e| e.to_string())?;
+
+            // Query pre-action env delta from the backend plugin (non-fatal on failure).
+            match backend.env_pre(dr) {
+                Ok(Some(delta)) => {
+                    merge_backend_delta(
+                        delta,
+                        "pre",
+                        backend_key,
+                        feature_id,
+                        env_ctx,
+                        *ctx.platform,
+                        artifacts,
+                    );
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    on_event(Event::ContributorWarning {
+                        backend_id: backend_key.to_string(),
+                        reason: format!("env_pre failed: {e}"),
+                    });
+                }
+            }
+
+            // Export accumulated env to subprocess environment.
+            for (k, v) in &env_ctx.vars {
+                // SAFETY: env mutation is intentional; executor controls the process.
+                // On Windows this is also safe — std::env::set_var is cfg-guarded by stdlib.
+                #[allow(unsafe_code)]
+                unsafe {
+                    std::env::set_var(k, v);
+                }
+            }
+
             backend.apply(dr).map_err(|e| e.to_string())?;
+
+            // Query post-action env delta from the backend plugin (non-fatal on failure).
+            match backend.env_post(dr) {
+                Ok(Some(delta)) => {
+                    merge_backend_delta(
+                        delta,
+                        "post",
+                        backend_key,
+                        feature_id,
+                        env_ctx,
+                        *ctx.platform,
+                        artifacts,
+                    );
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    on_event(Event::ContributorWarning {
+                        backend_id: backend_key.to_string(),
+                        reason: format!("env_post failed: {e}"),
+                    });
+                }
+            }
+
             Ok(Resource {
                 id: dr.id.clone(),
                 kind: ResourceKind::Package {
@@ -436,11 +710,66 @@ fn apply_one_resource(
             version,
             desired_backend,
         } => {
+            let backend_key = desired_backend.as_str();
             let backend = ctx
                 .registry
                 .get(desired_backend)
                 .map_err(|e| e.to_string())?;
+
+            // Query pre-action env delta from the backend plugin (non-fatal on failure).
+            match backend.env_pre(dr) {
+                Ok(Some(delta)) => {
+                    merge_backend_delta(
+                        delta,
+                        "pre",
+                        backend_key,
+                        feature_id,
+                        env_ctx,
+                        *ctx.platform,
+                        artifacts,
+                    );
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    on_event(Event::ContributorWarning {
+                        backend_id: backend_key.to_string(),
+                        reason: format!("env_pre failed: {e}"),
+                    });
+                }
+            }
+
+            // Export accumulated env to subprocess environment.
+            for (k, v) in &env_ctx.vars {
+                #[allow(unsafe_code)]
+                unsafe {
+                    std::env::set_var(k, v);
+                }
+            }
+
             backend.apply(dr).map_err(|e| e.to_string())?;
+
+            // Query post-action env delta from the backend plugin (non-fatal on failure).
+            match backend.env_post(dr) {
+                Ok(Some(delta)) => {
+                    merge_backend_delta(
+                        delta,
+                        "post",
+                        backend_key,
+                        feature_id,
+                        env_ctx,
+                        *ctx.platform,
+                        artifacts,
+                    );
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    on_event(Event::ContributorWarning {
+                        backend_id: backend_key.to_string(),
+                        reason: format!("env_post failed: {e}"),
+                    });
+                }
+            }
+
             Ok(Resource {
                 id: dr.id.clone(),
                 kind: ResourceKind::Runtime {
@@ -473,6 +802,128 @@ fn apply_one_resource(
             })
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Backend env delta merge helper
+// ---------------------------------------------------------------------------
+
+/// Merge an [`ExecutionEnvDelta`] returned from `backend.env_pre()` or
+/// `backend.env_post()` into `env_ctx` and record an [`EnvArtifact`].
+///
+/// This is the primary mechanism for plugins to contribute environment
+/// variables to the execution session. Rust-based [`ExecutionEnvContributor`]
+/// implementations are a secondary, extension-point-only mechanism.
+#[allow(clippy::too_many_arguments)]
+fn merge_backend_delta(
+    delta: model::env::ExecutionEnvDelta,
+    phase: &str,
+    backend_key: &str,
+    feature_id: &str,
+    env_ctx: &mut ExecutionEnvContext,
+    platform: Platform,
+    artifacts: &mut Vec<EnvArtifact>,
+) {
+    // Collect affected keys before consuming `delta` in merge().
+    let affected_keys: Vec<String> = delta
+        .mutations
+        .iter()
+        .map(|m| match m {
+            model::env::EnvMutation::Set { key, .. }
+            | model::env::EnvMutation::Unset { key }
+            | model::env::EnvMutation::PrependPath { key, .. }
+            | model::env::EnvMutation::AppendPath { key, .. }
+            | model::env::EnvMutation::RemovePath { key, .. } => key.clone(),
+        })
+        .collect();
+    env_ctx.merge(&delta, platform);
+    let changed_vars: Vec<(String, String)> = affected_keys
+        .into_iter()
+        .map(|k| {
+            let v = env_ctx.vars.get(&k).cloned().unwrap_or_default();
+            (k, v)
+        })
+        .collect();
+    artifacts.push(EnvArtifact {
+        feature_id: feature_id.to_string(),
+        phase: phase.to_string(),
+        contributor_key: backend_key.to_string(),
+        delta,
+        changed_vars,
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Contributor evaluation helper
+// ---------------------------------------------------------------------------
+
+/// Evaluate one contributor, merge its delta into `env_ctx`, and record the
+/// artifact. Non-fatal contributors emit a [`Event::ContributorWarning`] on
+/// failure; required contributors propagate a hard error.
+///
+/// This is a secondary Rust extension point. Primary env contributions are
+/// handled via `backend.env_pre()` / `backend.env_post()` (see
+/// `merge_backend_delta`). This function is kept for cases where a Rust
+/// struct must contribute env without a corresponding script backend.
+#[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
+fn evaluate_contributor(
+    key: &str,
+    contributor: &dyn ExecutionEnvContributor,
+    phase: &str,
+    feature_id: &str,
+    env_ctx: &mut ExecutionEnvContext,
+    platform: Platform,
+    artifacts: &mut Vec<EnvArtifact>,
+    on_event: &mut dyn FnMut(Event),
+) -> Result<(), String> {
+    let query = ExecutionEnvQuery {
+        platform,
+        current_vars: &env_ctx.vars,
+    };
+    match contributor.execution_env_delta(&query) {
+        Ok(delta) => {
+            // Collect which keys are affected before merging.
+            let affected_keys: Vec<String> = delta
+                .mutations
+                .iter()
+                .map(|m| match m {
+                    model::env::EnvMutation::Set { key, .. }
+                    | model::env::EnvMutation::Unset { key }
+                    | model::env::EnvMutation::PrependPath { key, .. }
+                    | model::env::EnvMutation::AppendPath { key, .. }
+                    | model::env::EnvMutation::RemovePath { key, .. } => key.clone(),
+                })
+                .collect();
+            env_ctx.merge(&delta, platform);
+            // Record (key, new_value) pairs after merging.
+            let changed_vars: Vec<(String, String)> = affected_keys
+                .into_iter()
+                .map(|k| {
+                    let v = env_ctx.vars.get(&k).cloned().unwrap_or_default();
+                    (k, v)
+                })
+                .collect();
+            artifacts.push(EnvArtifact {
+                feature_id: feature_id.to_string(),
+                phase: phase.to_string(),
+                contributor_key: key.to_string(),
+                delta,
+                changed_vars,
+            });
+        }
+        Err(e) => {
+            if contributor.is_required() {
+                return Err(format!("required contributor '{key}' failed: {e}"));
+            } else {
+                on_event(Event::ContributorWarning {
+                    backend_id: key.to_string(),
+                    reason: e.to_string(),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Remove state resources using the backend recorded at install time (authoritative).
@@ -653,8 +1104,11 @@ mod tests {
 
     struct OkBackend;
     impl Backend for OkBackend {
-        fn apply(&self, _r: &DesiredResource) -> Result<(), BackendError> {
-            Ok(())
+        fn apply(
+            &self,
+            _r: &DesiredResource,
+        ) -> Result<backend_host::BackendApplyResult, BackendError> {
+            Ok(backend_host::BackendApplyResult::none())
         }
         fn remove(&self, _r: &DesiredResource) -> Result<(), BackendError> {
             Ok(())
@@ -669,7 +1123,10 @@ mod tests {
 
     struct FailBackend;
     impl Backend for FailBackend {
-        fn apply(&self, _r: &DesiredResource) -> Result<(), BackendError> {
+        fn apply(
+            &self,
+            _r: &DesiredResource,
+        ) -> Result<backend_host::BackendApplyResult, BackendError> {
             Err(BackendError::ScriptFailed {
                 exit_code: 1,
                 stderr: "fail".to_string(),
@@ -836,6 +1293,7 @@ mod tests {
             dirs: &dirs,
             platform: &platform,
             state_path: &state_path,
+            contributors: &ContributorRegistry::new(),
         };
 
         let mut events = vec![];
@@ -881,6 +1339,7 @@ mod tests {
             dirs: &dirs,
             platform: &platform,
             state_path: &state_path,
+            contributors: &ContributorRegistry::new(),
         };
 
         let mut events = vec![];
@@ -939,6 +1398,7 @@ mod tests {
             dirs: &dirs,
             platform: &platform,
             state_path: &state_path,
+            contributors: &ContributorRegistry::new(),
         };
 
         let mut events = vec![];
@@ -990,6 +1450,7 @@ mod tests {
             dirs: &dirs,
             platform: &platform,
             state_path: &state_path,
+            contributors: &ContributorRegistry::new(),
         };
 
         let mut events = vec![];
@@ -1040,6 +1501,7 @@ mod tests {
             dirs: &dirs,
             platform: &platform,
             state_path: &state_path,
+            contributors: &ContributorRegistry::new(),
         };
 
         let mut events = vec![];
@@ -1107,6 +1569,7 @@ mod tests {
             dirs: &dirs,
             platform: &platform,
             state_path: &state_path,
+            contributors: &ContributorRegistry::new(),
         };
 
         let mut events = vec![];
@@ -1161,6 +1624,7 @@ mod tests {
             dirs: &dirs,
             platform: &platform,
             state_path: &state_path,
+            contributors: &ContributorRegistry::new(),
         };
 
         let mut events = vec![];
@@ -1211,6 +1675,7 @@ mod tests {
             dirs: &dirs,
             platform: &platform,
             state_path: &state_path,
+            contributors: &ContributorRegistry::new(),
         };
 
         let mut events = vec![];

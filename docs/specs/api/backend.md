@@ -6,6 +6,7 @@ This document defines the normative interface contract for backend plugins in th
 
 **Covered:**
 - Required script operations (`apply.sh`, `remove.sh`, `status.sh`)
+- Optional env lifecycle scripts (`env_pre.sh`, `env_post.sh`)
 - Environment variable and JSON stdin protocol
 - Plugin directory layout and metadata
 - Determinism requirements and isolation rules
@@ -29,12 +30,15 @@ Builtin backends (like `brew`, `apt`, `mise`) are implemented directly in Rust v
 ```text
 <backend_dir>/
   backend.yaml     # metadata (api_version)
-  apply.sh         # install or upgrade
-  remove.sh        # uninstall
-  status.sh        # query installation state
+  apply.sh         # install or upgrade         (required)
+  remove.sh        # uninstall                  (required)
+  status.sh        # query installation state   (required)
+  env_pre.sh       # pre-action env delta        (optional, api_version 1+)
+  env_post.sh      # post-action env delta       (optional, api_version 1+)
 ```
 
-All three scripts must be present and executable.
+`apply.sh`, `remove.sh`, `status.sh` must be present and executable.
+`env_pre.sh` and `env_post.sh` are **optional**. Backends without them continue to work unchanged.
 
 ---
 
@@ -133,7 +137,107 @@ Scripts that need JSON can parse stdin with `jq` or other tools:
 name=$(jq -r '.Package.name' <&0)
 ```
 
----
+## Env Lifecycle Scripts (Optional)
+
+`env_pre.sh` and `env_post.sh` allow a backend plugin to **declare execution
+environment mutations** that the executor applies before and after calling
+`apply.sh`. This enables downstream backends to use tools that were just
+installed (e.g. brew PATH before calling a brew-backed backend, mise shims
+after installing a runtime).
+
+### When to use
+
+| Script | Use case |
+|---|---|
+| `env_pre.sh` | Backend's own tool needs to be on PATH before `apply.sh` runs (e.g., `brew`, `mise` shims) |
+| `env_post.sh` | After successful apply, expose newly-installed tools to subsequent backends (e.g., `mise` shims after runtime install) |
+
+### Protocol
+
+**Input:**
+- Same environment variables as `apply.sh` (`LOADOUT_RESOURCE_KIND`, `LOADOUT_PACKAGE_NAME`, etc.)
+- **No JSON on stdin** (unlike `apply.sh`, no stdin is provided)
+
+**Output:**
+- A JSON **env delta payload** on **stdout** (see wire format below)
+- Empty stdout is a valid no-op (treated as "no env changes")
+- **stderr** is forwarded to the user (diagnostic messages)
+
+**Exit code:**
+- **0** — Success (output may be empty)
+- **Non-0** — Failure → executor emits a `ContributorWarning` and continues (non-fatal)
+
+### Wire Format
+
+```json
+{
+  "schema_version": 1,
+  "mutations": [
+    { "op": "prepend_path", "key": "PATH", "entries": ["/home/linuxbrew/.linuxbrew/bin"] },
+    { "op": "set",          "key": "HOMEBREW_NO_AUTO_UPDATE", "value": "1" }
+  ],
+  "evidence": {
+    "kind": "probed",
+    "command": "brew --prefix"
+  }
+}
+```
+
+#### `mutations` — supported `op` values
+
+| `op` | Fields | Description |
+|---|---|---|
+| `set` | `key`, `value` | Set a variable to an exact value |
+| `unset` | `key` | Remove a variable |
+| `prepend_path` | `key`, `entries: []` | Prepend entries to a PATH-style variable |
+| `append_path` | `key`, `entries: []` | Append entries to a PATH-style variable |
+| `remove_path` | `key`, `entries: []` | Remove specific entries from a PATH-style variable |
+
+#### `evidence` — how the value was obtained
+
+| `kind` | Additional fields | Meaning |
+|---|---|---|
+| `static_default` | _(none)_ | Hardcoded / well-known default path |
+| `probed` | `command` | Value obtained by running a command (e.g. `brew --prefix`) |
+| `config_file` | `path` | Value read from a configuration file |
+
+`evidence` is optional. If omitted, `kind` defaults to `static_default`.
+
+### Implementation Example (pure bash, no jq)
+
+```bash
+#!/usr/bin/env bash
+# backends/brew/env_pre.sh
+set -euo pipefail
+
+BREW_PREFIX="$(brew --prefix 2>/dev/null || true)"
+if [[ -z "$BREW_PREFIX" ]]; then
+    exit 0  # brew not found — no env contribution
+fi
+
+cat <<JSON
+{
+  "schema_version": 1,
+  "mutations": [
+    { "op": "prepend_path", "key": "PATH", "entries": ["${BREW_PREFIX}/bin"] }
+  ],
+  "evidence": { "kind": "probed", "command": "brew --prefix" }
+}
+JSON
+```
+
+**Requirements:**
+- No external tools (`jq` is NOT required).
+  Use bash heredoc or `printf` / `echo` to produce JSON. All values must be known strings with no special characters, which makes raw string construction safe.
+- Exit 0 with empty stdout if the tool is not installed (valid no-op).
+
+### Error Handling
+
+Failures in `env_pre.sh` / `env_post.sh` are **non-fatal**. The executor:
+1. Emits a `ContributorWarning` event with the backend ID and reason.
+2. Continues with the next action (does not abort the apply session).
+
+This matches the `is_required() = false` behaviour used for optional contributors.
 
 ## Script Operations
 
@@ -252,6 +356,8 @@ Non-determinism (e.g., race conditions, external network failures) may cause tra
 - **Current API version:** `1`
 - Breaking changes to the JSON schema or script contract will increment `api_version`.
 - New optional fields may be added to the resource JSON without a version bump (scripts must ignore unknown fields).
+- `env_pre.sh` and `env_post.sh` were added in `api_version 1` as optional extensions;
+  existing backends without these files continue to work unchanged.
 
 Core will reject backends with an unsupported `api_version` at load time.
 

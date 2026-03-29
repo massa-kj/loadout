@@ -49,10 +49,17 @@ backends/<backend_name>/
 ├── backend.yaml     # Metadata (required)
 ├── apply.sh         # Install/upgrade operation (required)
 ├── remove.sh        # Uninstall operation (required)
-└── status.sh        # Query installation state (required)
+├── status.sh        # Query installation state (required)
+├── env_pre.sh       # Pre-action env delta (optional)
+└── env_post.sh      # Post-action env delta (optional)
 ```
 
-All three scripts (`.sh` on Linux/macOS, `.ps1` on Windows) must be present and executable.
+The three core scripts (`.sh` on Linux/macOS, `.ps1` on Windows) must be present and executable.
+
+`env_pre.sh` and `env_post.sh` are **optional**. Add them only when your backend needs to
+contribute environment variables to the executor session:
+- **`env_pre.sh`** — runs before `apply.sh` (e.g., ensure `brew` is on PATH before invoking brew-backed packages)
+- **`env_post.sh`** — runs after a successful `apply.sh` (e.g., expose newly-installed tool shims)
 
 ### Backend Discovery
 
@@ -208,7 +215,84 @@ esac
 
 ---
 
-## Environment Variables Reference
+## Implementing Env Lifecycle Scripts (Optional)
+
+If your backend installs a tool that subsequent backends depend on (e.g., `brew`, `mise`),
+you can add `env_pre.sh` and/or `env_post.sh` to contribute environment mutations to the
+executor's running session.
+
+### 5. Implement `env_pre.sh` (optional)
+
+**Purpose:** Declare env mutations needed **before** `apply.sh` runs.
+
+The executor calls this script first, merges the returned delta into the session env, then
+exports updated variables to `apply.sh`'s subprocess. This allows `apply.sh` to use tools
+that are already on PATH.
+
+**Contract:**
+- **Input:** Same environment variables as `apply.sh` (no JSON stdin)
+- **Output:** JSON env delta payload on stdout, OR empty stdout (valid no-op)
+- **Exit code:** 0 = success, non-0 = failure (non-fatal; executor warns and continues)
+- **No external tools required:** construct JSON with bash heredoc (`no jq needed`)
+
+**Example: brew backend prepending its bin directory**
+
+```bash
+#!/usr/bin/env bash
+# backends/brew/env_pre.sh
+set -euo pipefail
+
+BREW_PREFIX="$(brew --prefix 2>/dev/null || true)"
+if [[ -z "$BREW_PREFIX" ]]; then
+    # brew not installed yet, or not found; nothing to contribute
+    exit 0
+fi
+
+cat <<JSON
+{
+  "schema_version": 1,
+  "mutations": [
+    { "op": "prepend_path", "key": "PATH", "entries": ["${BREW_PREFIX}/bin", "${BREW_PREFIX}/sbin"] }
+  ],
+  "evidence": { "kind": "probed", "command": "brew --prefix" }
+}
+JSON
+```
+
+### 6. Implement `env_post.sh` (optional)
+
+**Purpose:** Declare env mutations that become available **after** a successful `apply.sh`.
+
+Use this when installing a tool via `apply.sh` reveals new paths (e.g., a runtime manager
+installing shims that subsequent backends need).
+
+**Example: mise backend adding shims after runtime install**
+
+```bash
+#!/usr/bin/env bash
+# backends/mise/env_post.sh
+set -euo pipefail
+
+MISE_SHIMS="$(mise shims --dirs 2>/dev/null | head -n1 || true)"
+if [[ -z "$MISE_SHIMS" ]]; then
+    exit 0
+fi
+
+cat <<JSON
+{
+  "schema_version": 1,
+  "mutations": [
+    { "op": "prepend_path", "key": "PATH", "entries": ["${MISE_SHIMS}"] }
+  ],
+  "evidence": { "kind": "probed", "command": "mise shims --dirs" }
+}
+JSON
+```
+
+### Wire Format Reference
+
+See [`specs/api/backend.md` — Env Lifecycle Scripts](../specs/api/backend.md) for the full JSON wire format
+documentation, including all supported `op` values and `evidence` kinds.
 
 Scripts receive resource data via environment variables:
 

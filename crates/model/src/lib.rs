@@ -4,6 +4,7 @@
 //! It has no I/O dependencies; serialization uses serde derives only.
 
 pub mod desired_resource_graph;
+pub mod env;
 pub mod error;
 pub mod feature_index;
 pub mod id;

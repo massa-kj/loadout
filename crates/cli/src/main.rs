@@ -143,6 +143,9 @@ fn cmd_apply(args: &[String]) {
             Event::FeatureFailed { id, error } => {
                 eprintln!("  ✗ {id}: {error}");
             }
+            Event::ContributorWarning { backend_id, reason } => {
+                eprintln!("  ⚠ contributor '{backend_id}': {reason}");
+            }
         }
     });
 

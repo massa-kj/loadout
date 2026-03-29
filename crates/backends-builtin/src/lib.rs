@@ -1,75 +1,80 @@
-//! Builtin backends — Rust implementations of the core package manager adapters.
+//! Builtin backend registration — extension point for Rust-native backend adapters.
 //!
-//! Each backend implements [`backend_host::Backend`] and shells out to the
-//! appropriate package manager CLI. The glue code is in Rust rather than shell,
-//! eliminating bash as a dependency for the core installation path.
+//! # Current state
 //!
-//! # Available backends
+//! All production backends are implemented as **script backends** (shell-script
+//! directories under `backends/<name>/`). This crate previously held Rust-native
+//! backends for `apt`, `brew`, `mise`, `npm`, `uv`, `scoop`, and `winget`, but
+//! they have been removed in favour of the script-backend approach.
 //!
-//! | Backend ID    | Tool        | Supported kinds | Platforms         |
-//! |---------------|-------------|-----------------|-------------------|
-//! | `core/brew`   | Homebrew    | package         | Linux, macOS, WSL |
-//! | `core/apt`    | APT         | package         | Linux, WSL        |
-//! | `core/mise`   | mise        | runtime         | all               |
-//! | `core/npm`    | npm         | package         | all               |
-//! | `core/uv`     | uv          | package         | all               |
-//! | `core/scoop`  | Scoop       | package         | Windows           |
-//! | `core/winget` | winget      | package         | Windows           |
+//! # Extension points
 //!
-//! # Registration
+//! Two registration functions are retained as hooks for future Rust-native
+//! implementations:
 //!
-//! Call [`register_builtins`] once during app startup to populate a
-//! [`backend_host::BackendRegistry`] with all platform-appropriate backends.
-//! Script backends from `backends/` on disk are registered afterwards and can
-//! override or extend the builtins.
+//! - [`register_builtins`]  — register [`backend_host::Backend`] trait objects
+//! - [`register_contributors`] — register [`executor::ExecutionEnvContributor`] objects
 //!
-//! See: `docs/specs/api/backend.md`
-
-pub mod apt;
-pub mod brew;
-pub mod mise;
-pub mod npm;
-pub mod scoop;
-pub mod uv;
-pub mod winget;
-
-mod cmd;
+//! Both are intentionally empty. Add implementations here only when shell
+//! scripts are genuinely insufficient (e.g. Windows registry reads, OS API
+//! probes, or unit-test mock injection).
+//!
+//! See: `docs/specs/api/backend.md`, `docs/guides/backends.md`
 
 use backend_host::{BackendId, BackendRegistry};
+use executor::ContributorRegistry;
 use platform::Platform;
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Register all builtin backends appropriate for `platform` into `registry`.
+/// Register all builtin [`Backend`] implementations for `platform` into `registry`.
 ///
-/// Builtin backends are registered under `core/<name>` IDs.  Script backends
-/// loaded from disk afterwards can override individual entries.
+/// # Current state: intentionally empty
 ///
-/// # Platform mapping
+/// Builtin Rust backends (`core/brew`, `core/apt`, `core/mise`, …) are being
+/// deprecated in favour of **script backends** — shell-script directories loaded
+/// from `backends/<name>/` at runtime. All production backends are now script
+/// backends; this function registers nothing by default.
 ///
-/// | Platform      | Backends registered                                |
-/// |---------------|----------------------------------------------------|
-/// | Linux / WSL   | `core/brew`, `core/apt`, `core/mise`, `core/npm`, `core/uv` |
-/// | Windows       | `core/scoop`, `core/winget`, `core/mise`, `core/npm`, `core/uv` |
-pub fn register_builtins(registry: &mut BackendRegistry, platform: &Platform) {
-    match platform {
-        Platform::Linux | Platform::Wsl => {
-            // registry.register(id("core/brew"), Box::new(brew::BrewBackend));
-            registry.register(id("core/apt"), Box::new(apt::AptBackend));
-            // registry.register(id("core/mise"), Box::new(mise::MiseBackend));
-            registry.register(id("core/npm"), Box::new(npm::NpmBackend));
-            registry.register(id("core/uv"), Box::new(uv::UvBackend));
-        }
-        Platform::Windows => {
-            registry.register(id("core/scoop"), Box::new(scoop::ScoopBackend));
-            registry.register(id("core/winget"), Box::new(winget::WingetBackend));
-            registry.register(id("core/mise"), Box::new(mise::MiseBackend));
-            registry.register(id("core/npm"), Box::new(npm::NpmBackend));
-            registry.register(id("core/uv"), Box::new(uv::UvBackend));
-        }
-    }
+/// # Extension point
+///
+/// The registration infrastructure is preserved so that a Rust-native backend
+/// can be added here when shell scripts are genuinely insufficient (e.g. a
+/// backend that requires deep OS integration). To add one, implement the
+/// [`Backend`] trait and call `registry.register(id("core/name"), Box::new(…))`
+/// inside the appropriate platform arm.
+pub fn register_builtins(_registry: &mut BackendRegistry, _platform: &Platform) {
+    // Intentionally empty: all backends are now script backends loaded from disk.
+    // Rust-native backend registrations go here if needed in the future.
+}
+
+/// Register Rust-based [`executor::ExecutionEnvContributor`]s for the given platform.
+///
+/// # Current state: intentionally empty
+///
+/// Env contributions for builtin backends (`core/brew`, `core/mise`, …) are now
+/// handled entirely by `env_pre.sh` / `env_post.sh` shell scripts in the backend
+/// plugin directory (e.g. `backends/brew/env_pre.sh`). No Rust contributors are
+/// registered by default.
+///
+/// # Extension point
+///
+/// `ContributorRegistry` is preserved as a **secondary Rust-only extension point**
+/// for cases where shell scripts are not sufficient:
+/// - OS-level API probes (e.g. Windows registry reads)
+/// - Contributors generated from loadout's own metadata at runtime
+/// - Dependency injection in unit tests (mock contributors)
+///
+/// To add a Rust contributor, implement [`executor::ExecutionEnvContributor`] and
+/// call `registry.register_pre_action(key, Box::new(MyContributor))` here.
+/// Prefer `env_pre.sh` for new work; use Rust contributors only when shell is
+/// genuinely insufficient.
+pub fn register_contributors(_registry: &mut ContributorRegistry, _platform: &Platform) {
+    // Intentionally empty: all env contributions are handled by env_pre.sh /
+    // env_post.sh scripts in the backend plugin directory.
+    // See: backends/brew/env_pre.sh, backends/mise/env_pre.sh
 }
 
 // ---------------------------------------------------------------------------
@@ -80,6 +85,7 @@ pub fn register_builtins(registry: &mut BackendRegistry, platform: &Platform) {
 ///
 /// Panics if the string is not a valid canonical ID — callers must use
 /// compile-time-known strings of the form `"<source>/<name>"`.
+#[allow(dead_code)]
 fn id(s: &str) -> BackendId {
     BackendId::new(s).expect("builtin backend IDs are always valid canonical IDs")
 }

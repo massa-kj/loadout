@@ -110,11 +110,48 @@ pub enum BackendError {
     /// Example: npm backend does not support runtime resources.
     #[error("resource kind not supported by this backend: {kind}")]
     NotSupported { kind: String },
+
+    /// The `env_pre.sh` or `env_post.sh` script produced output that could not
+    /// be parsed as a valid env delta JSON payload.
+    ///
+    /// See: `docs/specs/api/backend.md` for the expected JSON wire format.
+    #[error("env script output could not be parsed: {reason}")]
+    EnvScriptParseFailed { reason: String },
 }
 
 // ---------------------------------------------------------------------------
 // Backend trait
 // ---------------------------------------------------------------------------
+
+/// Result returned by a successful [`Backend::apply`] call.
+///
+/// Contains keys of post-action env contributors that the executor should
+/// evaluate after this apply completes, and whose deltas should be merged into
+/// the running [`ExecutionEnvContext`] before the next action runs.
+///
+/// Most backends return an empty `post_contributors` list. Backends that
+/// provide new tools to later actions (e.g. `core/mise` after installing a
+/// runtime) populate this list so the executor can update PATH and similar
+/// variables automatically.
+#[derive(Debug, Default)]
+pub struct BackendApplyResult {
+    /// Keys into `ContributorRegistry::named` to evaluate after this apply.
+    pub post_contributors: Vec<String>,
+}
+
+impl BackendApplyResult {
+    /// Construct a result with no post-action contributors (the common case).
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// Construct a result advertising a single named post-action contributor.
+    pub fn with_contributor(key: impl Into<String>) -> Self {
+        Self {
+            post_contributors: vec![key.into()],
+        }
+    }
+}
 
 /// The executor-facing interface for all backend implementations.
 ///
@@ -123,13 +160,57 @@ pub enum BackendError {
 /// and are responsible only for the operation; routing is handled by the registry.
 pub trait Backend: Send + Sync {
     /// Install or update the resource so that it is present.
-    fn apply(&self, resource: &DesiredResource) -> Result<(), BackendError>;
+    ///
+    /// Returns a [`BackendApplyResult`] that advertises any post-action env
+    /// contributors the executor should evaluate to keep the env context current.
+    fn apply(&self, resource: &DesiredResource) -> Result<BackendApplyResult, BackendError>;
 
     /// Remove the resource so that it is no longer present.
     fn remove(&self, resource: &DesiredResource) -> Result<(), BackendError>;
 
     /// Query the current installation state of the resource.
     fn status(&self, resource: &DesiredResource) -> Result<ResourceState, BackendError>;
+
+    /// Probe and return env mutations needed **before** `apply` is called.
+    ///
+    /// The executor merges the returned delta into the running env context and
+    /// exports updated variables to the subprocess environment before invoking
+    /// `apply`, `remove`, or `status`.
+    ///
+    /// Script backends implement this via an optional `env_pre.sh` /
+    /// `env_pre.ps1` file in the backend directory. The script:
+    /// - receives the same environment variables as `apply.sh` (no JSON stdin)
+    /// - writes a JSON [`EnvDeltaPayload`] to **stdout** (empty stdout = no-op)
+    /// - must exit 0 on success; non-zero exit → [`BackendError::ScriptFailed`]
+    ///
+    /// Non-fatal: the executor emits a [`ContributorWarning`] on failure and
+    /// continues. Default: `Ok(None)` (no pre-action env setup).
+    ///
+    /// [`ContributorWarning`]: (see executor crate Event enum)
+    fn env_pre(
+        &self,
+        resource: &DesiredResource,
+    ) -> Result<Option<model::env::ExecutionEnvDelta>, BackendError> {
+        let _ = resource;
+        Ok(None)
+    }
+
+    /// Probe and return env mutations needed **after** a successful `apply`.
+    ///
+    /// Used to expose newly installed tools to subsequent backend calls in the
+    /// same apply session (e.g. mise shims after installing a runtime).
+    ///
+    /// Same script contract as `env_pre`: optional `env_post.sh` / `env_post.ps1`,
+    /// JSON stdout, no JSON stdin, exit 0 = success.
+    ///
+    /// Default: `Ok(None)` (no post-action env setup).
+    fn env_post(
+        &self,
+        resource: &DesiredResource,
+    ) -> Result<Option<model::env::ExecutionEnvDelta>, BackendError> {
+        let _ = resource;
+        Ok(None)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -201,16 +282,25 @@ struct BackendMeta {
 /// Expected directory layout:
 /// ```text
 /// <backend_dir>/
-///   backend.yaml     # metadata (api_version)
-///   apply.sh         # install / update
-///   remove.sh        # uninstall
-///   status.sh        # query current state
+///   backend.yaml       # metadata (api_version)
+///   apply.sh           # install or upgrade  (required)
+///   remove.sh          # uninstall           (required)
+///   status.sh          # query state         (required)
+///   env_pre.sh         # pre-action env      (optional)
+///   env_post.sh        # post-action env     (optional)
 /// ```
 ///
-/// Protocol:
-/// - The resource is serialised as JSON and written to the script's **stdin**.
-/// - `apply.sh` / `remove.sh`: exit 0 = success, non-0 = failure (stderr captured).
-/// - `status.sh`: exit 0 + stdout one of `installed`, `not_installed`, `unknown`.
+/// Protocol for `apply.sh` / `remove.sh` / `status.sh`:
+/// - Resource data passed via **environment variables** (primary).
+/// - Optionally also available as JSON on **stdin** (for `jq` / complex parsing).
+/// - Exit 0 = success; non-zero = failure (stderr captured).
+/// - `status.sh` writes `installed`, `not_installed`, or `unknown` to stdout.
+///
+/// Protocol for `env_pre.sh` / `env_post.sh` (optional; api_version 1+):
+/// - Receive the same environment variables as `apply.sh` (no JSON stdin).
+/// - Write a JSON [`EnvDeltaPayload`] to **stdout** (empty stdout = no-op).
+/// - Exit 0 = success; non-zero → [`BackendError::ScriptFailed`].
+/// - Failure is non-fatal: executor emits a warning and continues.
 #[derive(Debug)]
 pub struct ScriptBackend {
     platform: Platform,
@@ -218,6 +308,10 @@ pub struct ScriptBackend {
     apply_script: PathBuf,
     remove_script: PathBuf,
     status_script: PathBuf,
+    /// Pre-action env script (`env_pre.sh`), present only if the file exists.
+    env_pre_script: Option<PathBuf>,
+    /// Post-action env script (`env_post.sh`), present only if the file exists.
+    env_post_script: Option<PathBuf>,
 }
 
 impl ScriptBackend {
@@ -261,12 +355,32 @@ impl ScriptBackend {
             }
         }
 
+        // Detect optional env_pre / env_post scripts (api_version 1+).
+        let env_pre_script = {
+            let p = backend_dir.join(format!("env_pre.{}", script_ext));
+            if p.is_file() {
+                Some(p)
+            } else {
+                None
+            }
+        };
+        let env_post_script = {
+            let p = backend_dir.join(format!("env_post.{}", script_ext));
+            if p.is_file() {
+                Some(p)
+            } else {
+                None
+            }
+        };
+
         Ok(Self {
             platform,
             backend_dir,
             apply_script,
             remove_script,
             status_script,
+            env_pre_script,
+            env_post_script,
         })
     }
 
@@ -277,10 +391,10 @@ impl ScriptBackend {
 }
 
 impl Backend for ScriptBackend {
-    fn apply(&self, resource: &DesiredResource) -> Result<(), BackendError> {
+    fn apply(&self, resource: &DesiredResource) -> Result<BackendApplyResult, BackendError> {
         let json = serialise_resource(resource);
         run_script(self.platform, &self.apply_script, resource, &json)?;
-        Ok(())
+        Ok(BackendApplyResult::none())
     }
 
     fn remove(&self, resource: &DesiredResource) -> Result<(), BackendError> {
@@ -299,6 +413,26 @@ impl Backend for ScriptBackend {
             other => Err(BackendError::UnrecognisedStatus {
                 output: other.to_string(),
             }),
+        }
+    }
+
+    fn env_pre(
+        &self,
+        resource: &DesiredResource,
+    ) -> Result<Option<model::env::ExecutionEnvDelta>, BackendError> {
+        match &self.env_pre_script {
+            Some(script) => run_env_script(self.platform, script, resource).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    fn env_post(
+        &self,
+        resource: &DesiredResource,
+    ) -> Result<Option<model::env::ExecutionEnvDelta>, BackendError> {
+        match &self.env_post_script {
+            Some(script) => run_env_script(self.platform, script, resource).map(Some),
+            None => Ok(None),
         }
     }
 }
@@ -462,6 +596,162 @@ fn run_script_with_output(
 }
 
 // ---------------------------------------------------------------------------
+// Env delta wire format (env_pre / env_post script protocol)
+// ---------------------------------------------------------------------------
+
+/// Expected `schema_version` for env delta JSON payloads.
+const ENV_DELTA_SCHEMA_VERSION: u32 = 1;
+
+/// Top-level JSON envelope produced by `env_pre.sh` / `env_post.sh`.
+///
+/// Example:
+/// ```json
+/// {
+///   "schema_version": 1,
+///   "mutations": [
+///     { "op": "prepend_path", "key": "PATH", "entries": ["/opt/homebrew/bin"] }
+///   ],
+///   "evidence": { "kind": "probed", "command": "brew --prefix" }
+/// }
+/// ```
+#[derive(Debug, serde::Deserialize)]
+struct EnvDeltaPayload {
+    schema_version: u32,
+    mutations: Vec<EnvMutationEntry>,
+    #[serde(default)]
+    evidence: EnvEvidenceEntry,
+}
+
+/// Individual mutation entry as delivered by the script.
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+enum EnvMutationEntry {
+    Set { key: String, value: String },
+    Unset { key: String },
+    PrependPath { key: String, entries: Vec<String> },
+    AppendPath { key: String, entries: Vec<String> },
+    RemovePath { key: String, entries: Vec<String> },
+}
+
+/// Evidence entry describing how the env value was determined.
+#[derive(Debug, serde::Deserialize, Default)]
+struct EnvEvidenceEntry {
+    #[serde(default = "EnvEvidenceEntry::default_kind")]
+    kind: String,
+    command: Option<String>,
+    path: Option<String>,
+}
+
+impl EnvEvidenceEntry {
+    fn default_kind() -> String {
+        "static_default".to_string()
+    }
+}
+
+/// Parse a trimmed JSON string produced by an env lifecycle script into an
+/// [`ExecutionEnvDelta`].
+///
+/// Returns [`BackendError::EnvScriptParseFailed`] when the JSON is invalid or
+/// when the `schema_version` does not match [`ENV_DELTA_SCHEMA_VERSION`].
+fn parse_env_delta(stdout: &str) -> Result<model::env::ExecutionEnvDelta, BackendError> {
+    let payload: EnvDeltaPayload =
+        serde_json::from_str(stdout).map_err(|e| BackendError::EnvScriptParseFailed {
+            reason: e.to_string(),
+        })?;
+    if payload.schema_version != ENV_DELTA_SCHEMA_VERSION {
+        return Err(BackendError::EnvScriptParseFailed {
+            reason: format!(
+                "unsupported schema_version: {} (expected {})",
+                payload.schema_version, ENV_DELTA_SCHEMA_VERSION
+            ),
+        });
+    }
+    let mutations = payload
+        .mutations
+        .into_iter()
+        .map(|m| match m {
+            EnvMutationEntry::Set { key, value } => model::env::EnvMutation::Set { key, value },
+            EnvMutationEntry::Unset { key } => model::env::EnvMutation::Unset { key },
+            EnvMutationEntry::PrependPath { key, entries } => {
+                model::env::EnvMutation::PrependPath {
+                    key,
+                    entries: entries
+                        .into_iter()
+                        .map(model::env::PathEntry::new)
+                        .collect(),
+                }
+            }
+            EnvMutationEntry::AppendPath { key, entries } => model::env::EnvMutation::AppendPath {
+                key,
+                entries: entries
+                    .into_iter()
+                    .map(model::env::PathEntry::new)
+                    .collect(),
+            },
+            EnvMutationEntry::RemovePath { key, entries } => model::env::EnvMutation::RemovePath {
+                key,
+                entries: entries
+                    .into_iter()
+                    .map(model::env::PathEntry::new)
+                    .collect(),
+            },
+        })
+        .collect();
+    let evidence = match payload.evidence.kind.as_str() {
+        "probed" => model::env::EnvEvidence::Probed {
+            command: payload.evidence.command.unwrap_or_default(),
+        },
+        "config_file" => model::env::EnvEvidence::ConfigFile {
+            path: std::path::PathBuf::from(payload.evidence.path.unwrap_or_default()),
+        },
+        _ => model::env::EnvEvidence::StaticDefault,
+    };
+    Ok(model::env::ExecutionEnvDelta {
+        mutations,
+        evidence,
+    })
+}
+
+/// Run an optional env lifecycle script (`env_pre.sh` / `env_post.sh`) and
+/// parse its JSON output into an [`ExecutionEnvDelta`].
+///
+/// - The script receives the same environment variables as `apply.sh`.
+/// - No JSON is written to stdin (scripts must not rely on it).
+/// - Empty stdout (exit 0) is silently treated as an empty delta.
+/// - Non-zero exit → [`BackendError::ScriptFailed`].
+fn run_env_script(
+    platform: Platform,
+    script: &std::path::Path,
+    resource: &DesiredResource,
+) -> Result<model::env::ExecutionEnvDelta, BackendError> {
+    let mut cmd = build_command_with_env(platform, script, resource);
+    // No JSON stdin for env scripts; stderr is forwarded to the user.
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
+
+    let output = cmd.output().map_err(|e| BackendError::SpawnFailed {
+        reason: e.to_string(),
+    })?;
+
+    if !output.status.success() {
+        return Err(BackendError::ScriptFailed {
+            exit_code: output.status.code().unwrap_or(-1),
+            // stderr is inherited (visible to user); no need to echo it here.
+            stderr: String::new(),
+        });
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let trimmed = stdout.trim();
+    if trimmed.is_empty() {
+        // Empty output is a valid no-op.
+        return Ok(model::env::ExecutionEnvDelta::empty());
+    }
+    parse_env_delta(trimmed)
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -493,8 +783,8 @@ mod tests {
     struct AlwaysOkBackend;
 
     impl Backend for AlwaysOkBackend {
-        fn apply(&self, _r: &DesiredResource) -> Result<(), BackendError> {
-            Ok(())
+        fn apply(&self, _r: &DesiredResource) -> Result<BackendApplyResult, BackendError> {
+            Ok(BackendApplyResult::none())
         }
         fn remove(&self, _r: &DesiredResource) -> Result<(), BackendError> {
             Ok(())
@@ -508,7 +798,7 @@ mod tests {
     struct AlwaysFailBackend;
 
     impl Backend for AlwaysFailBackend {
-        fn apply(&self, _r: &DesiredResource) -> Result<(), BackendError> {
+        fn apply(&self, _r: &DesiredResource) -> Result<BackendApplyResult, BackendError> {
             Err(BackendError::ScriptFailed {
                 exit_code: 1,
                 stderr: "fail".to_string(),

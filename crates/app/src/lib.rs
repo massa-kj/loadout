@@ -209,6 +209,9 @@ pub fn execute(
 ) -> Result<ExecutorReport, AppError> {
     let mut state = execution_plan.state;
 
+    let mut contributors = executor::ContributorRegistry::new();
+    backends_builtin::register_contributors(&mut contributors, &ctx.platform);
+
     let exec_ctx = executor::ExecutionContext {
         plan: &execution_plan.plan,
         graph: &execution_plan.graph,
@@ -217,6 +220,7 @@ pub fn execute(
         dirs: &ctx.dirs,
         platform: &ctx.platform,
         state_path: &ctx.state_path(),
+        contributors: &contributors,
     };
 
     let report = executor::execute(&exec_ctx, &mut state, on_event)?;
