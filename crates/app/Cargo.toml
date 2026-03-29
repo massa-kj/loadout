@@ -17,6 +17,7 @@ platform     = { path = "../platform" }
 backend-host     = { path = "../backend-host" }
 backends-builtin = { path = "../backends-builtin" }
 thiserror    = "2"
+serde_json   = "1"
 
 [dev-dependencies]
 tempfile = "3"

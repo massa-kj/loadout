@@ -20,6 +20,7 @@
 //! See: `docs/architecture/boundaries.md` (planner/executor boundary)
 
 pub mod activate;
+pub use activate::{generate_activation, ShellKind};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -1230,6 +1231,7 @@ mod tests {
             config_home: tmp.path().join("config"),
             data_home: tmp.path().join("data"),
             state_home: tmp.path().join("state"),
+            cache_home: tmp.path().join("cache"),
         }
     }
 

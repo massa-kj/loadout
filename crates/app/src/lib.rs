@@ -23,6 +23,7 @@
 
 use std::path::{Path, PathBuf};
 
+pub use executor::activate::ShellKind;
 pub use executor::{Event, ExecutorReport};
 pub use model::plan::Plan;
 
@@ -86,6 +87,18 @@ pub enum AppError {
     /// Fatal executor error (state commit failure or invariant violation).
     #[error("executor error: {0}")]
     Executor(#[from] executor::ExecutorError),
+
+    /// No cached env plan found; `loadout apply` must be run first.
+    #[error("no cached env plan — run 'loadout apply' first")]
+    EnvPlanNotFound,
+
+    /// Failed to read the env plan cache file.
+    #[error("failed to read env plan cache: {0}")]
+    EnvPlanIo(std::io::Error),
+
+    /// Failed to deserialize the env plan cache.
+    #[error("failed to deserialize env plan cache: {0}")]
+    EnvPlanDeserialize(serde_json::Error),
 }
 
 // ---------------------------------------------------------------------------
@@ -132,6 +145,14 @@ impl AppContext {
     /// May not exist; callers should treat absence as an empty `SourcesSpec`.
     pub fn sources_path(&self) -> PathBuf {
         self.dirs.config_home.join("sources.yaml")
+    }
+
+    /// Absolute path to the ephemeral env plan cache: `{cache_home}/env_plan.json`.
+    ///
+    /// Written by `execute()` on successful apply; read by `activate()`.
+    /// Not part of the authoritative state — callers must handle absence gracefully.
+    pub fn env_plan_cache_path(&self) -> PathBuf {
+        self.dirs.cache_home.join("env_plan.json")
     }
 }
 
@@ -224,6 +245,11 @@ pub fn execute(
     };
 
     let report = executor::execute(&exec_ctx, &mut state, on_event)?;
+
+    // Save the env plan cache for `loadout activate`. This is best-effort;
+    // a failure does not abort the apply or affect the returned report.
+    let _ = save_env_plan_cache(&report.final_env_plan, &ctx.dirs);
+
     Ok(report)
 }
 
@@ -248,6 +274,58 @@ pub fn apply(
 ) -> Result<ExecutorReport, AppError> {
     let execution_plan = prepare_execution(ctx, config_path)?;
     execute(ctx, execution_plan, on_event)
+}
+
+// ---------------------------------------------------------------------------
+// activate() use case
+// ---------------------------------------------------------------------------
+
+/// Generate a shell activation script from the last apply's env plan.
+///
+/// Reads the env plan cache written by `execute()` and returns a shell script
+/// suitable for evaluation in the target shell.
+///
+/// # Usage
+///
+/// ```text
+/// eval "$(loadout activate)"               # bash / zsh
+/// loadout activate --shell fish | source   # fish
+/// Invoke-Expression (loadout activate --shell pwsh)  # PowerShell
+/// ```
+///
+/// # Errors
+///
+/// Returns [`AppError::EnvPlanNotFound`] if no cache exists — the user must
+/// run `loadout apply` first.
+pub fn activate(ctx: &AppContext, shell: ShellKind) -> Result<String, AppError> {
+    let cache_path = ctx.env_plan_cache_path();
+    if !cache_path.exists() {
+        return Err(AppError::EnvPlanNotFound);
+    }
+    let json = std::fs::read_to_string(&cache_path).map_err(AppError::EnvPlanIo)?;
+    let plan: model::env::ExecutionEnvPlan =
+        serde_json::from_str(&json).map_err(AppError::EnvPlanDeserialize)?;
+    Ok(executor::activate::generate_activation(&plan, shell))
+}
+
+// ---------------------------------------------------------------------------
+// save_env_plan_cache (private)
+// ---------------------------------------------------------------------------
+
+/// Serialize the env plan to the cache file.
+///
+/// Creates the parent directory if it does not exist.
+/// Called by `execute()` on successful apply; failures are ignored (best-effort).
+fn save_env_plan_cache(
+    plan: &model::env::ExecutionEnvPlan,
+    dirs: &platform::Dirs,
+) -> Result<(), std::io::Error> {
+    let cache_path = dirs.cache_home.join("env_plan.json");
+    if let Some(parent) = cache_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string_pretty(plan).map_err(std::io::Error::other)?;
+    std::fs::write(&cache_path, json)
 }
 
 // ---------------------------------------------------------------------------
@@ -513,6 +591,7 @@ mod tests {
                 config_home: root.join("config"),
                 data_home: root.join("data"),
                 state_home: root.join("state"),
+                cache_home: root.join("cache"),
             },
             sources_override: None,
         }

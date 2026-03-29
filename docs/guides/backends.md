@@ -12,31 +12,29 @@ This guide explains how to implement a **script backend plugin** for loadout.
 
 Loadout supports two types of backends:
 
-### 1. Builtin Backends (Rust-native)
+### 1. Script Backends (primary mechanism)
 
 **Examples:** `core/brew`, `core/apt`, `core/mise`, `core/npm`, `core/uv`, `core/scoop`, `core/winget`
 
-**Implementation:** Written in Rust, compiled into the `loadout` binary.
-- Located in `crates/backends-builtin/src/<backend>.rs`
-- Implement the `Backend` trait defined in `crates/backend-host/src/lib.rs`
-- No JSON protocol overhead (direct function calls)
-- Preferred for performance-critical or complex backends
-
-**When to use:** Core-maintained backends that ship with loadout.
-
-### 2. Script Backends (Community extensions)
-
-**Examples:** Custom backends created by users or external sources
-
 **Implementation:** Shell scripts (`.sh` for Linux/macOS, `.ps1` for Windows).
 - Receive resource data via environment variables (primary protocol) and optionally via JSON stdin (see [`specs/api/backend.md`](../specs/api/backend.md))
-- Located in source-specific `backends/` directories
+- Located in source-specific `backends/` directories (e.g. `backends/brew/`, `backends/apt/`)
 - Built and loaded dynamically at runtime
 - No `jq` dependency required (when using environment variables)
+- Can optionally provide `env_pre.sh` / `env_post.sh` for execution environment contributions
 
-**When to use:** Community-contributed backends, project-specific package managers, custom tooling.
+**When to use:** All production backends, including core-maintained ones that ship with loadout.
 
-**This guide covers script backends.** For builtin backend development, see `crates/backend-host/src/lib.rs` and existing implementations in `crates/backends-builtin/`.
+### 2. Builtin Backends (Rust-native extension point)
+
+**Implementation:** Rust structs implementing the `Backend` trait, compiled into the `loadout` binary.
+- Registered via `crates/backends-builtin/src/lib.rs` (`register_builtins`)
+- Currently **intentionally empty** — all production backends use the script-backend mechanism above
+- Reserved as an extension point for future OS-level integrations (e.g. Windows registry, OS API probes) or internal test mocks
+
+**When to use:** Only when shell scripts are genuinely insufficient (OS-level API probes, Windows registry, etc.).
+
+**This guide covers script backends.** For Rust-native backend development, see `Backend` trait in `crates/backend-host/src/lib.rs`.
 
 ---
 
@@ -72,7 +70,7 @@ Backend directories are discovered from source roots:
 Backend IDs follow the canonical format: `<source_id>/<backend_name>`.
 
 Examples:
-- `core/brew` (builtin, Rust-native)
+- `core/brew` (script backend in repo `backends/brew/`)
 - `core/custom` (script backend in repo `backends/custom/`)
 - `user/mypkg` (script backend in user config `backends/mypkg/`)
 

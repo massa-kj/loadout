@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use platform::Platform;
+use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // EnvMutation
@@ -249,7 +250,10 @@ impl ExecutionEnvContext {
 /// Contains the fully resolved variable values after all contributor merges.
 /// Provenance is tracked per-action in `ExecutorReport`; this type carries
 /// only the final state needed to generate shell activation scripts.
-#[derive(Debug, Clone, Default)]
+///
+/// Serialized to JSON and cached by `app::execute()` so that a subsequent
+/// `loadout activate` invocation can read it without re-running apply.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExecutionEnvPlan {
     /// Variable name → final value to export.
     pub vars: BTreeMap<String, String>,

@@ -77,6 +77,11 @@ pub struct Dirs {
     /// Linux/WSL: `$XDG_STATE_HOME/loadout`   (default `~/.local/state/loadout`)
     /// Windows:   `%APPDATA%\loadout`
     pub state_home: PathBuf,
+
+    /// Cache home: ephemeral execution artifacts (env plan cache, etc.).
+    /// Linux/WSL: `$XDG_CACHE_HOME/loadout`   (default `~/.cache/loadout`)
+    /// Windows:   `%APPDATA%\loadout`
+    pub cache_home: PathBuf,
 }
 
 /// Errors from platform detection or directory resolution.
@@ -167,23 +172,29 @@ fn resolve_xdg_dirs(get_env: impl Fn(&str) -> Option<String>) -> Result<Dirs, Pl
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".local").join("state"));
 
+    let cache_base = get_env("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".cache"));
+
     Ok(Dirs {
         config_home: config_base.join("loadout"),
         data_home: data_base.join("loadout"),
         state_home: state_base.join("loadout"),
+        cache_home: cache_base.join("loadout"),
     })
 }
 
 /// Resolve AppData-based directories (Windows).
 ///
-/// All three dirs map to `%APPDATA%\loadout` on Windows.
+/// All four dirs map to `%APPDATA%\loadout` on Windows.
 fn resolve_appdata_dirs(get_env: impl Fn(&str) -> Option<String>) -> Result<Dirs, PlatformError> {
     let appdata = get_env("APPDATA").ok_or(PlatformError::AppDataNotFound)?;
     let base = PathBuf::from(appdata).join("loadout");
     Ok(Dirs {
         config_home: base.clone(),
         data_home: base.clone(),
-        state_home: base,
+        state_home: base.clone(),
+        cache_home: base,
     })
 }
 
@@ -280,6 +291,7 @@ mod tests {
             dirs.state_home,
             PathBuf::from("/home/user/.local/state/loadout")
         );
+        assert_eq!(dirs.cache_home, PathBuf::from("/home/user/.cache/loadout"));
     }
 
     #[test]
@@ -291,6 +303,7 @@ mod tests {
                 ("XDG_CONFIG_HOME", "/custom/cfg"),
                 ("XDG_DATA_HOME", "/custom/data"),
                 ("XDG_STATE_HOME", "/custom/state"),
+                ("XDG_CACHE_HOME", "/custom/cache"),
             ]),
         )
         .unwrap();
@@ -298,6 +311,7 @@ mod tests {
         assert_eq!(dirs.config_home, PathBuf::from("/custom/cfg/loadout"));
         assert_eq!(dirs.data_home, PathBuf::from("/custom/data/loadout"));
         assert_eq!(dirs.state_home, PathBuf::from("/custom/state/loadout"));
+        assert_eq!(dirs.cache_home, PathBuf::from("/custom/cache/loadout"));
     }
 
     #[test]
@@ -318,6 +332,7 @@ mod tests {
             dirs.state_home,
             PathBuf::from("/home/user/.local/state/loadout")
         );
+        assert_eq!(dirs.cache_home, PathBuf::from("/home/user/.cache/loadout"));
     }
 
     #[test]
@@ -334,12 +349,16 @@ mod tests {
             dirs.config_home,
             PathBuf::from("/home/wsluser/.config/loadout")
         );
+        assert_eq!(
+            dirs.cache_home,
+            PathBuf::from("/home/wsluser/.cache/loadout")
+        );
     }
 
     // --- AppData directory resolution (Windows) ---------------------------
 
     #[test]
-    fn appdata_sets_all_three_to_same_base() {
+    fn appdata_sets_all_four_to_same_base() {
         let dirs = resolve_dirs_from_env(
             &Platform::Windows,
             env_map(&[("APPDATA", r"C:\Users\user\AppData\Roaming")]),
@@ -351,6 +370,7 @@ mod tests {
         assert_eq!(dirs.config_home, expected);
         assert_eq!(dirs.data_home, expected);
         assert_eq!(dirs.state_home, expected);
+        assert_eq!(dirs.cache_home, expected);
     }
 
     #[test]
@@ -366,7 +386,12 @@ mod tests {
         let dirs =
             resolve_dirs_from_env(&Platform::Linux, env_map(&[("HOME", "/home/u")])).unwrap();
 
-        for path in [&dirs.config_home, &dirs.data_home, &dirs.state_home] {
+        for path in [
+            &dirs.config_home,
+            &dirs.data_home,
+            &dirs.state_home,
+            &dirs.cache_home,
+        ] {
             assert_eq!(
                 path.file_name().and_then(|n| n.to_str()),
                 Some("loadout"),

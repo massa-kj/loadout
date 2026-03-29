@@ -37,10 +37,12 @@ Coordinate execution flow.
 `plan`: load → resolve → compile → plan → display. Must NOT modify state.
 `apply`: load → resolve → compile → plan → execute → commit state.
 `prepare_execution`: load → resolve → compile → plan + registry → return ExecutionPlan. Enables confirmation prompts by CLI.
-`execute`: consume ExecutionPlan → execute → commit state.
+`execute`: consume ExecutionPlan → execute → commit state. On success, writes env plan cache (`{cache_home}/env_plan.json`) for `activate`.
+`activate`: read env plan cache → generate shell activation script → print to stdout.
 
 The `prepare_execution`/`execute` separation allows CLI to insert confirmation prompts between planning and execution.
 `apply` remains as a convenience wrapper around `prepare_execution` + `execute`.
+The env plan cache is an **ephemeral artifact** — not part of authoritative state.
 
 Must NOT: perform package management directly, re-classify after planner has decided.
 
@@ -147,7 +149,8 @@ State Commit
 | FeatureCompiler | Pure | ResolvedFeatureOrder, FeatureIndex, Strategy | DesiredResourceGraph |
 | Planner | Pure | DesiredResourceGraph, State, ResolvedFeatureOrder | Plan |
 | Executor | Impure (side effects) | Plan, DesiredResourceGraph, FeatureIndex, BackendRegistry | Effects |
-| State Commit | Impure (I/O) | Execution results | state.json |
+| State Commit | Impure (I/O) | Execution results | state.json, env_plan.json (cache) |
+| Activate | Impure (I/O) | env_plan.json (cache), shell kind | Shell activation script (stdout) |
 
 ### Data Structure Roles
 
@@ -160,6 +163,7 @@ State Commit
 - **DesiredResourceGraph**: Expanded resources with resolved backends
 - **Plan**: Authoritative instruction set (create/destroy/replace/noop/blocked)
 - **BackendRegistry**: Dispatcher mapping `CanonicalBackendId` → `Backend` trait implementation
+- **ExecutionEnvPlan**: Ephemeral snapshot of merged environment variables after apply; cached to `{cache_home}/env_plan.json` and consumed by `activate`
 
 ## Repository Structure
 
@@ -196,12 +200,14 @@ loadout/
 │   │   ├── install.sh         # Script mode (optional)
 │   │   ├── uninstall.sh       # Script mode (optional)
 │   │   └── files/             # Declarative mode (optional)
-├── backends/                  # Script backend plugins (community extensions)
+├── backends/                  # Script backend plugins
 │   ├── <backend>/
 │   │   ├── backend.yaml       # Metadata (api_version)
 │   │   ├── apply.sh           # Install/upgrade operation
 │   │   ├── remove.sh          # Uninstall operation
-│   │   └── status.sh          # Query installation state
+│   │   ├── status.sh          # Query installation state
+│   │   ├── env_pre.sh         # Pre-action env delta (optional)
+│   │   └── env_post.sh        # Post-action env delta (optional)
 ├── configs/                   # Repository example config files
 │   └── <platform>.yaml        # profile + strategy sections
 ├── tools/                     # Development tools
@@ -222,8 +228,8 @@ loadout/
 - State file location: platform-defined (XDG/AppData), not overridable by `LOADOUT_STATE_FILE`
 
 **Plugin isolation:**
-- Backend plugins (script directories in `backends/`) communicate via JSON stdin/stdout only
-- Builtin backends (`crates/backends-builtin/`) implement `Backend` trait directly
+- Backend plugins (script directories in `backends/`) receive resource data via environment variables (primary) and optionally JSON stdin. `env_pre.sh`/`env_post.sh` return env deltas as JSON stdout.
+- Builtin Rust backends (`crates/backends-builtin/`) implement `Backend` trait directly; currently an empty extension point.
 - Feature scripts (`install.sh`/`uninstall.sh`) receive environment variables only
 
 **Authoritative runtime paths for profiles, policies, state, and sources live under XDG/AppData locations, not under the repository root.**

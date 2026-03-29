@@ -225,6 +225,7 @@ mod tests {
             config_home: tmp.path().join("config"),
             data_home: tmp.path().join("data"),
             state_home: tmp.path().join("state"),
+            cache_home: tmp.path().join("cache"),
         }
     }
 
@@ -428,6 +429,7 @@ Write-Output "$env:LOADOUT_STATE_HOME""#
             config_home: cfg_path.clone(),
             data_home: data_path.clone(),
             state_home: state_path.clone(),
+            cache_home: tmp.path().join("cache"),
         };
 
         let out = run_install(&meta, &make_feature_id("core/git"), &dirs, &platform).unwrap();

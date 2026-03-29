@@ -4,9 +4,10 @@
 // crate. No shell scripts are spawned for core commands.
 //
 // Subcommands:
-//   apply  --config|-c <name|path> [--sources <path>] [--verbose]
-//   plan   --config|-c <name|path> [--sources <path>] [--verbose]
-//   migrate [--dry-run]
+//   apply    --config|-c <name|path> [--sources <path>] [--verbose]
+//   plan     --config|-c <name|path> [--sources <path>] [--verbose]
+//   activate [--shell bash|zsh|fish|pwsh]
+//   migrate  [--dry-run]
 //
 // Config resolution (--config / -c):
 //   --config linux           → $XDG_CONFIG_HOME/loadout/configs/linux.yaml
@@ -29,9 +30,10 @@ Usage: loadout <command> [options]
 A declarative environment management system.
 
 Available commands:
-  apply  -c <name|path> [options]   Apply a loadout config to the system
-  plan   -c <name|path> [options]   Show what apply would do (no changes made)
-  migrate [--dry-run]               Migrate state file to the latest schema version
+  apply    -c <name|path> [options]         Apply a loadout config to the system
+  plan     -c <name|path> [options]         Show what apply would do (no changes made)
+  activate [--shell bash|zsh|fish|pwsh]     Export env variables from last apply
+  migrate  [--dry-run]                      Migrate state file to the latest schema version
 
 Options for apply / plan:
   -c, --config <name|path>   Config to use (required)
@@ -50,7 +52,9 @@ Examples:
   loadout apply -c linux --yes
   loadout plan  -c linux --verbose
   loadout apply -c ./configs/work.yaml
-  loadout migrate --dry-run\
+  loadout migrate --dry-run
+  loadout activate              (eval the output to apply env changes)
+  loadout activate --shell fish | source\
 ";
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -75,6 +79,7 @@ fn main() {
     match subcommand.as_str() {
         "apply" => cmd_apply(&rest),
         "plan" => cmd_plan(&rest),
+        "activate" => cmd_activate(&rest),
         "migrate" => cmd_migrate(&rest),
         other => {
             eprintln!("error: unknown command: {other}");
@@ -274,6 +279,67 @@ fn confirm_apply() -> Result<(), String> {
     match input.trim().to_lowercase().as_str() {
         "y" | "yes" => Ok(()),
         _ => Err("Aborted by user".to_string()),
+    }
+}
+
+// ── activate ──────────────────────────────────────────────────────────────────
+
+fn cmd_activate(args: &[String]) {
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!("Usage: loadout activate [--shell bash|zsh|fish|pwsh]");
+        println!();
+        println!("Output a shell activation script based on the last 'loadout apply'.");
+        println!("Evaluate the output in your shell:");
+        println!("  bash/zsh:   eval \"$(loadout activate)\"");
+        println!("  fish:       loadout activate --shell fish | source");
+        println!("  pwsh:       Invoke-Expression (loadout activate --shell pwsh)");
+        println!();
+        println!("Options:");
+        println!(
+            "  --shell <bash|zsh|fish|pwsh>  Target shell (default: auto-detected from $SHELL)"
+        );
+        process::exit(0);
+    }
+
+    let shell = match parse_flag_value(args, "--shell").as_deref() {
+        Some("bash") => app::ShellKind::Bash,
+        Some("zsh") => app::ShellKind::Zsh,
+        Some("fish") => app::ShellKind::Fish,
+        Some("pwsh") | Some("powershell") => app::ShellKind::PowerShell,
+        Some(other) => {
+            eprintln!("error: unknown shell: {other}");
+            eprintln!("  supported: bash, zsh, fish, pwsh");
+            process::exit(1);
+        }
+        None => detect_shell(),
+    };
+
+    let ctx = build_app_context();
+    match app::activate(&ctx, shell) {
+        Ok(script) => {
+            // Print without trailing newline so shells can eval cleanly.
+            print!("{script}");
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            process::exit(1);
+        }
+    }
+}
+
+/// Detect the target shell from the `$SHELL` environment variable.
+///
+/// Falls back to Bash on Unix and PowerShell on Windows.
+fn detect_shell() -> app::ShellKind {
+    #[cfg(target_os = "windows")]
+    {
+        return app::ShellKind::PowerShell;
+    }
+    #[cfg(not(target_os = "windows"))]
+    match std::env::var("SHELL").as_deref() {
+        Ok(s) if s.ends_with("zsh") => app::ShellKind::Zsh,
+        Ok(s) if s.ends_with("fish") => app::ShellKind::Fish,
+        _ => app::ShellKind::Bash,
     }
 }
 
