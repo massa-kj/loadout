@@ -3,14 +3,14 @@
 
 profile:
   features:
-    brew: {}
-    fzf: {}
+    local/brew: {}
+    local/fzf: {}
 
 strategy:
   package:
-    default_backend: core/brew
+    default_backend: local/brew
   runtime:
-    default_backend: core/mise
+    default_backend: local/mise
   fs:
     # Disable backups inside test containers — no need to preserve originals.
     backup: false

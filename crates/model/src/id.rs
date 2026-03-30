@@ -13,7 +13,7 @@ pub struct CanonicalFeatureId(String);
 #[serde(transparent)]
 pub struct CanonicalBackendId(String);
 
-/// Source identifier (e.g. `core`, `user`, `community`).
+/// Source identifier (e.g. `core`, `local`, `community`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct SourceId(String);
@@ -190,7 +190,7 @@ mod tests {
 
     #[test]
     fn canonical_feature_id_multiple_slashes() {
-        assert!(CanonicalFeatureId::new("core/user/git").is_err());
+        assert!(CanonicalFeatureId::new("core/local/git").is_err());
     }
 
     #[test]
@@ -216,6 +216,6 @@ mod tests {
 
     #[test]
     fn source_id_no_slash_allowed() {
-        assert!(SourceId::new("core/user").is_err());
+        assert!(SourceId::new("core/local").is_err());
     }
 }

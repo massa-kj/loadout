@@ -15,7 +15,7 @@
 //
 // User source root resolution (for user features/ and backends/):
 //   Default: $XDG_CONFIG_HOME/loadout  (XDG standard)
-//   Override: LOADOUT_ROOT=<path>  (development use only)
+//   Override: LOADOUT_ROOT=<path>  (development use only; overrides `local` source root)
 //
 // See: docs/architecture/layers.md
 
@@ -420,7 +420,7 @@ fn cmd_migrate(args: &[String]) {
 /// Build an `AppContext` from the current environment.
 ///
 /// Platform and XDG/AppData dirs are detected automatically.
-/// The `user` source root defaults to `config_home`; set `LOADOUT_ROOT` to
+/// The `local` source root defaults to `config_home`; set `LOADOUT_ROOT` to
 /// override it during development (points an alternate directory containing
 /// `features/` and `backends/` subdirectories).
 fn build_app_context() -> app::AppContext {
@@ -430,11 +430,11 @@ fn build_app_context() -> app::AppContext {
         process::exit(1);
     });
     let mut ctx = app::AppContext::new(platform, dirs);
-    // Development override: LOADOUT_ROOT redirects the `user` source root.
+    // Development override: LOADOUT_ROOT redirects the `local` source root.
     if let Ok(root) = env::var("LOADOUT_ROOT") {
         let p = PathBuf::from(&root);
         if p.is_dir() {
-            ctx = ctx.with_user_root(p);
+            ctx = ctx.with_local_root(p);
         } else {
             eprintln!("warning: LOADOUT_ROOT={root} is not a directory; ignored");
         }

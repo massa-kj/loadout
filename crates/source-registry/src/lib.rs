@@ -8,30 +8,30 @@
 //! | Source ID   | Kind       | Declared in `sources.yaml` |
 //! |-------------|------------|----------------------------|
 //! | `core`      | implicit   | No — embedded in binary; no filesystem path  |
-//! | `user`      | implicit   | No — always available       |
+//! | `local`     | implicit   | No — always available       |
 //! | `<other>`   | external   | Yes — must be declared      |
 //!
 //! # Path Resolution
 //!
 //! **Features:**
 //! - `core/<name>` → embedded in binary; `feature_dir` returns `UnknownSource`
-//! - `user/<name>` → `{config_home}/features/<name>`
+//! - `local/<name>` → `{config_home}/features/<name>`
 //! - `<ext>/<name>` → `{data_home}/sources/<ext>/features/<name>`
 //!
 //! **Backends:**
 //! - `core/<name>` → embedded in binary; `backend_dir` returns `UnknownSource`
-//! - `user/<name>` → `{config_home}/backends/<name>`
+//! - `local/<name>` → `{config_home}/backends/<name>`
 //! - `<ext>/<name>` → `{data_home}/sources/<ext>/backends/<name>`
 //!
 //! # Allow-List Enforcement
 //!
-//! - `core` and `user`: always allowed — no allow-list applies.
+//! - `core` and `local`: always allowed — no allow-list applies.
 //! - External sources: `allow` field in the source entry is checked.
 //!   - `allow` absent → deny-all (error).
 //!   - `allow: "*"` → allow everything.
 //!   - `allow: { features: ..., backends: ... }` → check respective allow-list.
 //!
-//! No implicit fallback between `user`, external, and `core` is permitted.
+//! No implicit fallback between `local`, external, and `core` is permitted.
 //!
 //! # Phase 3 Contract
 //!
@@ -95,9 +95,9 @@ pub enum RegistryError {
 ///
 /// Construct via [`SourceRegistry::new`] using a loaded [`SourcesSpec`] and two base paths.
 pub struct SourceRegistry {
-    /// External sources declared in `sources.yaml`. `core` and `user` are not listed here.
+    /// External sources declared in `sources.yaml`. `core` and `local` are not listed here.
     sources: Vec<SourceEntry>,
-    /// Absolute path to the user config home (contains `features/` and `backends/`).
+    /// Absolute path to the local config home (contains `features/` and `backends/`).
     config_home: PathBuf,
     /// Absolute path to the data home (contains `sources/<id>/features/` and `sources/<id>/backends/`).
     data_home: PathBuf,
@@ -108,9 +108,9 @@ impl SourceRegistry {
     ///
     /// # Arguments
     ///
-    /// - `sources` — loaded and validated [`SourcesSpec`]; `core`/`user` must not appear here.
-    /// - `config_home` — user config home (for `user/` source resolution).
-    /// - `data_home` — user data home (for external source resolution).
+    /// - `sources` — loaded and validated [`SourcesSpec`]; `core`/`local` must not appear here.
+    /// - `config_home` — local config home (for `local/` source resolution).
+    /// - `data_home` — data home (for external source resolution).
     pub fn new(sources: SourcesSpec, config_home: &Path, data_home: &Path) -> Self {
         Self {
             sources: sources.sources,
@@ -137,7 +137,7 @@ impl SourceRegistry {
 
     /// Check whether a canonical feature ID is permitted by the source's allow-list.
     ///
-    /// - `core` and `user` sources are always allowed.
+    /// - `core` and `local` sources are always allowed.
     /// - External sources without an `allow` field are deny-all.
     /// - Returns `Ok(())` if allowed, `Err(RegistryError::Feature*)` otherwise.
     pub fn check_feature_allowed(&self, id: &CanonicalFeatureId) -> Result<(), RegistryError> {
@@ -151,7 +151,7 @@ impl SourceRegistry {
 
     /// Check whether a canonical backend ID is permitted by the source's allow-list.
     ///
-    /// - `core` and `user` sources are always allowed.
+    /// - `core` and `local` sources are always allowed.
     /// - External sources without an `allow` field are deny-all.
     /// - Returns `Ok(())` if allowed, `Err(RegistryError::Backend*)` otherwise.
     pub fn check_backend_allowed(&self, id: &CanonicalBackendId) -> Result<(), RegistryError> {
@@ -181,7 +181,7 @@ impl SourceRegistry {
         kind: ResourceKind,
     ) -> Result<PathBuf, RegistryError> {
         match source_id {
-            "user" => Ok(self.config_home.join(kind.dir_segment()).join(name)),
+            "local" => Ok(self.config_home.join(kind.dir_segment()).join(name)),
             ext => {
                 // External source must be declared. `core` has no filesystem path
                 // (it is embedded in the binary) and is not in `sources`, so it
@@ -204,7 +204,7 @@ impl SourceRegistry {
 
 /// Whether a source ID is an implicit source (always available, no allow-list).
 fn is_implicit(source_id: &str) -> bool {
-    matches!(source_id, "core" | "user")
+    matches!(source_id, "core" | "local")
 }
 
 enum ResourceKind {
@@ -337,9 +337,9 @@ mod tests {
     }
 
     #[test]
-    fn feature_dir_user() {
+    fn feature_dir_local() {
         let r = empty_registry();
-        let dir = r.feature_dir(&feature("user/myvim")).unwrap();
+        let dir = r.feature_dir(&feature("local/myvim")).unwrap();
         assert_eq!(dir, PathBuf::from("/cfg/features/myvim"));
     }
 
@@ -368,9 +368,9 @@ mod tests {
     }
 
     #[test]
-    fn backend_dir_user() {
+    fn backend_dir_local() {
         let r = empty_registry();
-        let dir = r.backend_dir(&backend("user/mypkg")).unwrap();
+        let dir = r.backend_dir(&backend("local/mypkg")).unwrap();
         assert_eq!(dir, PathBuf::from("/cfg/backends/mypkg"));
     }
 
@@ -390,9 +390,10 @@ mod tests {
     }
 
     #[test]
-    fn user_feature_always_allowed() {
+    fn local_feature_always_allowed() {
         let r = empty_registry();
-        r.check_feature_allowed(&feature("user/myfeature")).unwrap();
+        r.check_feature_allowed(&feature("local/myfeature"))
+            .unwrap();
     }
 
     #[test]
@@ -479,9 +480,9 @@ mod tests {
     }
 
     #[test]
-    fn user_backend_always_allowed() {
+    fn local_backend_always_allowed() {
         let r = empty_registry();
-        r.check_backend_allowed(&backend("user/mypkg")).unwrap();
+        r.check_backend_allowed(&backend("local/mypkg")).unwrap();
     }
 
     #[test]

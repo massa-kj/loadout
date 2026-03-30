@@ -21,13 +21,13 @@ Profile and Strategy inputs determine source selection via canonical IDs.
 Resolver handles three source kinds:
 
 - `core` — implicit built-in source shipped with this repository
-- `user` — implicit local override source under user config directory
+- `local` — implicit local override source under user config directory
 - external sources — explicitly declared in `sources.yaml`
 
 Reserved source IDs:
 
 - `core`
-- `user`
+- `local`
 - `official` (reserved for future use)
 
 Reserved source IDs must not appear in `sources.yaml`.
@@ -42,7 +42,7 @@ Reserved source IDs must not appear in `sources.yaml`.
 
 `LOADOUT_SOURCES_FILE` may override the path.
 
-If `sources.yaml` does not exist, only implicit sources (`core`, `user`) are available.
+If `sources.yaml` does not exist, only implicit sources (`core`, `local`) are available.
 
 ## Schema
 
@@ -128,21 +128,21 @@ Source directories are derived by source kind.
 ### Features
 
 - `core/<name>` → `{repo}/features/<name>`
-- `user/<name>` → config home `features/<name>`
+- `local/<name>` → config home `features/<name>`
 - `<external>/<name>` → data home `sources/<external>/features/<name>`
 
 ### Backends
 
 - `core/<name>` → `{repo}/backends/<name>`
-- `user/<name>` → config home `backends/<name>`
+- `local/<name>` → config home `backends/<name>`
 - `<external>/<name>` → data home `sources/<external>/backends/<name>`
 
 ## Resolution Rules
 
 - Canonical IDs are authoritative.
 - Bare names are normalized to `core/<name>` before resolver execution.
-- `user` and external sources must be explicit in canonical IDs.
-- No implicit fallback between `user`, external, and `core` is permitted.
+- `local` and external sources must be explicit in canonical IDs.
+- No implicit fallback between `local`, external, and `core` is permitted.
 - If a dependency references an external source item not allowed by `allow`, resolution must abort.
 - If a backend ID references an external source item not allowed by `allow`, backend loading must abort.
 

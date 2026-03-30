@@ -152,7 +152,7 @@ mod tests {
                 }
             ],
             "noops": [{ "feature": "core/bash" }],
-            "blocked": [{ "feature": "user/legacy", "reason": "unknown resource kind: registry" }],
+            "blocked": [{ "feature": "local/legacy", "reason": "unknown resource kind: registry" }],
             "summary": {
                 "create": 1, "destroy": 0, "replace": 1,
                 "replace_backend": 0, "strengthen": 1, "blocked": 1

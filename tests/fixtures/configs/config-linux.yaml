@@ -1,14 +1,14 @@
 profile:
   features:
-    brew: {}
+    local/brew: {}
     # cli-tools: {}
-    fzf: {}
-    mise: {}
+    local/fzf: {}
+    local/mise: {}
     # ripgrep: {}
 
-    node:
+    local/node:
       version: "22.17.1"
-    npm: {}
+    local/npm: {}
     # python:
     #   version: "3.12"
     # uv: {}
@@ -18,21 +18,21 @@ profile:
 strategy:
   package:
     # Default backend for system package installs on Linux / WSL.
-    default_backend: core/brew
+    default_backend: local/brew
     # Per-resource backend overrides, keyed by the exact package name.
     overrides:
       typescript:
-        backend: core/npm
+        backend: local/npm
       typescript-language-server:
-        backend: core/npm
+        backend: local/npm
       eslint:
-        backend: core/npm
+        backend: local/npm
       python-lsp-server:
-        backend: core/uv
+        backend: local/uv
 
   runtime:
     # Default backend for runtime installs (node, python, rust, lua, etc.).
-    default_backend: core/mise
+    default_backend: local/mise
     # Per-resource backend overrides, keyed by the runtime name
     # (e.g. "node", "python") — not the feature name.
     # Example:

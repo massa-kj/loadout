@@ -107,7 +107,7 @@ pub enum AppError {
 
 /// Stable, run-level context shared by all use cases.
 ///
-/// Contains the platform, resolved base directories, and the user source root.
+/// Contains the platform, resolved base directories, and the local source root.
 /// Use-case-specific paths (e.g. the config file) are passed as arguments.
 pub struct AppContext {
     /// Platform variant: Linux, Windows, or WSL.
@@ -116,11 +116,11 @@ pub struct AppContext {
     /// Resolved XDG / AppData base directories.
     pub dirs: platform::Dirs,
 
-    /// Base directory for the `user` source (features/ and backends/).
+    /// Base directory for the `local` source (features/ and backends/).
     ///
     /// Defaults to `dirs.config_home`. Can be overridden via the `LOADOUT_ROOT`
     /// environment variable for development use only.
-    pub user_root: PathBuf,
+    pub local_root: PathBuf,
 
     /// Optional override for the sources spec path.
     /// When `Some`, this path is used instead of `{config_home}/sources.yaml`.
@@ -131,21 +131,21 @@ pub struct AppContext {
 impl AppContext {
     /// Create an `AppContext` from explicit parts.
     ///
-    /// `user_root` defaults to `dirs.config_home`.
-    /// Use [`AppContext::with_user_root`] to override it for development.
+    /// `local_root` defaults to `dirs.config_home`.
+    /// Use [`AppContext::with_local_root`] to override it for development.
     pub fn new(platform: platform::Platform, dirs: platform::Dirs) -> Self {
-        let user_root = dirs.config_home.clone();
+        let local_root = dirs.config_home.clone();
         Self {
             platform,
             dirs,
-            user_root,
+            local_root,
             sources_override: None,
         }
     }
 
-    /// Override the `user` source root. Used by the CLI when `LOADOUT_ROOT` is set.
-    pub fn with_user_root(mut self, path: PathBuf) -> Self {
-        self.user_root = path;
+    /// Override the `local` source root. Used by the CLI when `LOADOUT_ROOT` is set.
+    pub fn with_local_root(mut self, path: PathBuf) -> Self {
+        self.local_root = path;
         self
     }
 
@@ -380,7 +380,7 @@ fn run_pipeline(ctx: &AppContext, config_path: &Path) -> Result<PipelineOutput, 
     // Strategy::default() if the 'strategy' section is absent from the file).
     let (profile, strategy) = config::load_config(config_path)?;
 
-    // Step 3: load sources if present; default to empty (core + user only).
+    // Step 3: load sources if present; default to empty (core + local only).
     let sources = load_sources_optional(ctx)?;
 
     // Step 4: build feature index from all source roots.
@@ -427,7 +427,7 @@ fn to_fi_platform(p: &platform::Platform) -> feature_index::Platform {
 /// Build the list of feature source roots for the feature-index scanner.
 ///
 /// Implicit sources:
-/// - `user` → `{user_root}/features/`
+/// - `local` → `{local_root}/features/`
 ///
 /// (The `core` source is embedded in the binary; no filesystem path applies.)
 ///
@@ -438,8 +438,8 @@ fn build_source_roots(
     sources: &config::SourcesSpec,
 ) -> Vec<feature_index::SourceRoot> {
     let mut roots = vec![feature_index::SourceRoot {
-        source_id: "user".into(),
-        features_dir: ctx.user_root.join("features"),
+        source_id: "local".into(),
+        features_dir: ctx.local_root.join("features"),
     }];
 
     for entry in &sources.sources {
@@ -495,22 +495,22 @@ fn profile_to_desired_ids(
     ids
 }
 
-/// Build the backend registry from builtins and user script backends.
+/// Build the backend registry from builtins and local script backends.
 ///
 /// - Builtin Rust backends are registered first (embedded in the binary).
-/// - Script backends under `{user_root}/backends/` are registered as `user/<name>`
-///   and can override builtins for user customisation.
+/// - Script backends under `{local_root}/backends/` are registered as `local/<name>`
+///   and can override builtins for local customisation.
 ///
 /// Directories that fail to load are skipped silently.
 fn build_backend_registry(ctx: &AppContext) -> backend_host::BackendRegistry {
     let mut registry = backend_host::BackendRegistry::new();
     // 1. Register builtin Rust backends for the current platform.
     backends_builtin::register_builtins(&mut registry, &ctx.platform);
-    // 2. Script backends from the user source can override / extend builtins.
+    // 2. Script backends from the local source can override / extend builtins.
     load_backends_from_dir(
         &mut registry,
-        &ctx.user_root.join("backends"),
-        "user",
+        &ctx.local_root.join("backends"),
+        "local",
         ctx.platform,
     );
     registry
@@ -579,13 +579,13 @@ mod tests {
     #[cfg(not(unix))]
     fn make_executable(_path: &Path) {}
 
-    /// Build an AppContext whose dirs and user_root all point inside `tmp`.
+    /// Build an AppContext whose dirs and local_root all point inside `tmp`.
     fn make_ctx(tmp: &TempDir) -> AppContext {
         let root = tmp.path().to_path_buf();
         let config_home = root.join("config");
         AppContext {
             platform: platform::detect_platform(),
-            user_root: config_home.clone(),
+            local_root: config_home.clone(),
             dirs: platform::Dirs {
                 config_home,
                 data_home: root.join("data"),
@@ -596,7 +596,7 @@ mod tests {
         }
     }
 
-    /// Write a minimal script-mode feature to `{user_root}/features/{name}/`.
+    /// Write a minimal script-mode feature to `{local_root}/features/{name}/`.
     /// Creates platform-appropriate scripts: .sh on Linux/WSL, .ps1 on Windows.
     fn write_script_feature(root: &Path, name: &str) {
         let feat_dir = root.join("config").join("features").join(name);
@@ -671,7 +671,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let ctx = make_ctx(&tmp);
         // Feature referenced in config does not exist in index → desired IDs empty.
-        let config_path = write_config(tmp.path(), "config.yaml", &["user/nonexistent"]);
+        let config_path = write_config(tmp.path(), "config.yaml", &["local/nonexistent"]);
 
         // Should succeed: empty desired produces a plan with no actions.
         let p = plan(&ctx, &config_path).unwrap();
@@ -687,12 +687,12 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let ctx = make_ctx(&tmp);
         write_script_feature(tmp.path(), "git");
-        let config_path = write_config(tmp.path(), "config.yaml", &["user/git"]);
+        let config_path = write_config(tmp.path(), "config.yaml", &["local/git"]);
 
         let p = plan(&ctx, &config_path).unwrap();
         assert_eq!(p.actions.len(), 1);
         let action = &p.actions[0];
-        assert_eq!(action.feature.as_str(), "user/git");
+        assert_eq!(action.feature.as_str(), "local/git");
         assert!(matches!(action.operation, model::plan::Operation::Create));
     }
 
@@ -702,7 +702,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let ctx = make_ctx(&tmp);
         write_script_feature(tmp.path(), "git");
-        let config_path = write_config(tmp.path(), "config.yaml", &["user/git"]);
+        let config_path = write_config(tmp.path(), "config.yaml", &["local/git"]);
 
         let (result, events) = collect_apply(&ctx, &config_path);
 
@@ -732,7 +732,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let ctx = make_ctx(&tmp);
         write_script_feature(tmp.path(), "git");
-        let config_path = write_config(tmp.path(), "config.yaml", &["user/git"]);
+        let config_path = write_config(tmp.path(), "config.yaml", &["local/git"]);
 
         // First apply: installs.
         let (r1, _) = collect_apply(&ctx, &config_path);
@@ -776,7 +776,7 @@ mod tests {
         let ctx = make_ctx(&tmp);
         write_script_feature(tmp.path(), "git");
         write_script_feature(tmp.path(), "node");
-        let config_path = write_config(tmp.path(), "config.yaml", &["user/git", "user/node"]);
+        let config_path = write_config(tmp.path(), "config.yaml", &["local/git", "local/node"]);
 
         let (result, _) = collect_apply(&ctx, &config_path);
         let report = result.unwrap();
@@ -794,11 +794,11 @@ mod tests {
         write_script_feature(tmp.path(), "node");
 
         // First apply: install git + node.
-        let config_both = write_config(tmp.path(), "both.yaml", &["user/git", "user/node"]);
+        let config_both = write_config(tmp.path(), "both.yaml", &["local/git", "local/node"]);
         collect_apply(&ctx, &config_both).0.unwrap();
 
         // Second apply: only git desired → node should be destroyed.
-        let config_git_only = write_config(tmp.path(), "git_only.yaml", &["user/git"]);
+        let config_git_only = write_config(tmp.path(), "git_only.yaml", &["local/git"]);
         let (result, _) = collect_apply(&ctx, &config_git_only);
         let report = result.unwrap();
 
@@ -809,11 +809,11 @@ mod tests {
         // Reload state from disk and verify.
         let state = state::load(&ctx.state_path()).unwrap();
         assert!(
-            state.features.contains_key("user/git"),
+            state.features.contains_key("local/git"),
             "git must still be in state"
         );
         assert!(
-            !state.features.contains_key("user/node"),
+            !state.features.contains_key("local/node"),
             "node must be removed from state"
         );
     }
@@ -824,7 +824,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let ctx = make_ctx(&tmp);
         write_script_feature(tmp.path(), "git");
-        let config_path = write_config(tmp.path(), "config.yaml", &["user/git"]);
+        let config_path = write_config(tmp.path(), "config.yaml", &["local/git"]);
 
         // write_config omits the strategy section → Strategy::default() is used.
         let p = plan(&ctx, &config_path).unwrap();
@@ -873,11 +873,11 @@ mod tests {
         write_script_feature(tmp.path(), "git");
 
         // First apply: install both.
-        let config_both = write_config(tmp.path(), "both.yaml", &["user/badfeature", "user/git"]);
+        let config_both = write_config(tmp.path(), "both.yaml", &["local/badfeature", "local/git"]);
         collect_apply(&ctx, &config_both).0.unwrap();
 
         // Second apply: only git desired → badfeature must be destroyed (fails), git is noop.
-        let config_git_only = write_config(tmp.path(), "git.yaml", &["user/git"]);
+        let config_git_only = write_config(tmp.path(), "git.yaml", &["local/git"]);
         let (result, events) = collect_apply(&ctx, &config_git_only);
         let report = result.unwrap(); // Must not be a fatal error.
 

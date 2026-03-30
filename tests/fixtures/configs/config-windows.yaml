@@ -1,45 +1,45 @@
 profile:
   features:
-    caps2ctrl: {}
-    cli-tools: {}
-    git: {}
-    git-tools: {}
-    mise: {}
-    neovim: {}
-    powershell: {}
-    scoop: {}
-    vcredist: {}
-    vscode: {}
+    local/caps2ctrl: {}
+    local/cli-tools: {}
+    local/git: {}
+    local/git-tools: {}
+    local/mise: {}
+    local/neovim: {}
+    local/powershell: {}
+    local/scoop: {}
+    local/vcredist: {}
+    local/vscode: {}
 
-    lua: {}
-    node:
+    local/lua: {}
+    local/node:
       version: "22.17.1"
-    npm: {}
-    python:
+    local/npm: {}
+    local/python:
       version: "3.12"
-    uv: {}
-    rust:
+    local/uv: {}
+    local/rust:
       version: "1.87"
 
 
 strategy:
   package:
     # Default backend for system package installs on Windows.
-    default_backend: core/scoop
+    default_backend: local/scoop
     # Per-resource backend overrides, keyed by the exact package name.
     overrides:
       typescript:
-        backend: core/npm
+        backend: local/npm
       typescript-language-server:
-        backend: core/npm
+        backend: local/npm
       eslint:
-        backend: core/npm
+        backend: local/npm
       python-lsp-server:
-        backend: core/uv
+        backend: local/uv
 
   runtime:
     # Default backend for runtime installs (node, python, rust, lua, etc.).
-    default_backend: core/mise
+    default_backend: local/mise
     # Per-resource backend overrides, keyed by the runtime name
     # (e.g. "node", "python") — not the feature name.
     # Example:

@@ -126,7 +126,7 @@ The executor reads `details.add_resources` to determine what to install without 
     { "feature": "core/git", "operation": "strengthen", "details": { "add_resources": [ { "kind": "fs", "id": "fs:gitconfig" } ] } }
   ],
   "noops": [ { "feature": "core/bash" } ],
-  "blocked": [ { "feature": "user/legacy", "reason": "unknown resource kind: registry" } ],
+  "blocked": [ { "feature": "local/legacy", "reason": "unknown resource kind: registry" } ],
   "summary": { "create": 1, "replace": 1, "strengthen": 1, "destroy": 0, "blocked": 1 }
 }
 ```

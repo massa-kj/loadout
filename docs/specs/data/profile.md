@@ -72,7 +72,7 @@ Feature key normalization rules:
 
 * Bare feature key `git` is normalized to `core/git`
 * Canonical feature key `core/git` is preserved as-is
-* `user` and external source features must be explicit, e.g. `user/myfeat`, `community/node`
+* `local` and external source features must be explicit, e.g. `local/myfeat`, `community/node`
 
 The normalized canonical IDs are what planner, resolver, executor, and state use internally.
 
@@ -105,8 +105,8 @@ Minimal config — profile with no feature configuration:
 # configs/linux.yaml
 profile:
   features:
-    git: {}
-    bash: {}
+    local/git: {}
+    local/bash: {}
 ```
 
 Equivalent canonical form after normalization:
@@ -114,8 +114,8 @@ Equivalent canonical form after normalization:
 ```yaml
 profile:
   features:
-    core/git: {}
-    core/bash: {}
+    local/git: {}
+    local/bash: {}
 ```
 
 Feature with version:
@@ -123,11 +123,11 @@ Feature with version:
 ```yaml
 profile:
   features:
-    node:
+    local/node:
       version: "22.17.1"
-    python:
+    local/python:
       version: "3.12"
-    user/myfeat: {}
+    local/myfeat: {}
 
 strategy:
   runtime:

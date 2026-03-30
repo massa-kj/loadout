@@ -116,7 +116,7 @@ open_shell() {
     log_info "  ./tests/e2e/linux/docker/scenarios/minimal.sh"
     log_info ""
     log_info "Environment:"
-    log_info "  user source: ~/.config/loadout (features/ and backends/ location)"
+    log_info "  local source: ~/.config/loadout (features/ and backends/ location)"
     echo ""
 
     docker run --rm -it "$IMAGE_NAME" /bin/bash

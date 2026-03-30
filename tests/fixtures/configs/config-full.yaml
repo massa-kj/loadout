@@ -2,14 +2,14 @@
 
 profile:
   features:
-    brew: {}
-    fzf: {}
-    ripgrep: {}
+    local/brew: {}
+    local/fzf: {}
+    local/ripgrep: {}
 
 strategy:
   package:
-    default_backend: core/brew
+    default_backend: local/brew
   runtime:
-    default_backend: core/mise
+    default_backend: local/mise
   fs:
     backup: false

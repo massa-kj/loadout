@@ -4,15 +4,15 @@
 
 profile:
   features:
-    brew: {}
-    mise: {}
-    node:
+    local/brew: {}
+    local/mise: {}
+    local/node:
       version: "20"
 
 strategy:
   package:
-    default_backend: core/brew
+    default_backend: local/brew
   runtime:
-    default_backend: core/mise
+    default_backend: local/mise
   fs:
     backup: false

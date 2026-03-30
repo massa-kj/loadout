@@ -58,10 +58,10 @@ Strategy determines which backend is used for each resource installation.
 Backend identifiers accept the same two forms as feature identifiers:
 
 * bare backend name, e.g. `brew`
-* canonical backend ID, e.g. `core/brew`, `user/custompkg`
+* canonical backend ID, e.g. `core/brew`, `local/custompkg`
 
 Bare backend names are normalized to `core/<name>` before backend loading.
-`user` and external source backends must be explicit.
+`local` and external source backends must be explicit.
 
 Resolution applies per resource kind:
 
@@ -90,4 +90,4 @@ per-resource override  >  default_backend  >  abort
 * `runtime.default_backend` must be a non-empty string if present.
 * Override values must contain a `backend` key with a non-empty string.
 * Unknown top-level keys are reserved and must not be present.
-* External and `user` backends are resolved only if their source allow-list permits them.
+* External and `local` backends are resolved only if their source allow-list permits them.

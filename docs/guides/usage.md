@@ -28,7 +28,7 @@ Each profile declares which features should be present and (optionally) which ve
 Feature keys may be written as either:
 
 * bare names such as `git` → normalized to `core/git`
-* canonical IDs such as `user/myfeat`, `community/node`
+* canonical IDs such as `local/myfeat`, `community/node`
 
 ```yaml
 # profiles/linux.yaml
@@ -64,10 +64,10 @@ sources:
 
 Place source content at:
 
-* user features/backends: config home `features/`, `backends/`
+* local features/backends: config home `features/`, `backends/`
 * external features/backends: data home `sources/<id>/features/`, `backends/`
 
-There is no implicit fallback across `core`, `user`, and external sources.
+There is no implicit fallback across `core`, `local`, and external sources.
 If you want a non-core source, reference it explicitly in the profile or strategy.
 
 ## Policies

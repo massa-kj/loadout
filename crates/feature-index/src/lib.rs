@@ -100,13 +100,13 @@ impl Platform {
 ///
 /// For implicit sources:
 /// - `core` → `<repo_root>/features`
-/// - `user` → `<config_home>/features`
+/// - `local` → `<config_home>/features`
 ///
 /// For external sources:
 /// - `<ext>` → `<data_home>/sources/<ext>/features`
 #[derive(Debug, Clone)]
 pub struct SourceRoot {
-    /// Source identifier (e.g. `core`, `user`, `community`).
+    /// Source identifier (e.g. `core`, `local`, `community`).
     pub source_id: String,
     /// Absolute path to the `features/` directory for this source.
     pub features_dir: PathBuf,
@@ -115,7 +115,7 @@ pub struct SourceRoot {
 /// Build a [`FeatureIndex`] by discovering and parsing all features under the given source roots.
 ///
 /// For each source root, every subdirectory within `features_dir` is treated as one feature.
-/// If `features_dir` does not exist, it is silently skipped (user/external sources may be absent).
+/// If `features_dir` does not exist, it is silently skipped (local/external sources may be absent).
 ///
 /// # Errors
 ///
@@ -402,7 +402,7 @@ mod tests {
     fn build_missing_source_dir_is_skipped() {
         let tmp = tempfile::tempdir().unwrap();
         let missing = tmp.path().join("nonexistent");
-        let index = build(&[source_root("user", &missing)], &Platform::Linux).unwrap();
+        let index = build(&[source_root("local", &missing)], &Platform::Linux).unwrap();
         assert!(index.features.is_empty());
     }
 
@@ -621,23 +621,23 @@ mod tests {
     fn multiple_sources_merged_into_one_index() {
         let tmp = tempfile::tempdir().unwrap();
         let core_dir = tmp.path().join("core");
-        let user_dir = tmp.path().join("user");
+        let local_dir = tmp.path().join("local");
         let cgit = make_feature_dir(&core_dir, "git");
-        let umyvim = make_feature_dir(&user_dir, "myvim");
+        let umyvim = make_feature_dir(&local_dir, "myvim");
         write(&cgit, "feature.yaml", simple_script_yaml());
         write(&umyvim, "feature.yaml", simple_script_yaml());
 
         let index = build(
             &[
                 source_root("core", &core_dir),
-                source_root("user", &user_dir),
+                source_root("local", &local_dir),
             ],
             &Platform::Linux,
         )
         .unwrap();
 
         assert!(index.features.contains_key("core/git"));
-        assert!(index.features.contains_key("user/myvim"));
+        assert!(index.features.contains_key("local/myvim"));
     }
 
     // ─── requires/provides ───────────────────────────────────────────────────

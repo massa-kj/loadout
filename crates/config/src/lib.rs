@@ -155,7 +155,7 @@ fn validate_backend_strategy_field(field: &str, value: Option<&str>) -> Result<(
 /// profile:
 ///   features:
 ///     fzf: {}
-///     user/myapp: {}
+///     local/myapp: {}
 ///
 /// strategy:                  # optional
 ///   package:
@@ -192,7 +192,8 @@ pub fn load_config(path: &Path) -> Result<(Profile, Strategy), ConfigError> {
 
 // ─── Sources ─────────────────────────────────────────────────────────────────
 
-const RESERVED_SOURCE_IDS: &[&str] = &["core", "user", "official"];
+const RESERVED_SOURCE_IDS: &[&str] =
+    &["core", "local", "official", "sample", "example", "external"];
 
 /// Load and validate a sources spec from a YAML file.
 pub fn load_sources(path: &Path) -> Result<SourcesSpec, ConfigError> {
@@ -287,9 +288,9 @@ mod tests {
     #[test]
     fn profile_canonical_preserved() {
         let dir = tempfile::tempdir().unwrap();
-        let p = write_yaml_file(dir.path(), "profile.yaml", "features:\n  user/myvim: {}\n");
+        let p = write_yaml_file(dir.path(), "profile.yaml", "features:\n  local/myvim: {}\n");
         let profile = load_profile(&p).unwrap();
-        assert!(profile.features.contains_key("user/myvim"));
+        assert!(profile.features.contains_key("local/myvim"));
     }
 
     #[test]
@@ -403,7 +404,7 @@ mod tests {
 
     #[test]
     fn sources_reserved_id_rejected() {
-        for reserved in &["core", "user", "official"] {
+        for reserved in &["core", "local", "official"] {
             let dir = tempfile::tempdir().unwrap();
             let yaml =
                 format!("sources:\n  - id: {reserved}\n    type: git\n    url: https://x.com\n");
@@ -461,7 +462,7 @@ mod tests {
 profile:
   features:
     fzf: {}
-    user/myapp: {}
+    local/myapp: {}
 
 strategy:
   package:
@@ -473,7 +474,7 @@ strategy:
             profile.features.contains_key("core/fzf"),
             "bare 'fzf' must become 'core/fzf'"
         );
-        assert!(profile.features.contains_key("user/myapp"));
+        assert!(profile.features.contains_key("local/myapp"));
         assert_eq!(
             strategy.package.unwrap().default_backend.as_deref(),
             Some("brew")

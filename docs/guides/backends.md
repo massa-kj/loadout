@@ -64,7 +64,7 @@ contribute environment variables to the executor session:
 Backend directories are discovered from source roots:
 
 - **core source**: `{repo}/backends/`
-- **user source**: `$XDG_CONFIG_HOME/loadout/backends/` (or `$HOME/.config/loadout/backends/`)
+- **local source**: `$XDG_CONFIG_HOME/loadout/backends/` (or `$HOME/.config/loadout/backends/`)
 - **external sources**: `$XDG_DATA_HOME/loadout/sources/<source_id>/backends/`
 
 Backend IDs follow the canonical format: `<source_id>/<backend_name>`.
@@ -72,7 +72,7 @@ Backend IDs follow the canonical format: `<source_id>/<backend_name>`.
 Examples:
 - `core/brew` (script backend in repo `backends/brew/`)
 - `core/custom` (script backend in repo `backends/custom/`)
-- `user/mypkg` (script backend in user config `backends/mypkg/`)
+- `local/mypkg` (script backend in user config `backends/mypkg/`)
 
 Bare backend names in strategy files are normalized to `core/<name>`.
 
@@ -399,7 +399,7 @@ spec:
 ```yaml
 # test-strategy.yaml
 packages:
-  testpkg: user/mybackend
+  testpkg: local/mybackend
 ```
 
 3. Run:
@@ -471,11 +471,11 @@ mytool install $name
 
 ## Publishing a Backend
 
-### For user backends
+### For local backends
 
 Place backend directory in `$XDG_CONFIG_HOME/loadout/backends/<name>/` (Linux/macOS) or `%LOCALAPPDATA%\loadout\backends\<name>\` (Windows).
 
-Reference in strategy as `user/<name>`.
+Reference in strategy as `local/<name>`.
 
 ### For external source backends
 

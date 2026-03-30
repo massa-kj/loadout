@@ -9,11 +9,11 @@ use serde::{Deserialize, Serialize};
 
 /// Specification of external plugin source locations and admission rules.
 ///
-/// Implicit sources (`core` and `user`) are always available and must NOT be listed here.
+/// Implicit sources (`core` and `local`) are always available and must NOT be listed here.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct SourcesSpec {
     /// External source declarations.
-    /// Reserved IDs (`core`, `user`, `official`) must not appear here.
+    /// Reserved IDs (`core`, `local`, `official`) must not appear here.
     #[serde(default)]
     pub sources: Vec<SourceEntry>,
 }

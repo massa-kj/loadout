@@ -49,10 +49,10 @@ Profiles, policies, features, and backends can now be loaded from multiple sourc
   
 * **Features/Backends:**
   - `core` source: `{repo}/features/` and `{repo}/backends/`
-  - `user` source: `$XDG_CONFIG_HOME/loadout/features/` and `backends/`
+  - `local` source: `$XDG_CONFIG_HOME/loadout/features/` and `backends/`
   - External sources: `$XDG_DATA_HOME/loadout/sources/<source_id>/` (schema defined, execution path deferred)
 
-* **Canonical IDs:** All features and backends use `<source_id>/<name>` format (e.g., `core/git`, `user/mypkg`).
+* **Canonical IDs:** All features and backends use `<source_id>/<name>` format (e.g., `core/git`, `local/mypkg`).
 * **Source registry:** Manages discovery, allow-list validation, path resolution (see `crates/source-registry/`).
 
 **Remaining work:**

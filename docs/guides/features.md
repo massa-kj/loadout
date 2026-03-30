@@ -36,7 +36,7 @@ No nested submodules. No cross-feature imports.
 The same layout is used for all source roots:
 
 * built-in: `{repo}/features/<name>/`
-* user: config home `features/<name>/`
+* local: config home `features/<name>/`
 * external: data home `sources/<source_id>/features/<name>/`
 
 ## feature.yaml
