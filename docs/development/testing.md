@@ -48,9 +48,9 @@ Tests that exercise path resolution must isolate XDG/AppData roots instead of mo
 
 | Environment | Description |
 |-------------|-------------|
-| [Environment](../../tests/environment/README.md) | Full apply execution in isolated environments (Docker, Windows Sandbox) |
-| [Linux (Docker)](../../tests/environment/linux/docker/README.md) | Full apply execution in a fresh Ubuntu container |
-| [Windows (Sandbox)](../../tests/environment/windows/README.md) | Full apply execution in a disposable Windows Sandbox instance |
+| [Environment](../../tests/e2e/README.md) | Full apply execution in isolated environments (Docker, Windows Sandbox) |
+| [Linux (Docker)](../../tests/e2e/linux/docker/README.md) | Full apply execution in a fresh Ubuntu container |
+| [Windows (Sandbox)](../../tests/e2e/windows/README.md) | Full apply execution in a disposable Windows Sandbox instance |
 
 ## Path Isolation Rules
 
