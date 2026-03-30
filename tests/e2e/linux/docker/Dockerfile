@@ -6,6 +6,7 @@ FROM ubuntu:24.04 AS base
 # Install minimal dependencies
 RUN apt-get update && apt-get install -y \
     curl \
+    git \
     sudo \
     ca-certificates \
     bash \
@@ -40,11 +41,12 @@ RUN mkdir -p ~/.local/bin \
 RUN mkdir -p ~/.config/loadout/configs \
     && cp -r features ~/.config/loadout/ \
     && cp -r backends ~/.config/loadout/ \
-    && cp tests/environment/linux/docker/fixtures/* ~/.config/loadout/configs/ \
-    && find tests/environment/linux/docker/scenarios -type f -name "*.sh" -exec chmod +x {} \;
+    && cp tests/fixtures/configs/* ~/.config/loadout/configs/ \
+    && find tests/e2e/linux/docker/scenarios -type f -name "*.sh" -exec chmod +x {} \;
 
-# Set PATH for this session
+# Set PATH and LOADOUT_ROOT for this session
 ENV PATH="/root/.local/bin:${PATH}"
+ENV LOADOUT_ROOT="/root/.config/loadout"
 
 WORKDIR /tmp/loadout-repo
 

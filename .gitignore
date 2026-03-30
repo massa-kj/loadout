@@ -2,5 +2,5 @@
 /target/
 
 # Test environment artifacts
-tests/environment/windows/logs/
-tests/environment/windows/sandbox/loadout.wsb
+tests/e2e/windows/logs/
+tests/e2e/windows/sandbox/loadout.wsb

@@ -82,7 +82,7 @@ try {
     # --- Run test scenario ---
     Write-Host "==> Running test scenario: $Scenario" -ForegroundColor Green
     
-    $ScenarioScript = ".\tests\environment\windows\sandbox\scenarios\$Scenario.ps1"
+    $ScenarioScript = ".\tests\e2e\windows\sandbox\scenarios\$Scenario.ps1"
     if (-not (Test-Path $ScenarioScript)) {
         throw "Scenario script not found: $ScenarioScript"
     }

@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-# Detect loadout root (this script is at tests/environment/linux/docker/test.sh)
+# Detect loadout root (this script is at tests/e2e/linux/docker/test.sh)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOADOUT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
@@ -11,7 +11,7 @@ cd "$LOADOUT_ROOT"
 
 IMAGE_BASE="loadout-base"
 IMAGE_NAME="loadout-test"
-DOCKERFILE="tests/environment/linux/docker/Dockerfile"
+DOCKERFILE="tests/e2e/linux/docker/Dockerfile"
 
 # Color output
 readonly COLOR_RESET='\033[0m'
@@ -85,7 +85,7 @@ build_image() {
 # Run scenario
 run_scenario() {
     local scenario="$1"
-    local script="./tests/environment/linux/docker/scenarios/${scenario}.sh"
+    local script="./tests/e2e/linux/docker/scenarios/${scenario}.sh"
     
     log_step "Running ${scenario} scenario..."
     
@@ -113,7 +113,10 @@ open_shell() {
     log_info "loadout is installed at ~/.local/bin/loadout. You can run:"
     log_info "  loadout plan -c ~/.config/loadout/configs/config-base.yaml"
     log_info "  loadout apply -c ~/.config/loadout/configs/config-base.yaml"
-    log_info "  ./tests/environment/linux/docker/scenarios/minimal.sh"
+    log_info "  ./tests/e2e/linux/docker/scenarios/minimal.sh"
+    log_info ""
+    log_info "Environment:"
+    log_info "  LOADOUT_ROOT=~/.config/loadout (features/ and backends/ location)"
     echo ""
 
     docker run --rm -it "$IMAGE_NAME" /bin/bash
@@ -125,7 +128,7 @@ open_base_shell() {
     log_info "Repository is available at /tmp/loadout-repo."
     log_info "You can test pre-release binaries:"
     log_info "  ./target/debug/loadout --help"
-    log_info "  ./target/debug/loadout plan -c tests/environment/linux/docker/fixtures/config-base.yaml"
+    log_info "  ./target/debug/loadout plan -c tests/fixtures/configs/config-base.yaml"
     echo ""
 
     docker run --rm -it "$IMAGE_BASE" /bin/bash

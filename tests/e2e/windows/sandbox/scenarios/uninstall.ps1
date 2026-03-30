@@ -16,10 +16,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $StateFile = "state\state.json"
-$FixturesDir = Join-Path $PSScriptRoot "..\fixtures"
+$FixturesDir = Join-Path $PSScriptRoot "..\..\..\..\fixtures\configs"
 
-# Use test-specific policy (no backup, standard backends)
-$global:LOADOUT_POLICY_FILE = (Resolve-Path (Join-Path $FixturesDir "policy.yaml")).Path
+# Use test-specific strategy (no backup, standard backends)
+$global:LOADOUT_STRATEGY_FILE = (Resolve-Path (Join-Path $FixturesDir "strategy.yaml")).Path
 $ProfileFull  = (Resolve-Path (Join-Path $FixturesDir "profile-full.yaml")).Path
 $ProfileEmpty = (Resolve-Path (Join-Path $FixturesDir "profile-empty.yaml")).Path
 

@@ -121,7 +121,7 @@ Scenario tests use the `installed` image for fast execution.
 ### Run all tests
 
 ```bash
-./tests/environment/linux/docker/test.sh all
+./tests/e2e/linux/docker/test.sh all
 ```
 
 This will:
@@ -134,45 +134,45 @@ This will:
 ### Run specific test
 
 ```bash
-./tests/environment/linux/docker/test.sh minimal
-./tests/environment/linux/docker/test.sh lifecycle
-./tests/environment/linux/docker/test.sh idempotent
-./tests/environment/linux/docker/test.sh uninstall
-./tests/environment/linux/docker/test.sh version-install
-./tests/environment/linux/docker/test.sh version-mixed
-./tests/environment/linux/docker/test.sh version-upgrade
+./tests/e2e/linux/docker/test.sh minimal
+./tests/e2e/linux/docker/test.sh lifecycle
+./tests/e2e/linux/docker/test.sh idempotent
+./tests/e2e/linux/docker/test.sh uninstall
+./tests/e2e/linux/docker/test.sh version-install
+./tests/e2e/linux/docker/test.sh version-mixed
+./tests/e2e/linux/docker/test.sh version-upgrade
 ```
 
 ### Build images
 
 ```bash
 # Build installed image (used by scenario tests)
-./tests/environment/linux/docker/test.sh build
+./tests/e2e/linux/docker/test.sh build
 
 # Build base image only (for pre-release binary validation)
-./tests/environment/linux/docker/test.sh build-base
+./tests/e2e/linux/docker/test.sh build-base
 ```
 
 ### Clean up
 
 ```bash
-./tests/environment/linux/docker/test.sh clean
+./tests/e2e/linux/docker/test.sh clean
 ```
 
 ### Interactive shell (for debugging)
 
 ```bash
 # Shell in installed container (loadout ready to use)
-./tests/environment/linux/docker/test.sh shell
+./tests/e2e/linux/docker/test.sh shell
 
 # Shell in base container (pre-installation, for binary validation)
-./tests/environment/linux/docker/test.sh base-shell
+./tests/e2e/linux/docker/test.sh base-shell
 ```
 
 `shell` is useful for:
 - Testing plan command: `loadout plan -c ~/.config/loadout/configs/config-base.yaml`
 - Testing apply command: `loadout apply -c ~/.config/loadout/configs/config-base.yaml`
-- Running a scenario manually: `./tests/environment/linux/docker/scenarios/minimal.sh`
+- Running a scenario manually: `./tests/e2e/linux/docker/scenarios/minimal.sh`
 - Inspecting state: `cat ~/.local/state/loadout/state.json`
 
 `base-shell` is useful for:
@@ -221,7 +221,7 @@ These are environmental concerns, not architectural guarantees.
 
 When adding new test scenarios:
 
-1. Create `tests/environment/linux/docker/scenarios/<name>.sh`
+1. Create `tests/e2e/linux/docker/scenarios/<name>.sh`
 2. Follow `set -euo pipefail` pattern
 3. Verify state only — not implementation
 4. Exit 1 on any violation
@@ -232,7 +232,7 @@ Document guarantees being tested.
 ## File Structure
 
 ```
-tests/environment/linux/docker/
+tests/e2e/linux/docker/
 ├── Dockerfile           # Two-stage build (base / bootstrapped)
 ├── test.sh              # Test execution script
 ├── README.md            # This file

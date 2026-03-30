@@ -9,7 +9,7 @@ profile:
     node:
       version: "20"
 
-policy:
+strategy:
   package:
     default_backend: core/brew
   runtime:

@@ -31,10 +31,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-# Resolve repository root (this script is at tests/environment/windows/sandbox/create-wsb.ps1)
+# Resolve repository root (this script is at tests/e2e/windows/sandbox/create-wsb.ps1)
 $ScriptDir = $PSScriptRoot
 $RepoRoot = (Resolve-Path (Join-Path $ScriptDir "..\..\..\..\")).Path
-$LogsRoot = Join-Path $RepoRoot "tests\environment\windows\logs"
+$LogsRoot = Join-Path $RepoRoot "tests\e2e\windows\logs"
 
 # Ensure logs directory exists
 if (-not (Test-Path $LogsRoot)) {
@@ -86,7 +86,7 @@ Write-Host 'Working directory: `$WorkDir' -ForegroundColor Gray;
 
 if ($Scenario) {
     # Automated test mode: Install WinGet, copy repo, set SCENARIO env var, then run script
-    $InnerCommand = $WinGetInstallCmd + $CopyRepoCmd + "`$env:SCENARIO='$Scenario'; .\tests\environment\windows\sandbox\run-in-sandbox.ps1"
+    $InnerCommand = $WinGetInstallCmd + $CopyRepoCmd + "`$env:SCENARIO='$Scenario'; .\tests\e2e\windows\sandbox\run-in-sandbox.ps1"
 } else {
     # Manual mode: Install WinGet, copy repo, then ready for manual testing
     $InnerCommand = $WinGetInstallCmd + $CopyRepoCmd + "Write-Host 'Ready for manual testing!' -ForegroundColor Green; Write-Host 'Run bootstrap: .\platforms\windows\bootstrap.ps1' -ForegroundColor Yellow"

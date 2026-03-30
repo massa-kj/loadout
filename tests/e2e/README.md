@@ -27,7 +27,7 @@ and verifies the resulting state file.
 **Quick start:**
 
 ```bash
-./tests/environment/linux/docker/test.sh all
+./tests/e2e/linux/docker/test.sh all
 ```
 
 See [linux/docker/README.md](linux/docker/README.md) for full documentation.
@@ -42,7 +42,7 @@ repository, runs bootstrap, and executes the scenario inside the Sandbox.
 **Quick start (from Windows):**
 
 ```powershell
-cd tests\environment\windows\sandbox
+cd tests\e2e\windows\sandbox
 .\test.ps1 all
 ```
 

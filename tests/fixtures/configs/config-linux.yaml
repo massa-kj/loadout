@@ -1,0 +1,47 @@
+profile:
+  features:
+    brew: {}
+    # cli-tools: {}
+    fzf: {}
+    mise: {}
+    # ripgrep: {}
+
+    node:
+      version: "22.17.1"
+    npm: {}
+    # python:
+    #   version: "3.12"
+    # uv: {}
+    # rust:
+    #   version: "1.87"
+
+strategy:
+  package:
+    # Default backend for system package installs on Linux / WSL.
+    default_backend: core/brew
+    # Per-resource backend overrides, keyed by the exact package name.
+    overrides:
+      typescript:
+        backend: core/npm
+      typescript-language-server:
+        backend: core/npm
+      eslint:
+        backend: core/npm
+      python-lsp-server:
+        backend: core/uv
+
+  runtime:
+    # Default backend for runtime installs (node, python, rust, lua, etc.).
+    default_backend: core/mise
+    # Per-resource backend overrides, keyed by the runtime name
+    # (e.g. "node", "python") — not the feature name.
+    # Example:
+    #   overrides:
+    #     node:
+    #       backend: mise
+    overrides: {}
+
+  fs:
+    # Create a backup of existing files before overwriting.
+    backup: true
+    backup_dir: "~/.loadout_backup"

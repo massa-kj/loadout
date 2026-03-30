@@ -6,7 +6,7 @@ profile:
     brew: {}
     fzf: {}
 
-policy:
+strategy:
   package:
     default_backend: core/brew
   runtime:

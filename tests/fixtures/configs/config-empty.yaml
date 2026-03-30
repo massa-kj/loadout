@@ -4,7 +4,7 @@
 profile:
   features: {}
 
-policy:
+strategy:
   package:
     default_backend: core/brew
   runtime:
