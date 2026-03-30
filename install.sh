@@ -34,7 +34,8 @@ detect_target() {
         Darwin) os="macos" ;;
         *)
             echo "error: unsupported OS: $(uname -s)" >&2
-            echo "For Windows, download the .exe from GitHub Releases manually." >&2
+            echo "For Windows, use install.ps1 instead:" >&2
+            echo "  irm https://raw.githubusercontent.com/massa-kj/loadout/main/install.ps1 | iex" >&2
             exit 1
             ;;
     esac
