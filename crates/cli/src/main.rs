@@ -13,11 +13,11 @@
 //   --config linux           → $XDG_CONFIG_HOME/loadout/configs/linux.yaml
 //   --config ./work.yaml     → ./work.yaml  (any value containing .yaml)
 //
-// Repository root resolution (for features/, backends/):
-//   1. LOADOUT_ROOT environment variable (explicit override)
-//   2. Parent of the binary’s directory (tarball layout: bin/loadout → ../)
+// User source root resolution (for user features/ and backends/):
+//   Default: $XDG_CONFIG_HOME/loadout  (XDG standard)
+//   Override: LOADOUT_ROOT=<path>  (development use only)
 //
-// See: docs/adr/config-unification-plan.md, docs/architecture/layers.md
+// See: docs/architecture/layers.md
 
 use std::path::{Path, PathBuf};
 use std::{env, process};
@@ -419,65 +419,27 @@ fn cmd_migrate(args: &[String]) {
 
 /// Build an `AppContext` from the current environment.
 ///
-/// See [`resolve_repo_root`] for repository root resolution order.
 /// Platform and XDG/AppData dirs are detected automatically.
+/// The `user` source root defaults to `config_home`; set `LOADOUT_ROOT` to
+/// override it during development (points an alternate directory containing
+/// `features/` and `backends/` subdirectories).
 fn build_app_context() -> app::AppContext {
-    let repo_root = resolve_repo_root();
     let platform = platform::detect_platform();
     let dirs = platform::resolve_dirs(&platform).unwrap_or_else(|e| {
         eprintln!("error: failed to resolve directories: {e}");
         process::exit(1);
     });
-    app::AppContext::new(repo_root, platform, dirs)
-}
-
-/// Resolve the loadout repository root directory.
-///
-/// Resolution order:
-///   1. `LOADOUT_ROOT` environment variable (explicit override)
-///   2. Parent of the binary's directory, if it contains `features/`
-///      (tarball layout: `<install_root>/bin/loadout → ../`)
-///   3. Parent of the binary's directory (unconditional fallback)
-fn resolve_repo_root() -> PathBuf {
-    // 1. Explicit override via environment variable.
+    let mut ctx = app::AppContext::new(platform, dirs);
+    // Development override: LOADOUT_ROOT redirects the `user` source root.
     if let Ok(root) = env::var("LOADOUT_ROOT") {
         let p = PathBuf::from(&root);
         if p.is_dir() {
-            return p;
-        }
-        eprintln!("warning: LOADOUT_ROOT={root} is not a directory; falling back");
-    }
-
-    // 2. Tarball layout: binary is at `<install_root>/bin/loadout`.
-    if let Some(candidate) = exe_dir().parent().map(Path::to_path_buf) {
-        if looks_like_repo_root(&candidate) {
-            return candidate;
+            ctx = ctx.with_user_root(p);
+        } else {
+            eprintln!("warning: LOADOUT_ROOT={root} is not a directory; ignored");
         }
     }
-
-    // 3. Last resort: exe parent even without a features/ directory.
-    exe_dir()
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(exe_dir)
-}
-
-/// Returns `true` if `path` looks like the loadout repository root.
-///
-/// The presence of a `features/` directory is used as the heuristic.
-fn looks_like_repo_root(path: &Path) -> bool {
-    path.join("features").is_dir()
-}
-
-/// Returns the directory containing this binary, following symlinks.
-fn exe_dir() -> PathBuf {
-    env::current_exe()
-        .expect("failed to locate current executable")
-        .canonicalize()
-        .unwrap_or_else(|_| env::current_exe().expect("failed to locate current executable"))
-        .parent()
-        .expect("executable has no parent directory")
-        .to_path_buf()
+    ctx
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

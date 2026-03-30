@@ -5,23 +5,21 @@
 //!
 //! # Source Kinds
 //!
-//! Three source kinds are recognized:
-//!
 //! | Source ID   | Kind       | Declared in `sources.yaml` |
 //! |-------------|------------|----------------------------|
-//! | `core`      | implicit   | No — always available       |
+//! | `core`      | implicit   | No — embedded in binary; no filesystem path  |
 //! | `user`      | implicit   | No — always available       |
 //! | `<other>`   | external   | Yes — must be declared      |
 //!
 //! # Path Resolution
 //!
 //! **Features:**
-//! - `core/<name>` → `{repo_root}/features/<name>`
+//! - `core/<name>` → embedded in binary; `feature_dir` returns `UnknownSource`
 //! - `user/<name>` → `{config_home}/features/<name>`
 //! - `<ext>/<name>` → `{data_home}/sources/<ext>/features/<name>`
 //!
 //! **Backends:**
-//! - `core/<name>` → `{repo_root}/backends/<name>`
+//! - `core/<name>` → embedded in binary; `backend_dir` returns `UnknownSource`
 //! - `user/<name>` → `{config_home}/backends/<name>`
 //! - `<ext>/<name>` → `{data_home}/sources/<ext>/backends/<name>`
 //!
@@ -95,13 +93,11 @@ pub enum RegistryError {
 
 /// The source registry resolves canonical IDs to filesystem paths and enforces allow-lists.
 ///
-/// Construct via [`SourceRegistry::new`] using a loaded [`SourcesSpec`] and three base paths.
+/// Construct via [`SourceRegistry::new`] using a loaded [`SourcesSpec`] and two base paths.
 pub struct SourceRegistry {
     /// External sources declared in `sources.yaml`. `core` and `user` are not listed here.
     sources: Vec<SourceEntry>,
-    /// Absolute path to the loadout repository root (contains `features/` and `backends/`).
-    repo_root: PathBuf,
-    /// Absolute path to the user config home (contains `features/` and `backends/` overrides).
+    /// Absolute path to the user config home (contains `features/` and `backends/`).
     config_home: PathBuf,
     /// Absolute path to the data home (contains `sources/<id>/features/` and `sources/<id>/backends/`).
     data_home: PathBuf,
@@ -113,18 +109,11 @@ impl SourceRegistry {
     /// # Arguments
     ///
     /// - `sources` — loaded and validated [`SourcesSpec`]; `core`/`user` must not appear here.
-    /// - `repo_root` — the repository root directory (where `features/` and `backends/` live).
     /// - `config_home` — user config home (for `user/` source resolution).
     /// - `data_home` — user data home (for external source resolution).
-    pub fn new(
-        sources: SourcesSpec,
-        repo_root: &Path,
-        config_home: &Path,
-        data_home: &Path,
-    ) -> Self {
+    pub fn new(sources: SourcesSpec, config_home: &Path, data_home: &Path) -> Self {
         Self {
             sources: sources.sources,
-            repo_root: repo_root.to_path_buf(),
             config_home: config_home.to_path_buf(),
             data_home: data_home.to_path_buf(),
         }
@@ -192,10 +181,11 @@ impl SourceRegistry {
         kind: ResourceKind,
     ) -> Result<PathBuf, RegistryError> {
         match source_id {
-            "core" => Ok(self.repo_root.join(kind.dir_segment()).join(name)),
             "user" => Ok(self.config_home.join(kind.dir_segment()).join(name)),
             ext => {
-                // External source must be declared.
+                // External source must be declared. `core` has no filesystem path
+                // (it is embedded in the binary) and is not in `sources`, so it
+                // also falls here and returns UnknownSource.
                 if !self.sources.iter().any(|e| e.id == ext) {
                     return Err(RegistryError::UnknownSource {
                         source_id: ext.to_string(),
@@ -299,9 +289,6 @@ mod tests {
     };
     use std::path::PathBuf;
 
-    fn repo() -> PathBuf {
-        PathBuf::from("/repo")
-    }
     fn cfg() -> PathBuf {
         PathBuf::from("/cfg")
     }
@@ -318,7 +305,7 @@ mod tests {
     }
 
     fn registry_with(sources: SourcesSpec) -> SourceRegistry {
-        SourceRegistry::new(sources, &repo(), &cfg(), &data())
+        SourceRegistry::new(sources, &cfg(), &data())
     }
 
     fn empty_registry() -> SourceRegistry {
@@ -342,10 +329,11 @@ mod tests {
     // ── feature_dir ───────────────────────────────────────────────────────────
 
     #[test]
-    fn feature_dir_core() {
+    fn feature_dir_core_returns_unknown_source() {
+        // core is embedded; it has no filesystem path in the registry.
         let r = empty_registry();
-        let dir = r.feature_dir(&feature("core/git")).unwrap();
-        assert_eq!(dir, PathBuf::from("/repo/features/git"));
+        let err = r.feature_dir(&feature("core/git")).unwrap_err();
+        assert!(matches!(err, RegistryError::UnknownSource { .. }));
     }
 
     #[test]
@@ -372,10 +360,11 @@ mod tests {
     // ── backend_dir ───────────────────────────────────────────────────────────
 
     #[test]
-    fn backend_dir_core() {
+    fn backend_dir_core_returns_unknown_source() {
+        // core is embedded; it has no filesystem path in the registry.
         let r = empty_registry();
-        let dir = r.backend_dir(&backend("core/brew")).unwrap();
-        assert_eq!(dir, PathBuf::from("/repo/backends/brew"));
+        let err = r.backend_dir(&backend("core/brew")).unwrap_err();
+        assert!(matches!(err, RegistryError::UnknownSource { .. }));
     }
 
     #[test]

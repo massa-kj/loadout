@@ -44,9 +44,8 @@ RUN mkdir -p ~/.config/loadout/configs \
     && cp tests/fixtures/configs/* ~/.config/loadout/configs/ \
     && find tests/e2e/linux/docker/scenarios -type f -name "*.sh" -exec chmod +x {} \;
 
-# Set PATH and LOADOUT_ROOT for this session
+# Set PATH for this session
 ENV PATH="/root/.local/bin:${PATH}"
-ENV LOADOUT_ROOT="/root/.config/loadout"
 
 WORKDIR /tmp/loadout-repo
 
