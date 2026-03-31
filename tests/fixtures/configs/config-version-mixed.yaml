@@ -1,19 +1,18 @@
-# Mixed config: versioned (node) and non-versioned features together.
+# Mixed config: versioned (dummy-rt) and non-versioned (dummy-pkg) features.
 # Verifies: versioned features record runtime.version; non-versioned do not.
-# Used by: version_mixed scenario
+# Used by: version_mixed scenario.
 
 profile:
   features:
     local:
-      brew: {}
-      mise: {}
-      node:
+      dummy-pkg: {}
+      dummy-rt:
         version: "20"
 
 strategy:
   package:
-    default_backend: local/brew
+    default_backend: local/dummy-pkg
   runtime:
-    default_backend: local/mise
+    default_backend: local/dummy-rt
   fs:
     backup: false

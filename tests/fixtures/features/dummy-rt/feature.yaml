@@ -1,0 +1,16 @@
+spec_version: 1
+description: |
+  Dummy runtime feature for E2E testing.
+  Uses the local/dummy-rt backend — no network access required.
+  The version in this file is the default; the profile config can override it
+  via the feature's 'version' field.
+depends: []
+
+provides:
+  - name: runtime_manager
+
+resources:
+  - kind: runtime
+    id: rt:dummy-rt
+    name: dummy-rt
+    version: "1.0"

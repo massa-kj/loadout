@@ -1,19 +1,17 @@
-# Config with a versioned runtime (node@20).
+# Config with a versioned runtime (dummy-rt@20).
 # Verifies: version is recorded in state.
-# Used by: version_install scenario, version_upgrade scenario (first apply)
+# Used by: version_install scenario, version_upgrade scenario (first apply).
 
 profile:
   features:
     local:
-      brew: {}
-      mise: {}
-      node:
+      dummy-rt:
         version: "20"
 
 strategy:
   package:
-    default_backend: local/brew
+    default_backend: local/dummy-pkg
   runtime:
-    default_backend: local/mise
+    default_backend: local/dummy-rt
   fs:
     backup: false

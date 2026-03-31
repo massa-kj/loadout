@@ -1,17 +1,18 @@
-# Minimal feature set: verifies state creation, file tracking, and no duplicates.
-# Used by: minimal, lifecycle, idempotent, uninstall scenarios (base phase)
+# Minimal feature set: package + fs resources, no runtime.
+# Verifies state creation, file tracking, and no duplicates.
+# Used by: minimal, lifecycle (base phase), idempotent, uninstall scenarios.
 
 profile:
   features:
     local:
-      brew: {}
-      fzf: {}
+      dummy-pkg: {}
+      dummy-fs: {}
 
 strategy:
   package:
-    default_backend: local/brew
+    default_backend: local/dummy-pkg
   runtime:
-    default_backend: local/mise
+    default_backend: local/dummy-rt
   fs:
     # Disable backups inside test containers — no need to preserve originals.
     backup: false

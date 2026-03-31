@@ -1,16 +1,18 @@
-# Broader feature set: used for expand phase in lifecycle and uninstall scenarios.
+# Broader feature set: package + fs + runtime resources.
+# Verifies that runtime version is recorded and features expand correctly.
+# Used by: lifecycle (expand phase), idempotent (full profile variant).
 
 profile:
   features:
     local:
-      brew: {}
-      fzf: {}
-      ripgrep: {}
+      dummy-pkg: {}
+      dummy-fs: {}
+      dummy-rt: {}
 
 strategy:
   package:
-    default_backend: local/brew
+    default_backend: local/dummy-pkg
   runtime:
-    default_backend: local/mise
+    default_backend: local/dummy-rt
   fs:
     backup: false
