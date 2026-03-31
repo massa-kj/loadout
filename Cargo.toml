@@ -1,3 +1,22 @@
 [workspace]
-members = ["crates/cli", "crates/model", "crates/resolver", "crates/planner", "crates/io", "crates/config", "crates/state", "crates/source-registry", "crates/feature-index", "crates/compiler", "crates/platform", "crates/backend-host", "crates/feature-host", "crates/executor", "crates/backends-builtin", "crates/app"]
+members = [
+    "crates/cli",
+    "crates/model",
+    "crates/resolver",
+    "crates/planner",
+    "crates/io",
+    "crates/config",
+    "crates/state",
+    "crates/source-registry",
+    "crates/feature-index",
+    "crates/compiler",
+    "crates/platform",
+    "crates/backend-host",
+    "crates/feature-host",
+    "crates/executor",
+    "crates/backends-builtin",
+    "crates/app",
+    # Test infrastructure (not part of the loadout product binary)
+    "tests/runtime",
+]
 resolver = "2"
