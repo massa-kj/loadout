@@ -1,124 +1,113 @@
-# Windows Environment Tests
+# Windows E2E Tests
 
-E2E tests for the loadout system on Windows (Windows Sandbox).
+E2E tests for loadout on Windows, executed inside Windows Sandbox.
 
-## Purpose
+## Overview
 
-Verify that `loadout apply` works correctly on Windows by running tests in a
-clean, isolated Windows Sandbox environment.
+Tests run against pre-built host binaries (`loadout.exe`, `loadout-e2e.exe`)
+inside a clean, ephemeral sandbox. Dummy backends are used — no WinGet, no
+network access required.
 
-Tests focus on:
-
-* Correct execution of Windows-specific backends (`winget`, `scoop`)
-* State file creation and schema validity
-* Safe uninstall behaviour
-
-## Current State of Scenario Execution
-
-Scenarios are currently driven by PowerShell scripts (`scenarios/*.ps1`).
-
-A future goal is to reuse the `loadout-e2e` binary
-(`tests/runtime/` Rust crate) once a cross-compiled `loadout-e2e.exe` is
-available, aligning Windows tests with the Linux approach.
+The same `loadout-e2e` Rust binary that drives Linux Docker tests also drives
+the Windows Sandbox tests, ensuring both platforms exercise identical scenario
+logic.
 
 ## Prerequisites
 
-* Windows 10/11 Pro or Enterprise (Windows Sandbox must be enabled)
-* Enable Windows Sandbox: **Turn Windows features on or off** → **Windows Sandbox**
-* `loadout` binary built and accessible on `%PATH%`
+* Windows 10/11 Pro or Enterprise
+* Windows Sandbox enabled:
+  **Turn Windows features on or off → Windows Sandbox**
+  or run as Administrator:
+  ```powershell
+  Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM -All
+  ```
+* Rust toolchain (for the initial binary build — `cargo build --release`)
 
 ## Quick Start
 
-Run the top-level test script from PowerShell (as administrator):
+Run from PowerShell (Administrator) in the repository root:
 
 ```powershell
-.\tests\e2e\windows\test.ps1 all
-.\tests\e2e\windows\test.ps1 <scenario>
+.\tests\e2e\windows\sandbox\test.ps1 all
+.\tests\e2e\windows\sandbox\test.ps1 minimal
+.\tests\e2e\windows\sandbox\test.ps1 shell   # interactive session
 ```
 
-### Available commands
-
-| Command | Description |
-|---------|-------------|
-| `all` | Run all scenarios |
-| `<scenario>` | Run a specific scenario by name |
-| `shell` | Open an interactive Sandbox session |
-| `clean` | Remove log files |
+`test.ps1` automatically builds `loadout.exe` and `loadout-e2e.exe` if the
+release binaries are not present. After the first build the check is fast.
 
 ## Test Scenarios
 
-### lifecycle
+| Scenario         | Description                                               |
+|------------------|-----------------------------------------------------------|
+| `minimal`        | State created, version correct, no duplicates             |
+| `idempotent`     | Second apply produces identical state                     |
+| `lifecycle`      | Full cycle: base → full → idempotent → shrink → empty     |
+| `uninstall`      | Tracked resources removed; untracked files preserved      |
+| `version-install`| Version recorded in state after runtime install           |
+| `version-upgrade`| Version mismatch triggers reinstall; state updated        |
+| `version-mixed`  | Versioned and unversioned features coexist correctly      |
 
-Full lifecycle verification in a single run:
+## How It Works
 
-1. base apply — state initialised correctly
-2. full apply — additional features installed
-3. full apply (repeat) — idempotency confirmed
-4. base apply — unwanted features removed safely
-5. empty apply — all tracked resources removed
+1. `test.ps1` ensures `target\release\loadout.exe` and `loadout-e2e.exe` exist
+2. `create-wsb.ps1` generates `loadout.wsb` from the template
+3. Windows Sandbox launches with:
+   * Repository mounted read-only at `C:\host-loadout`
+   * Log directory mounted read-write at `C:\logs` → `tests\e2e\windows\logs\`
+4. Inside the sandbox, `run-in-sandbox.ps1`:
+   * Copies the repo to `C:\loadout`
+   * Installs binaries into `%LOCALAPPDATA%\loadout\bin\`
+   * Sets `XDG_CONFIG_HOME` and `XDG_STATE_HOME` to `%APPDATA%` so that
+     `loadout.exe` and `loadout-e2e.exe` agree on the same config/state paths
+   * Copies configs, features, and dummy backends to `%APPDATA%\loadout\`
+   * Runs `loadout-e2e.exe <scenario>`
 
-### minimal
+## Path Convention (Windows)
 
-Basic execution:
+| Purpose          | Path                                  |
+|------------------|---------------------------------------|
+| Config / features / backends | `%APPDATA%\loadout\`    |
+| State file       | `%APPDATA%\loadout\state.json`        |
+| Configs dir      | `%APPDATA%\loadout\configs\`          |
+| Features dir     | `%APPDATA%\loadout\features\`         |
+| Backends dir     | `%APPDATA%\loadout\backends\`         |
 
-* State file created
-* Schema version correct
-* Features recorded
-
-### idempotent
-
-Determinism:
-
-* Second apply does not change state
-
-### uninstall
-
-Safe removal:
-
-* Tracked resources removed after apply with empty profile
-* Untracked files preserved
-
-## How Sandbox Works
-
-Each test run:
-
-1. Launches a fresh Windows Sandbox instance (no persistent state)
-2. Copies the `loadout` binary and scenario scripts into the Sandbox
-3. Runs the scenario inside the Sandbox
-4. Captures the exit code and logs
-5. Closes the Sandbox
-
-The Sandbox is ephemeral — every run starts from a clean Windows install.
+`loadout.exe` uses `%APPDATA%\loadout\` natively on Windows.
+`loadout-e2e.exe` is aligned via `XDG_CONFIG_HOME=%APPDATA%` and
+`XDG_STATE_HOME=%APPDATA%`.
 
 ## Logs
 
-Log files are written to `tests/e2e/windows/logs/` on the host.
-
-They are excluded from version control (`.gitignore`).
+Log files are written to `tests\e2e\windows\logs\` on the host during sandbox
+execution. They are excluded from version control.
 
 ## Troubleshooting
 
 **Sandbox does not start**
-Confirm that Windows Sandbox is enabled and that Hyper-V / virtualisation is
-active in BIOS/UEFI.
+Confirm Windows Sandbox is enabled and Hyper-V / virtualisation is active in
+BIOS/UEFI.
 
 **Script execution blocked**
-Open PowerShell as administrator and run:
 ```powershell
 Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
-**`loadout` not found inside Sandbox**
-Ensure the binary was built (`cargo build --release`) and that `test.ps1`
-correctly copies it into the Sandbox.
+**`loadout.exe` not found inside Sandbox**
+Ensure the release build exists:
+```powershell
+cargo build -p loadout -p loadout-e2e --release
+```
+or just re-run `test.ps1` — it builds automatically.
 
 ## File Structure
 
 ```
 tests/e2e/windows/
-├── test.ps1            # Test execution script
-├── sandbox/
-│   ├── setup.ps1       # Sandbox configuration
-│   └── scenarios/      # PowerShell scenario scripts
-└── README.md           # This file
+├── README.md
+└── sandbox/
+    ├── test.ps1                # Top-level test runner
+    ├── create-wsb.ps1          # Generates loadout.wsb from template
+    ├── run-in-sandbox.ps1      # Runs inside the sandbox
+    └── loadout.wsb.template    # Windows Sandbox configuration template
 ```

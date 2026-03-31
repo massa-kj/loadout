@@ -8,9 +8,12 @@
     Creates a Windows Sandbox configuration from a template with
     repository-specific paths substituted.
 
+    The sandbox uses pre-built host binaries (loadout.exe, loadout-e2e.exe)
+    and dummy backends — no WinGet, no network access required.
+
 .PARAMETER Scenario
-    Test scenario to run (minimal, idempotent, uninstall, etc.)
-    If not specified, creates a manual testing environment without running a scenario.
+    Test scenario to run (minimal, idempotent, lifecycle, uninstall, etc.)
+    If not specified, creates a manual testing environment.
 
 .EXAMPLE
     .\create-wsb.ps1 -Scenario minimal
@@ -24,7 +27,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory=$false)]
-    [ValidateSet("minimal", "idempotent", "uninstall", "version-install", "version-mixed", "version-upgrade")]
+    [ValidateSet("minimal", "idempotent", "lifecycle", "uninstall",
+                 "version-install", "version-mixed", "version-upgrade")]
     [string]$Scenario
 )
 
@@ -33,8 +37,8 @@ $ErrorActionPreference = "Stop"
 
 # Resolve repository root (this script is at tests/e2e/windows/sandbox/create-wsb.ps1)
 $ScriptDir = $PSScriptRoot
-$RepoRoot = (Resolve-Path (Join-Path $ScriptDir "..\..\..\..\")).Path
-$LogsRoot = Join-Path $RepoRoot "tests\e2e\windows\logs"
+$RepoRoot  = (Resolve-Path (Join-Path $ScriptDir "..\..\..\..\")).Path
+$LogsRoot  = Join-Path $RepoRoot "tests\e2e\windows\logs"
 
 # Ensure logs directory exists
 if (-not (Test-Path $LogsRoot)) {
@@ -43,7 +47,7 @@ if (-not (Test-Path $LogsRoot)) {
 
 # Read template
 $TemplatePath = Join-Path $ScriptDir "loadout.wsb.template"
-$OutputPath = Join-Path $ScriptDir "loadout.wsb"
+$OutputPath   = Join-Path $ScriptDir "loadout.wsb"
 
 if (-not (Test-Path $TemplatePath)) {
     throw "Template not found: $TemplatePath"
@@ -51,61 +55,48 @@ if (-not (Test-Path $TemplatePath)) {
 
 $Content = Get-Content $TemplatePath -Raw
 
-# Substitute placeholders
-# Note: XML paths use backslashes, so we escape them for literal replacement
+# Substitute path placeholders
 $Content = $Content.Replace("__LOADOUT_ROOT__", $RepoRoot)
-$Content = $Content.Replace("__LOGS_ROOT__", $LogsRoot)
+$Content = $Content.Replace("__LOGS_ROOT__",    $LogsRoot)
 
-# Generate appropriate LogonCommand based on scenario
-# WinGet installation command (common for both modes) - simplified without jobs
-$WinGetInstallCmd = @"
-Write-Host 'Installing WinGet...' -ForegroundColor Cyan;
-cd `$env:USERPROFILE\Downloads;
-Write-Host 'Downloading dependencies...' -ForegroundColor Gray;
-curl.exe -LO https://www.nuget.org/api/v2/package/Microsoft.UI.Xaml/2.7.0;
-curl.exe -LO https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx;
-curl.exe -LO https://github.com/microsoft/winget-cli/releases/download/v1.6.3482/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle;
-Write-Host 'Extracting and installing...' -ForegroundColor Gray;
-Rename-Item .\2.7.0 -NewName Microsoft.UI.Xaml.2.7.0.zip;
-Expand-Archive -LiteralPath .\Microsoft.UI.Xaml.2.7.0.zip;
-Add-AppxPackage -Path .\Microsoft.UI.Xaml.2.7.0\tools\AppX\x64\Release\Microsoft.UI.Xaml.2.7.appx -ErrorAction SilentlyContinue;
-Add-AppxPackage -Path .\Microsoft.VCLibs.x64.14.00.Desktop.appx;
-Add-AppxPackage -Path .\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle;
-Write-Host 'WinGet installation complete!' -ForegroundColor Green;
-"@
-
-# Repository copy command (common for both modes)
+# Copy-repo command: called first in all modes.
+# The sandbox mounts the repo read-only at C:\host-loadout; copy it to a
+# writable location before running any scripts.
 $CopyRepoCmd = @"
 Write-Host 'Copying repository...' -ForegroundColor Cyan;
-`$WorkDir = 'C:\loadout';
-if (Test-Path `$WorkDir) { Remove-Item `$WorkDir -Recurse -Force };
-Copy-Item 'C:\host-loadout' `$WorkDir -Recurse;
-cd `$WorkDir;
-Write-Host 'Working directory: `$WorkDir' -ForegroundColor Gray;
+`$w = 'C:\loadout';
+if (Test-Path `$w) { Remove-Item `$w -Recurse -Force };
+Copy-Item 'C:\host-loadout' `$w -Recurse;
+cd `$w;
+Write-Host 'Working directory: `$w' -ForegroundColor Gray;
 "@
 
+# Generate the LogonCommand payload depending on mode.
 if ($Scenario) {
-    # Automated test mode: Install WinGet, copy repo, set SCENARIO env var, then run script
-    $InnerCommand = $WinGetInstallCmd + $CopyRepoCmd + "`$env:SCENARIO='$Scenario'; .\tests\e2e\windows\sandbox\run-in-sandbox.ps1"
+    # Automated test mode: set SCENARIO and run the test script.
+    $InnerCommand = $CopyRepoCmd + "`$env:SCENARIO='$Scenario'; .\tests\e2e\windows\sandbox\run-in-sandbox.ps1"
 } else {
-    # Manual mode: Install WinGet, copy repo, then ready for manual testing
-    $InnerCommand = $WinGetInstallCmd + $CopyRepoCmd + "Write-Host 'Ready for manual testing!' -ForegroundColor Green; Write-Host 'Run bootstrap: .\platforms\windows\bootstrap.ps1' -ForegroundColor Yellow"
+    # Manual mode: copy repo and show instructions.
+    $InnerCommand = $CopyRepoCmd + @"
+Write-Host 'Ready for manual testing!' -ForegroundColor Green;
+Write-Host 'Binaries are at: target\release\' -ForegroundColor Yellow;
+Write-Host 'To run a scenario: `$env:SCENARIO=''minimal''; .\tests\e2e\windows\sandbox\run-in-sandbox.ps1' -ForegroundColor Yellow;
+"@
 }
 
-# Escape single quotes for PowerShell string
+# Escape single quotes for embedding into the PowerShell -Command argument.
 $InnerCommand = $InnerCommand -replace "'", "''"
 
-# Use Start-Process to launch PowerShell in a new visible window
+# Wrap in Start-Process so the script runs in a visible, interactive window.
 $LogonCommand = "powershell -ExecutionPolicy Bypass -Command `"Start-Process powershell -ArgumentList '-ExecutionPolicy', 'Bypass', '-NoExit', '-NoLogo', '-Command', '$InnerCommand'`""
 $Content = $Content.Replace("__LOGON_COMMAND__", $LogonCommand)
 
-# Write output
 Set-Content -Path $OutputPath -Value $Content -Encoding UTF8 -NoNewline
 
 Write-Host "Generated: $OutputPath" -ForegroundColor Green
 if ($Scenario) {
-    Write-Host "Mode: Automated test" -ForegroundColor Cyan
-    Write-Host "Scenario: $Scenario" -ForegroundColor Cyan
+    Write-Host "Mode    : Automated test" -ForegroundColor Cyan
+    Write-Host "Scenario: $Scenario"      -ForegroundColor Cyan
 } else {
     Write-Host "Mode: Manual testing" -ForegroundColor Cyan
     Write-Host "No scenario will run automatically" -ForegroundColor Yellow

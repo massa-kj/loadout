@@ -2,35 +2,34 @@
 
 <#
 .SYNOPSIS
-    Execute test scenario inside Windows Sandbox.
+    Execute test scenario inside Windows Sandbox using the loadout-e2e binary.
 
 .DESCRIPTION
     This script runs inside Windows Sandbox (invoked by LogonCommand).
-    It copies the repository, runs bootstrap, executes the test scenario,
-    and saves logs.
+    It installs the pre-built loadout binaries, sets up the loadout config
+    directory, and runs loadout-e2e.exe for the requested scenario.
+
+    No network access, WinGet, or bootstrap required — dummy backends are used.
 
 .NOTES
-    Environment variables set by .wsb configuration:
-    - SCENARIO: Test scenario name (minimal, idempotent, uninstall, etc.)
+    Environment variable set by create-wsb.ps1 via LogonCommand:
+    - SCENARIO: Test scenario name (minimal, idempotent, lifecycle, etc.)
 #>
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-# --- Logging setup ---
-$LogDir = "C:\logs"
 $Scenario = $env:SCENARIO
-
 if (-not $Scenario) {
     Write-Host "ERROR: SCENARIO environment variable not set" -ForegroundColor Red
     Write-Host "This script should only be called with a scenario specified." -ForegroundColor Yellow
-    Write-Host "For manual testing, use create-wsb.ps1 without -Scenario parameter." -ForegroundColor Yellow
     exit 1
 }
 
+# --- Logging setup ---
+$LogDir  = "C:\logs"
 $LogPath = Join-Path $LogDir "sandbox-$Scenario-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
-
 if (Test-Path $LogDir) {
     Start-Transcript -Path $LogPath -Force | Out-Null
 } else {
@@ -39,88 +38,90 @@ if (Test-Path $LogDir) {
 
 Write-Host ""
 Write-Host "=====================================" -ForegroundColor Cyan
-Write-Host "Windows Sandbox Test Execution" -ForegroundColor Cyan
+Write-Host "Windows Sandbox Test Execution"       -ForegroundColor Cyan
 Write-Host "=====================================" -ForegroundColor Cyan
-Write-Host "Scenario: $Scenario" -ForegroundColor Cyan
-Write-Host "Started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Cyan
+Write-Host "Scenario: $Scenario"                  -ForegroundColor Cyan
+Write-Host "Started : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Cyan
 Write-Host "=====================================" -ForegroundColor Cyan
 Write-Host ""
 
 try {
-    # Repository should already be copied by LogonCommand
+    # Repository is pre-copied to C:\loadout by LogonCommand.
     $WorkDir = "C:\loadout"
     if (-not (Test-Path $WorkDir)) {
         throw "Repository not found at $WorkDir. LogonCommand may have failed."
     }
     Set-Location $WorkDir
-    
-    # --- Verify WinGet (installed by LogonCommand) ---
-    Write-Host "==> Verifying WinGet..." -ForegroundColor Green
-    
-    $wingetPath = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps\winget.exe"
-    if (Test-Path $wingetPath) {
-        $testResult = & $wingetPath --version 2>&1
-        Write-Host "    WinGet version: $testResult" -ForegroundColor Gray
-    } else {
-        throw "WinGet not found at: $wingetPath"
-    }
-    
+
+    # --- Install binaries into PATH ---
+    Write-Host "==> Installing binaries..." -ForegroundColor Green
+    $BinDir = Join-Path $env:LOCALAPPDATA "loadout\bin"
+    New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
+    Copy-Item "target\release\loadout.exe"     (Join-Path $BinDir "loadout.exe")     -Force
+    Copy-Item "target\release\loadout-e2e.exe" (Join-Path $BinDir "loadout-e2e.exe") -Force
+    $env:PATH = "$BinDir;$env:PATH"
+    Write-Host "    Installed to: $BinDir" -ForegroundColor Gray
+
+    # --- Align XDG env vars with Windows APPDATA ---
+    # loadout.exe on Windows resolves config/state from %APPDATA%\loadout\.
+    # loadout-e2e resolves them from XDG_CONFIG_HOME and XDG_STATE_HOME.
+    # Setting both to %APPDATA% makes all tools agree on the same base path:
+    #   config_dir  -> %APPDATA%\loadout\configs\
+    #   state_file  -> %APPDATA%\loadout\state.json
+    $env:XDG_CONFIG_HOME = $env:APPDATA
+    $env:XDG_STATE_HOME  = $env:APPDATA
+    $env:LOADOUT_REPO    = $WorkDir
+
+    $LoadoutRoot = Join-Path $env:APPDATA "loadout"
+
+    # --- Set up config, features, and backends ---
+    Write-Host "==> Setting up loadout config..." -ForegroundColor Green
+    $FeaturesDir = Join-Path $LoadoutRoot "features"
+    $BackendsDir = Join-Path $LoadoutRoot "backends"
+    $ConfigsDir  = Join-Path $LoadoutRoot "configs"
+    New-Item -ItemType Directory -Force -Path $FeaturesDir, $BackendsDir, $ConfigsDir | Out-Null
+
+    # Copy repo-bundled features and backends first.
+    Copy-Item "features\*" $FeaturesDir -Recurse -Force
+    Copy-Item "backends\*" $BackendsDir -Recurse -Force
+
+    # Merge fixture backends/features on top (register as local/dummy-*).
+    Copy-Item "tests\fixtures\backends\*" $BackendsDir -Recurse -Force
+    Copy-Item "tests\fixtures\features\*" $FeaturesDir -Recurse -Force
+    Copy-Item "tests\fixtures\configs\*"  $ConfigsDir  -Force
+
+    Write-Host "    Config root : $LoadoutRoot" -ForegroundColor Gray
+    Write-Host "    Configs     : $ConfigsDir"  -ForegroundColor Gray
     Write-Host ""
-    
-    # --- Run bootstrap ---
-    Write-Host "==> Running bootstrap..." -ForegroundColor Green
-    
-    $BootstrapScript = ".\platforms\windows\bootstrap.ps1"
-    & $BootstrapScript
-    
+
+    # --- Run scenario via loadout-e2e ---
+    Write-Host "==> Running scenario: $Scenario" -ForegroundColor Green
+    & loadout-e2e.exe $Scenario
+
     if ($LASTEXITCODE -ne 0) {
-        throw "Bootstrap failed with exit code $LASTEXITCODE"
+        throw "loadout-e2e exited with code $LASTEXITCODE"
     }
-    
-    Write-Host ""
-    
-    # --- Run test scenario ---
-    Write-Host "==> Running test scenario: $Scenario" -ForegroundColor Green
-    
-    $ScenarioScript = ".\tests\e2e\windows\sandbox\scenarios\$Scenario.ps1"
-    if (-not (Test-Path $ScenarioScript)) {
-        throw "Scenario script not found: $ScenarioScript"
-    }
-    
-    & $ScenarioScript
-    
-    if ($LASTEXITCODE -ne 0) {
-        throw "Scenario failed with exit code $LASTEXITCODE"
-    }
-    
+
     Write-Host ""
     Write-Host "=====================================" -ForegroundColor Green
-    Write-Host "SUCCESS: $Scenario scenario passed" -ForegroundColor Green
+    Write-Host "SUCCESS: $Scenario scenario passed"   -ForegroundColor Green
     Write-Host "=====================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "Please close this Sandbox window manually" -ForegroundColor Yellow
     Write-Host ""
-    
+
 } catch {
     Write-Host ""
     Write-Host "=====================================" -ForegroundColor Red
-    Write-Host "FAILURE: $Scenario scenario failed" -ForegroundColor Red
+    Write-Host "FAILURE: $Scenario scenario failed"   -ForegroundColor Red
     Write-Host "=====================================" -ForegroundColor Red
-    Write-Host "Error: $_" -ForegroundColor Red
+    Write-Host "Error: $_"                            -ForegroundColor Red
     Write-Host ""
-    Write-Host "Check logs: $LogPath" -ForegroundColor Yellow
+    if (Test-Path $LogDir) { Write-Host "Check logs: $LogPath" -ForegroundColor Yellow }
     Write-Host ""
-    
-    if (Test-Path $LogDir) {
-        Stop-Transcript | Out-Null
-    }
-    
+    if (Test-Path $LogDir) { Stop-Transcript | Out-Null }
     exit 1
 }
 
-if (Test-Path $LogDir) {
-    Stop-Transcript | Out-Null
-}
-
-# Keep window open for manual inspection
+if (Test-Path $LogDir) { Stop-Transcript | Out-Null }
 Read-Host "Press Enter to continue"
