@@ -3,8 +3,9 @@
 
 profile:
   features:
-    local/brew: {}
-    local/fzf: {}
+    local:
+      brew: {}
+      fzf: {}
 
 strategy:
   package:

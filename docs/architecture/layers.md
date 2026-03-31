@@ -44,6 +44,12 @@ The `prepare_execution`/`execute` separation allows CLI to insert confirmation p
 `apply` remains as a convenience wrapper around `prepare_execution` + `execute`.
 The env plan cache is an **ephemeral artifact** — not part of authoritative state.
 
+The `load` step includes all of the following before handing off to core:
+- Bundle expansion (`bundle.use` → merge `bundles:` definitions)
+- Namespace grouping normalization (`source_id: { name: {} }` → `source_id/name`)
+- Canonicalization (flat `HashMap<String, ProfileFeatureConfig>` keyed by canonical ID)
+- Validation (empty keys, undefined bundle names, duplicate canonicals)
+
 Must NOT: perform package management directly, re-classify after planner has decided.
 
 ### core

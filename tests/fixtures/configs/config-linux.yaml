@@ -1,19 +1,20 @@
 profile:
   features:
-    local/brew: {}
-    # cli-tools: {}
-    local/fzf: {}
-    local/mise: {}
-    # ripgrep: {}
+    local:
+      brew: {}
+      # cli-tools: {}
+      fzf: {}
+      mise: {}
+      # ripgrep: {}
 
-    local/node:
-      version: "22.17.1"
-    local/npm: {}
-    # python:
-    #   version: "3.12"
-    # uv: {}
-    # rust:
-    #   version: "1.87"
+      node:
+        version: "22.17.1"
+      npm: {}
+      # python:
+      #   version: "3.12"
+      # uv: {}
+      # rust:
+      #   version: "1.87"
 
 strategy:
   package:

@@ -25,21 +25,41 @@ See [profiles default location](../specs/data/profile.md#File-Location).
 
 Each profile declares which features should be present and (optionally) which version.
 
-Feature keys may be written as either:
-
-* bare names such as `git` → normalized to `core/git`
-* canonical IDs such as `local/myfeat`, `community/node`
+Feature keys use **namespace grouping syntax**: the outer key is the source id (`core`, `local`,
+or an external source id declared in `sources.yaml`), the inner key is the feature name.
 
 ```yaml
-# profiles/linux.yaml
-features:
-  git: {}
-  node:
-    version: "22.17.1"
-  neovim: {}
+# configs/linux.yaml
+profile:
+  features:
+    core:
+      git: {}
+    local:
+      node:
+        version: "22.17.1"
+      neovim: {}
 ```
 
-Edit your profile to add or remove features, or change versions.
+Bundles let you reuse feature sets across configs:
+
+```yaml
+bundle:
+  use:
+    - base
+
+bundles:
+  base:
+    features:
+      core:
+        git: {}
+
+profile:
+  features:
+    local:
+      node: {}    # profile.features takes priority over bundles
+```
+
+Edit your config to add or remove features, or change versions.
 
 See `specs/data/profile.md` for the full schema.
 

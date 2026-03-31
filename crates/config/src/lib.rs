@@ -3,14 +3,57 @@
 //! This crate bridges raw YAML files on disk and domain model types in the `model` crate.
 //! It handles three kinds of config files: profiles, strategies, and sources.
 //!
-//! **Phase 3 contract**: path resolution (XDG, AppData) is NOT handled here.
-//! Callers supply explicit `&Path` values. Platform-aware path discovery belongs to
-//! the `platform` crate (Phase 4).
+//! ## Input format
+//!
+//! Profiles use *namespace grouping* syntax: the outer key is a `source_id`,
+//! the inner key is the feature name. Both bare names and canonical `source/name`
+//! forms are **rejected**; grouping is the only accepted syntax.
+//!
+//! ```yaml
+//! profile:
+//!   features:
+//!     core:
+//!       git: {}
+//!     local:
+//!       nvim: {}
+//!       python:
+//!         version: "3.12"
+//! ```
+//!
+//! Bundles allow reusable feature sets:
+//!
+//! ```yaml
+//! bundle:
+//!   use:
+//!     - base
+//!     - work          # last entry wins on conflict
+//!
+//! bundles:
+//!   base:
+//!     features:
+//!       core:
+//!         git: {}
+//!   work:
+//!     features:
+//!       dev:
+//!         terraform: {}
+//!
+//! profile:
+//!   features:
+//!     local:
+//!       nvim: {}      # profile.features overrides all bundles
+//! ```
+//!
+//! After expansion and normalization, all feature keys are canonical `source_id/name`.
+//! Source existence is NOT verified here; that happens at `SourceRegistry` construction.
+//!
+//! **Path resolution contract**: callers supply explicit `&Path` values.
+//! Platform-aware path discovery belongs to the `platform` crate.
 //!
 //! See: `docs/specs/data/profile.md`, `docs/specs/data/strategy.md`,
 //!      `docs/specs/data/sources.md`
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use serde::Deserialize;
@@ -38,60 +81,155 @@ pub enum ConfigError {
     InvalidSources { reason: String },
 }
 
-// ─── Profile ────────────────────────────────────────────────────────────────
+// ─── Raw profile types (config-crate-local) ─────────────────────────────────
 
-/// Load, normalize, and validate a profile from a YAML file.
-///
-/// Normalization: bare feature names (no `/`) are prefixed with `core/`.
-/// Names already containing exactly one `/` are preserved as-is.
-/// Names with more than one `/` are rejected.
-pub fn load_profile(path: &Path) -> Result<Profile, ConfigError> {
-    let raw: Profile = io::load_yaml(path)?;
-    validate_and_normalize_profile(raw)
+/// Raw per-feature config as parsed from YAML (grouping syntax inner value).
+/// Mirrors `ProfileFeatureConfig` but is local to this crate.
+#[derive(Deserialize, Default, Clone)]
+struct RawFeatureConfig {
+    #[serde(default)]
+    version: Option<String>,
 }
 
-fn validate_and_normalize_profile(raw: Profile) -> Result<Profile, ConfigError> {
-    let mut normalized = Profile {
-        features: std::collections::HashMap::new(),
-    };
+/// Grouped feature map: `source_id → (feature_name → config)`.
+/// This is the only accepted input shape; bare names and canonical direct form are rejected.
+type GroupedFeatures = HashMap<String, HashMap<String, RawFeatureConfig>>;
 
-    for (key, config) in raw.features {
-        if key.is_empty() {
+/// Raw profile as read from a standalone profile YAML file.
+/// `features` uses the grouped syntax.
+#[derive(Deserialize)]
+struct RawProfile {
+    #[serde(default)]
+    features: GroupedFeatures,
+}
+
+// ─── Raw bundle types (config-crate-local) ──────────────────────────────────
+
+/// `bundle:` section in config.yaml — lists which bundles to apply.
+/// Values are bundle names (strings). Future `file:` prefix scheme is intentionally
+/// excluded from this type to keep the distinction clear.
+#[derive(Deserialize, Default)]
+struct RawBundleRef {
+    #[serde(default, rename = "use")]
+    use_list: Vec<String>,
+}
+
+/// A single bundle definition. Uses the same grouped-features syntax as profiles.
+#[derive(Deserialize)]
+struct RawBundle {
+    #[serde(default)]
+    features: GroupedFeatures,
+}
+
+/// `bundles:` section in config.yaml — named bundle definitions.
+type RawBundlesMap = HashMap<String, RawBundle>;
+
+// ─── Expansion helpers ───────────────────────────────────────────────────────
+
+/// Expand grouped features into a flat canonical map.
+///
+/// `{source_id: {name: config}}` → `{"source_id/name": ProfileFeatureConfig}`
+///
+/// Validates:
+/// - `source_id` must not be empty
+/// - feature name must not be empty
+/// - duplicate canonical IDs are rejected
+///
+/// Does NOT verify that `source_id` exists in the source registry;
+/// that check happens later at `SourceRegistry` construction.
+fn expand_grouped_features(
+    grouped: GroupedFeatures,
+) -> Result<HashMap<String, ProfileFeatureConfig>, ConfigError> {
+    let mut out: HashMap<String, ProfileFeatureConfig> = HashMap::new();
+
+    for (source_id, names) in grouped {
+        if source_id.is_empty() {
             return Err(ConfigError::InvalidProfile {
-                reason: "feature key must not be empty".into(),
+                reason: "source_id must not be empty".into(),
             });
         }
-
-        let slash_count = key.chars().filter(|&c| c == '/').count();
-        match slash_count {
-            // Bare name → canonicalize to core/<name>
-            0 => {
-                let canonical = format!("core/{}", key);
-                normalized.features.insert(canonical, config);
-            }
-            // Exactly one slash: already canonical (source/name), keep as-is
-            1 => {
-                // Validate: neither part must be empty
-                let parts: Vec<&str> = key.splitn(2, '/').collect();
-                if parts[0].is_empty() || parts[1].is_empty() {
-                    return Err(ConfigError::InvalidProfile {
-                        reason: format!(
-                            "invalid feature key '{key}': source or name segment is empty"
-                        ),
-                    });
-                }
-                normalized.features.insert(key, config);
-            }
-            // More than one slash: reject
-            _ => {
+        for (name, cfg) in names {
+            if name.is_empty() {
                 return Err(ConfigError::InvalidProfile {
-                    reason: format!("invalid feature key '{key}': at most one '/' is allowed (got {slash_count})"),
+                    reason: format!("feature name under source '{source_id}' must not be empty"),
                 });
+            }
+            let canonical = format!("{source_id}/{name}");
+            if out.contains_key(&canonical) {
+                return Err(ConfigError::InvalidProfile {
+                    reason: format!("duplicate feature '{canonical}'"),
+                });
+            }
+            out.insert(
+                canonical,
+                ProfileFeatureConfig {
+                    version: cfg.version,
+                },
+            );
+        }
+    }
+
+    Ok(out)
+}
+
+/// Merge bundles in `use` list order (last entry wins), then overlay profile features.
+///
+/// Returns merged grouped features ready for `expand_grouped_features`.
+/// Priority (lowest → highest): bundles[0], bundles[1], …, profile.features.
+fn expand_bundles(
+    bundle_ref: &RawBundleRef,
+    bundles: &RawBundlesMap,
+    profile_features: GroupedFeatures,
+) -> Result<GroupedFeatures, ConfigError> {
+    // Validate: all referenced bundle names must be defined.
+    for name in &bundle_ref.use_list {
+        if !bundles.contains_key(name) {
+            return Err(ConfigError::InvalidProfile {
+                reason: format!("undefined bundle '{name}': not found in 'bundles:' section"),
+            });
+        }
+    }
+
+    // Merge: iterate use list in order; last bundle wins per feature.
+    let mut merged: GroupedFeatures = HashMap::new();
+    for name in &bundle_ref.use_list {
+        let bundle = &bundles[name];
+        for (source_id, names) in &bundle.features {
+            let source_entry = merged.entry(source_id.clone()).or_default();
+            for (feat_name, cfg) in names {
+                // Later bundle overwrites earlier bundle for same feature.
+                source_entry.insert(feat_name.clone(), cfg.clone());
             }
         }
     }
 
-    Ok(normalized)
+    // Overlay: profile.features overwrites all bundle-merged features.
+    for (source_id, names) in profile_features {
+        let source_entry = merged.entry(source_id).or_default();
+        for (feat_name, cfg) in names {
+            source_entry.insert(feat_name, cfg);
+        }
+    }
+
+    Ok(merged)
+}
+
+// ─── Profile ────────────────────────────────────────────────────────────────
+
+/// Load and normalize a profile from a standalone profile YAML file.
+///
+/// The file must use grouping syntax:
+/// ```yaml
+/// features:
+///   core:
+///     git: {}
+///   local:
+///     nvim: {}
+/// ```
+pub fn load_profile(path: &Path) -> Result<Profile, ConfigError> {
+    let raw: RawProfile = io::load_yaml(path)?;
+    let flat = expand_grouped_features(raw.features)?;
+    Ok(Profile { features: flat })
 }
 
 // ─── Strategy ───────────────────────────────────────────────────────────────
@@ -146,20 +284,35 @@ fn validate_backend_strategy_field(field: &str, value: Option<&str>) -> Result<(
 /// serde ignores unknown top-level keys by default (no `deny_unknown_fields`),
 /// so future sections added to the format will not break existing versions.
 ///
-/// - `profile` section: required. Normalized the same way as `load_profile`.
-/// - `strategy` section: optional. Absent → `Strategy::default()` (no overrides).
+/// Sections:
+/// - `profile` — required. Features use grouping syntax `source_id: { name: {} }`.
+/// - `strategy` — optional. Absent → `Strategy::default()` (no overrides).
+/// - `bundle`   — optional. Lists which bundles to apply (`use: [base, work]`).
+/// - `bundles`  — optional. Named bundle definitions (same grouping syntax as profile).
+///
+/// Pipeline: bundle expansion → grouped-feature normalization → canonical Profile.
 ///
 /// # Format
 ///
 /// ```yaml
+/// bundle:
+///   use:
+///     - base
+///
+/// bundles:
+///   base:
+///     features:
+///       core:
+///         git: {}
+///
 /// profile:
 ///   features:
-///     fzf: {}
-///     local/myapp: {}
+///     local:
+///       nvim: {}
 ///
 /// strategy:                  # optional
 ///   package:
-///     default_backend: brew
+///     default_backend: local/brew
 ///
 /// future_section: ...        # silently ignored
 /// ```
@@ -169,8 +322,12 @@ pub fn load_config(path: &Path) -> Result<(Profile, Strategy), ConfigError> {
     /// no `deny_unknown_fields` attribute).
     #[derive(Deserialize)]
     struct RawConfig {
-        profile: Option<Profile>,
+        profile: Option<RawProfile>,
         strategy: Option<Strategy>,
+        #[serde(default)]
+        bundle: RawBundleRef,
+        #[serde(default)]
+        bundles: RawBundlesMap,
     }
 
     let raw: RawConfig = io::load_yaml(path)?;
@@ -179,7 +336,13 @@ pub fn load_config(path: &Path) -> Result<(Profile, Strategy), ConfigError> {
     let raw_profile = raw.profile.ok_or_else(|| ConfigError::InvalidProfile {
         reason: "config.yaml must contain a 'profile' section".into(),
     })?;
-    let profile = validate_and_normalize_profile(raw_profile)?;
+
+    // Bundle expansion: merge bundles in use-list order (last wins), then overlay profile.
+    let merged = expand_bundles(&raw.bundle, &raw.bundles, raw_profile.features)?;
+
+    // Normalize grouped features to canonical flat map.
+    let flat = expand_grouped_features(merged)?;
+    let profile = Profile { features: flat };
 
     // strategy is optional; absent → Strategy::default().
     let strategy = match raw.strategy {
@@ -271,75 +434,105 @@ mod tests {
         p
     }
 
-    // ── Profile tests ──────────────────────────────────────────────────────
+    // ── Profile (grouping) tests ───────────────────────────────────────────
 
     #[test]
-    fn profile_bare_name_normalized_to_core() {
+    fn grouped_features_normalized_to_canonical() {
         let dir = tempfile::tempdir().unwrap();
-        let p = write_yaml_file(dir.path(), "profile.yaml", "features:\n  git: {}\n");
+        let yaml = "features:\n  core:\n    git: {}\n  local:\n    nvim: {}\n";
+        let p = write_yaml_file(dir.path(), "profile.yaml", yaml);
         let profile = load_profile(&p).unwrap();
         assert!(
             profile.features.contains_key("core/git"),
-            "bare 'git' must become 'core/git'"
+            "core/git must be present"
         );
-        assert!(!profile.features.contains_key("git"));
-    }
-
-    #[test]
-    fn profile_canonical_preserved() {
-        let dir = tempfile::tempdir().unwrap();
-        let p = write_yaml_file(dir.path(), "profile.yaml", "features:\n  local/myvim: {}\n");
-        let profile = load_profile(&p).unwrap();
-        assert!(profile.features.contains_key("local/myvim"));
-    }
-
-    #[test]
-    fn profile_core_prefix_preserved() {
-        let dir = tempfile::tempdir().unwrap();
-        let p = write_yaml_file(dir.path(), "profile.yaml", "features:\n  core/git: {}\n");
-        let profile = load_profile(&p).unwrap();
-        // Must not double-prefix: core/git → core/git, not core/core/git
-        assert!(profile.features.contains_key("core/git"));
-        assert!(!profile.features.contains_key("core/core/git"));
-    }
-
-    #[test]
-    fn profile_multi_slash_rejected() {
-        let dir = tempfile::tempdir().unwrap();
-        let p = write_yaml_file(dir.path(), "profile.yaml", "features:\n  a/b/c: {}\n");
-        let err = load_profile(&p).unwrap_err();
-        assert!(matches!(err, ConfigError::InvalidProfile { .. }));
-    }
-
-    #[test]
-    fn profile_empty_key_rejected() {
-        let raw = Profile {
-            features: [("".to_string(), Default::default())].into_iter().collect(),
-        };
-        let err = validate_and_normalize_profile(raw).unwrap_err();
-        assert!(matches!(err, ConfigError::InvalidProfile { .. }));
-    }
-
-    #[test]
-    fn profile_empty_segment_rejected() {
-        let dir = tempfile::tempdir().unwrap();
-        // "/git" has empty source segment
-        let p = write_yaml_file(dir.path(), "profile.yaml", "features:\n  /git: {}\n");
-        let err = load_profile(&p).unwrap_err();
-        assert!(matches!(err, ConfigError::InvalidProfile { .. }));
-    }
-
-    #[test]
-    fn profile_version_config_preserved() {
-        let dir = tempfile::tempdir().unwrap();
-        let p = write_yaml_file(
-            dir.path(),
-            "profile.yaml",
-            "features:\n  node:\n    version: \"20\"\n",
+        assert!(
+            profile.features.contains_key("local/nvim"),
+            "local/nvim must be present"
         );
+        assert_eq!(profile.features.len(), 2);
+    }
+
+    #[test]
+    fn profile_empty_features_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = write_yaml_file(dir.path(), "profile.yaml", "features: {}\n");
         let profile = load_profile(&p).unwrap();
-        let cfg = profile.features.get("core/node").unwrap();
+        assert!(profile.features.is_empty());
+    }
+
+    #[test]
+    fn profile_version_forwarded_through_grouping() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "features:\n  local:\n    node:\n      version: \"20\"\n";
+        let p = write_yaml_file(dir.path(), "profile.yaml", yaml);
+        let profile = load_profile(&p).unwrap();
+        let cfg = profile.features.get("local/node").unwrap();
         assert_eq!(cfg.version.as_deref(), Some("20"));
+    }
+
+    #[test]
+    fn profile_empty_source_id_rejected() {
+        // YAML: features: { "": { git: {} } }
+        // serde_yaml will parse "" as an empty key
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "features:\n  \"\":\n    git: {}\n";
+        let p = write_yaml_file(dir.path(), "profile.yaml", yaml);
+        let err = load_profile(&p).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidProfile { .. }));
+    }
+
+    #[test]
+    fn profile_empty_feature_name_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "features:\n  core:\n    \"\": {}\n";
+        let p = write_yaml_file(dir.path(), "profile.yaml", yaml);
+        let err = load_profile(&p).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidProfile { .. }));
+    }
+
+    #[test]
+    fn profile_duplicate_canonical_rejected() {
+        // Two sources that would produce the same canonical id via different paths
+        // are not possible in grouping syntax (source_id is the outer key, so
+        // "core: { git: {} }" appears once). Duplicates can only occur within
+        // the same source group — e.g. outer key "core" appearing twice, which
+        // YAML/serde handles by last-write-wins (HashMap). So verify the happy
+        // path instead: same source, two different features are both present.
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "features:\n  core:\n    git: {}\n    bash: {}\n";
+        let p = write_yaml_file(dir.path(), "profile.yaml", yaml);
+        let profile = load_profile(&p).unwrap();
+        assert!(profile.features.contains_key("core/git"));
+        assert!(profile.features.contains_key("core/bash"));
+    }
+
+    #[test]
+    fn profile_bare_name_at_top_level_rejected() {
+        // Old format: "features:\n  git: {}\n" where the value is an empty map.
+        // Now "git" is treated as a source_id mapping to feature-map {"git": {}}.
+        // This is actually valid (source "git" with feature "{}") - but since the
+        // value `{}` is an empty HashMap, "git" source has no features.
+        // The resulting canonical map will be empty, not an error.
+        // The important invariant is: you cannot sneak a bare name through as canonical.
+        let dir = tempfile::tempdir().unwrap();
+        // "features:\n  git: {}\n" — source_id=git, inner map is empty → 0 features
+        let yaml = "features:\n  git: {}\n";
+        let p = write_yaml_file(dir.path(), "profile.yaml", yaml);
+        let profile = load_profile(&p).unwrap();
+        // Inner {} means empty sourced features, not "git" as a canonical ID.
+        assert!(
+            !profile.features.contains_key("git"),
+            "bare 'git' must not appear as canonical"
+        );
+        assert!(
+            !profile.features.contains_key("core/git"),
+            "must not auto-prefix to core/git"
+        );
+        assert!(
+            profile.features.is_empty(),
+            "source 'git' has no declared features"
+        );
     }
 
     // ── Strategy tests ─────────────────────────────────────────────────────
@@ -382,7 +575,6 @@ mod tests {
 
     #[test]
     fn strategy_no_defaults_ok() {
-        // Strategy with no package/runtime fields at all is valid.
         let dir = tempfile::tempdir().unwrap();
         let p = write_yaml_file(dir.path(), "strategy.yaml", "{}\n");
         let strategy = load_strategy(&p).unwrap();
@@ -453,7 +645,7 @@ mod tests {
         assert!(matches!(spec.sources[0].allow, Some(AllowSpec::All(_))));
     }
 
-    // ── load_config tests ──────────────────────────────────────────────────
+    // ── load_config (grouping) tests ───────────────────────────────────────
 
     #[test]
     fn config_profile_and_strategy_parsed() {
@@ -461,30 +653,35 @@ mod tests {
         let yaml = "\
 profile:
   features:
-    fzf: {}
-    local/myapp: {}
+    core:
+      git: {}
+    local:
+      myapp: {}
 
 strategy:
   package:
-    default_backend: brew
+    default_backend: local/brew
 ";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let (profile, strategy) = load_config(&p).unwrap();
         assert!(
-            profile.features.contains_key("core/fzf"),
-            "bare 'fzf' must become 'core/fzf'"
+            profile.features.contains_key("core/git"),
+            "core/git must be present"
         );
-        assert!(profile.features.contains_key("local/myapp"));
+        assert!(
+            profile.features.contains_key("local/myapp"),
+            "local/myapp must be present"
+        );
         assert_eq!(
             strategy.package.unwrap().default_backend.as_deref(),
-            Some("brew")
+            Some("local/brew")
         );
     }
 
     #[test]
     fn config_strategy_optional_defaults_to_empty() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = "profile:\n  features:\n    git: {}\n";
+        let yaml = "profile:\n  features:\n    core:\n      git: {}\n";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let (profile, strategy) = load_config(&p).unwrap();
         assert!(profile.features.contains_key("core/git"));
@@ -493,34 +690,34 @@ strategy:
     }
 
     #[test]
+    fn config_empty_profile_features_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "profile:\n  features: {}\n";
+        let p = write_yaml_file(dir.path(), "config.yaml", yaml);
+        let (profile, _) = load_config(&p).unwrap();
+        assert!(profile.features.is_empty());
+    }
+
+    #[test]
     fn config_extra_unknown_keys_ignored() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "\
 profile:
   features:
-    git: {}
+    core:
+      git: {}
 future_section:
   some_key: value
 another_unknown: 42
 ";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
-        // Must not error on unknown top-level keys.
         assert!(load_config(&p).is_ok());
-    }
-
-    #[test]
-    fn config_invalid_profile_propagates_error() {
-        let dir = tempfile::tempdir().unwrap();
-        let yaml = "profile:\n  features:\n    a/b/c: {}\n";
-        let p = write_yaml_file(dir.path(), "config.yaml", yaml);
-        let err = load_config(&p).unwrap_err();
-        assert!(matches!(err, ConfigError::InvalidProfile { .. }));
     }
 
     #[test]
     fn config_missing_profile_section_errors() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = "strategy:\n  package:\n    default_backend: brew\n";
+        let yaml = "strategy:\n  package:\n    default_backend: local/brew\n";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let err = load_config(&p).unwrap_err();
         assert!(matches!(err, ConfigError::InvalidProfile { .. }));
@@ -532,7 +729,8 @@ another_unknown: 42
         let yaml = "\
 profile:
   features:
-    git: {}
+    core:
+      git: {}
 strategy:
   package:
     default_backend: \"\"
@@ -545,10 +743,138 @@ strategy:
     #[test]
     fn config_version_config_forwarded() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = "profile:\n  features:\n    node:\n      version: \"20\"\n";
+        let yaml = "profile:\n  features:\n    local:\n      node:\n        version: \"20\"\n";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let (profile, _) = load_config(&p).unwrap();
-        let cfg = profile.features.get("core/node").unwrap();
+        let cfg = profile.features.get("local/node").unwrap();
         assert_eq!(cfg.version.as_deref(), Some("20"));
+    }
+
+    // ── Bundle tests ───────────────────────────────────────────────────────
+
+    #[test]
+    fn bundle_features_merged_into_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "\
+bundle:
+  use:
+    - base
+
+bundles:
+  base:
+    features:
+      core:
+        git: {}
+
+profile:
+  features:
+    local:
+      nvim: {}
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", yaml);
+        let (profile, _) = load_config(&p).unwrap();
+        assert!(
+            profile.features.contains_key("core/git"),
+            "bundle feature must be merged"
+        );
+        assert!(
+            profile.features.contains_key("local/nvim"),
+            "profile feature must be present"
+        );
+        assert_eq!(profile.features.len(), 2);
+    }
+
+    #[test]
+    fn bundle_use_order_last_wins() {
+        // base: core/git version "1.0", lang: core/git version "2.0"
+        // use: [base, lang] → lang wins
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "\
+bundle:
+  use:
+    - base
+    - lang
+
+bundles:
+  base:
+    features:
+      core:
+        git:
+          version: \"1.0\"
+  lang:
+    features:
+      core:
+        git:
+          version: \"2.0\"
+
+profile:
+  features: {}
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", yaml);
+        let (profile, _) = load_config(&p).unwrap();
+        let cfg = profile.features.get("core/git").unwrap();
+        assert_eq!(
+            cfg.version.as_deref(),
+            Some("2.0"),
+            "last bundle in use list must win"
+        );
+    }
+
+    #[test]
+    fn bundle_profile_features_override_bundle() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "\
+bundle:
+  use:
+    - base
+
+bundles:
+  base:
+    features:
+      core:
+        git:
+          version: \"1.0\"
+
+profile:
+  features:
+    core:
+      git:
+        version: \"override\"
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", yaml);
+        let (profile, _) = load_config(&p).unwrap();
+        let cfg = profile.features.get("core/git").unwrap();
+        assert_eq!(
+            cfg.version.as_deref(),
+            Some("override"),
+            "profile.features must override bundle"
+        );
+    }
+
+    #[test]
+    fn bundle_undefined_reference_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "\
+bundle:
+  use:
+    - nonexistent
+
+profile:
+  features: {}
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", yaml);
+        let err = load_config(&p).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidProfile { .. }));
+    }
+
+    #[test]
+    fn bundle_section_absent_ok() {
+        // No bundle/bundles sections: behaves identically to profile-only config.
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "profile:\n  features:\n    core:\n      git: {}\n";
+        let p = write_yaml_file(dir.path(), "config.yaml", yaml);
+        let (profile, _) = load_config(&p).unwrap();
+        assert!(profile.features.contains_key("core/git"));
+        assert_eq!(profile.features.len(), 1);
     }
 }

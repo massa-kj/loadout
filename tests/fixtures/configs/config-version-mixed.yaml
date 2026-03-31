@@ -4,10 +4,11 @@
 
 profile:
   features:
-    local/brew: {}
-    local/mise: {}
-    local/node:
-      version: "20"
+    local:
+      brew: {}
+      mise: {}
+      node:
+        version: "20"
 
 strategy:
   package:

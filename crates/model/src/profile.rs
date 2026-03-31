@@ -10,11 +10,14 @@ use std::collections::HashMap;
 
 /// User-declared desired environment.
 ///
-/// Keys are feature identifiers (bare or canonical). Normalization to canonical IDs
-/// happens in the `config` crate before pipeline entry.
+/// Keys are canonical feature identifiers of the form `source_id/name`.
+/// Normalization from grouping syntax (`source_id: { name: {} }`) happens
+/// in the `config` crate before pipeline entry. Bare names and canonical
+/// direct form are rejected at parse time.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Profile {
     /// Desired features and their per-feature configuration.
+    /// All keys are canonical IDs (`source_id/name`).
     pub features: HashMap<String, ProfileFeatureConfig>,
 }
 

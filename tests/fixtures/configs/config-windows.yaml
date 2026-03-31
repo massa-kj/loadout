@@ -1,25 +1,26 @@
 profile:
   features:
-    local/caps2ctrl: {}
-    local/cli-tools: {}
-    local/git: {}
-    local/git-tools: {}
-    local/mise: {}
-    local/neovim: {}
-    local/powershell: {}
-    local/scoop: {}
-    local/vcredist: {}
-    local/vscode: {}
+    local:
+      caps2ctrl: {}
+      cli-tools: {}
+      git: {}
+      git-tools: {}
+      mise: {}
+      neovim: {}
+      powershell: {}
+      scoop: {}
+      vcredist: {}
+      vscode: {}
 
-    local/lua: {}
-    local/node:
-      version: "22.17.1"
-    local/npm: {}
-    local/python:
-      version: "3.12"
-    local/uv: {}
-    local/rust:
-      version: "1.87"
+      lua: {}
+      node:
+        version: "22.17.1"
+      npm: {}
+      python:
+        version: "3.12"
+      uv: {}
+      rust:
+        version: "1.87"
 
 
 strategy:

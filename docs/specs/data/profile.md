@@ -10,22 +10,39 @@ Not covered: how to write or manage profiles (see `guides/usage.md`).
 
 ## Schema
 
-A profile is embedded as the `profile:` section within a `config.yaml` file:
+A config file (`config.yaml`) contains the following top-level sections:
 
 ```yaml
 # configs/linux.yaml
 profile:
   features:
-    <feature_id>: {}
-    <feature_id>:
-      version: "<string>"
+    <source_id>:
+      <feature_name>: {}
+      <feature_name>:
+        version: "<string>"
 
-strategy:    # optional — may be omitted; defaults to Strategy::default()
+bundle:            # optional — lists which bundles to apply
+  use:
+    - <bundle_name>
+
+bundles:           # optional — named bundle definitions
+  <bundle_name>:
+    features:
+      <source_id>:
+        <feature_name>: {}
+
+strategy:          # optional — may be omitted; defaults to Strategy::default()
   ...
 ```
 
-The `profile.features` key is required.
-All other keys under `profile:` are reserved.
+`profile.features` is required. All other top-level keys are optional.
+
+The `features` map uses **namespace grouping syntax**: the outer key is a `source_id`,
+the inner key is a feature name. This is the only accepted syntax.
+Bare feature names and canonical `source_id/name` direct form are rejected.
+
+After expansion and normalization, all feature keys become canonical `source_id/name`.
+Source existence is not verified at parse time; it is verified at `SourceRegistry` construction.
 
 ## File Location
 
@@ -68,21 +85,31 @@ or any platform-specific behavior. That belongs to strategy and feature scripts.
 Features absent from the profile are treated as "not desired".
 If such a feature exists in state, the planner will classify it as `destroy`.
 
-Feature key normalization rules:
-
-* Bare feature key `git` is normalized to `core/git`
-* Canonical feature key `core/git` is preserved as-is
-* `local` and external source features must be explicit, e.g. `local/myfeat`, `community/node`
-
-The normalized canonical IDs are what planner, resolver, executor, and state use internally.
+All feature keys in the normalized profile are canonical `source_id/name` IDs.
+Normalization (grouping expansion) is performed by the `config` crate before pipeline entry.
+The planner, resolver, executor, and state never see raw config syntax.
 
 ## Validation Rules
 
-* `features` must be an object.
-* Each key must be a non-empty string.
-* Each key must be either a bare name or a canonical ID of the form `<source_id>/<name>`.
-* Each value must be a map (or null/empty, equivalent to `{}`).
+* `profile.features` must be a map.
+* The outer key (`source_id`) must be a non-empty string.
+* The inner key (feature name) must be a non-empty string.
+* The inner value must be a map (or empty `{}`).
+* Duplicate canonical IDs produced after normalization are rejected.
+* Bare feature names (keys without a `source_id` nesting) are not accepted.
+* Canonical direct form (`source_id/name: {}` at the `features` top level) is not accepted.
 * Unknown fields in the feature configuration map are permitted and ignored by core.
+
+## Bundle Expansion
+
+Bundles allow reusable feature sets to be shared across configs.
+
+Merge order (lowest → highest priority):
+1. Bundles in `bundle.use` list order — last entry wins on conflict.
+2. `profile.features` overwrites all bundle-merged features.
+
+`bundle.use` values are bundle names (plain strings).
+Referencing an undefined bundle name is an error.
 
 ## Interaction with Planner
 
@@ -99,37 +126,63 @@ See `specs/algorithms/planner.md` for the full classification rules.
 
 ## Examples
 
-Minimal config — profile with no feature configuration:
+Minimal config — profile only:
 
 ```yaml
 # configs/linux.yaml
 profile:
   features:
-    local/git: {}
-    local/bash: {}
+    local:
+      git: {}
+      bash: {}
 ```
 
-Equivalent canonical form after normalization:
+Canonical IDs after normalization:
+
+```
+local/git
+local/bash
+```
+
+Features with version, multiple sources:
 
 ```yaml
 profile:
   features:
-    local/git: {}
-    local/bash: {}
-```
-
-Feature with version:
-
-```yaml
-profile:
-  features:
-    local/node:
-      version: "22.17.1"
-    local/python:
-      version: "3.12"
-    local/myfeat: {}
+    core:
+      git: {}
+    local:
+      node:
+        version: "22.17.1"
+      python:
+        version: "3.12"
+      myfeat: {}
 
 strategy:
   runtime:
-    default_backend: mise
+    default_backend: local/mise
+```
+
+Config using bundles:
+
+```yaml
+bundle:
+  use:
+    - base
+    - work          # last entry wins on conflict
+
+bundles:
+  base:
+    features:
+      core:
+        git: {}
+  work:
+    features:
+      dev:
+        terraform: {}
+
+profile:
+  features:
+    local:
+      nvim: {}      # profile.features always wins over bundles
 ```

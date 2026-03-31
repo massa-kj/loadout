@@ -627,12 +627,25 @@ mod tests {
     }
 
     /// Write a minimal config.yaml referencing the given feature names.
-    /// The profile section is required; no strategy section is written (uses Strategy::default()).
+    /// Features must be canonical `source_id/name` form; they are grouped by source_id.
+    /// No strategy section is written (uses Strategy::default()).
     fn write_config(dir: &Path, filename: &str, features: &[&str]) -> PathBuf {
-        let features_str: String = features
-            .iter()
-            .map(|f| format!("    {f}: {{}}\n"))
-            .collect();
+        // Group features by source_id.
+        let mut grouped: std::collections::BTreeMap<&str, Vec<&str>> =
+            std::collections::BTreeMap::new();
+        for f in features {
+            let (source, name) = f
+                .split_once('/')
+                .expect("feature must be canonical source/name");
+            grouped.entry(source).or_default().push(name);
+        }
+        let mut features_str = String::new();
+        for (source, names) in &grouped {
+            features_str.push_str(&format!("    {source}:\n"));
+            for name in names {
+                features_str.push_str(&format!("      {name}: {{}}\n"));
+            }
+        }
         let content = format!("profile:\n  features:\n{features_str}");
         let path = dir.join(filename);
         write(&path, &content);

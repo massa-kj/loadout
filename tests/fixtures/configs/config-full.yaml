@@ -2,9 +2,10 @@
 
 profile:
   features:
-    local/brew: {}
-    local/fzf: {}
-    local/ripgrep: {}
+    local:
+      brew: {}
+      fzf: {}
+      ripgrep: {}
 
 strategy:
   package:
