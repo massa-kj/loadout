@@ -1,6 +1,6 @@
 //! Lifecycle scenario — full multi-phase cycle: base → full → reapply → shrink → uninstall.
 //!
-//! Mirrors `tests/e2e/linux/docker/scenarios/lifecycle.sh`.
+//! Uses dummy backends and features; no network access required.
 
 use std::path::Path;
 
@@ -25,6 +25,8 @@ pub fn run(ctx: &Context) -> Result<(), String> {
 
     let state = load_state(&ctx.state_file)?;
     assert_state_valid(&state)?;
+    assert_feature_present(&state, "local/dummy-pkg")?;
+    assert_feature_present(&state, "local/dummy-fs")?;
 
     // ── Phase 2: expand to full profile ──────────────────────────────────────
     println!("==> Phase 2: expand to full profile");
@@ -32,7 +34,8 @@ pub fn run(ctx: &Context) -> Result<(), String> {
 
     let state = load_state(&ctx.state_file)?;
     assert_state_valid(&state)?;
-    assert_feature_present(&state, "core/ripgrep")?;
+    // full profile adds local/dummy-rt on top of base features
+    assert_feature_present(&state, "local/dummy-rt")?;
 
     println!("==> Snapshotting full state");
     let snapshot_full = load_state_raw(&ctx.state_file)?;
@@ -59,14 +62,16 @@ pub fn run(ctx: &Context) -> Result<(), String> {
 
     let state = load_state(&ctx.state_file)?;
     assert_state_valid(&state)?;
-    assert_feature_present(&state, "core/bash")?;
-    assert_feature_present(&state, "core/git")?;
+    // base features must be present
+    assert_feature_present(&state, "local/dummy-pkg")?;
+    assert_feature_present(&state, "local/dummy-fs")?;
 
+    // full-only feature must have been removed
     let unexpected: Vec<&str> = state
         .features
         .keys()
         .map(String::as_str)
-        .filter(|k| *k != "core/bash" && *k != "core/git")
+        .filter(|k| *k != "local/dummy-pkg" && *k != "local/dummy-fs")
         .collect();
     if !unexpected.is_empty() {
         return Err(format!(

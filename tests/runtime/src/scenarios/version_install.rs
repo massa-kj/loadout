@@ -1,8 +1,6 @@
 //! Version install scenario — version is recorded in state after install.
 //!
-//! Mirrors `tests/e2e/linux/docker/scenarios/version_install.sh`.
-
-use model::state::ResourceKind;
+//! Uses dummy backends and features; no network access required.
 
 use crate::assert::{assert_feature_present, assert_state_valid, get_runtime_version, load_state};
 use crate::context::Context;
@@ -27,25 +25,16 @@ pub fn run(ctx: &Context) -> Result<(), String> {
     let state = load_state(&ctx.state_file)?;
     assert_state_valid(&state)?;
 
-    println!("==> Verifying node is installed");
-    assert_feature_present(&state, "core/node")?;
+    println!("==> Verifying dummy-rt is installed");
+    assert_feature_present(&state, "local/dummy-rt")?;
 
-    println!("==> Verifying node version recorded in state");
-    let node_version = get_runtime_version(&state, "core/node")?;
-    if node_version != "20" {
+    println!("==> Verifying runtime version recorded in state");
+    let version = get_runtime_version(&state, "local/dummy-rt")?;
+    if version != "20" {
         return Err(format!(
-            "node version not recorded correctly: expected '20', got '{}'",
-            node_version
+            "runtime version not recorded correctly: expected '20', got '{}'",
+            version
         ));
-    }
-
-    println!("==> Verifying node package registered in state");
-    let node_feature = &state.features["core/node"];
-    let has_node_package = node_feature.resources.iter().any(|r| {
-        matches!(&r.kind, ResourceKind::Package { package, .. } if package.name.starts_with("node@20"))
-    });
-    if !has_node_package {
-        return Err("node@20 package not registered in state".to_owned());
     }
 
     println!("==> Version install scenario PASSED");

@@ -12,7 +12,7 @@ cd "$LOADOUT_ROOT"
 # Image names per stage
 IMAGE_OS="loadout-os"       # bare Ubuntu, no loadout
 IMAGE_DEV="loadout-dev"     # built from source inside Docker
-IMAGE_TEST="loadout-test"   # pre-built host binaries installed
+IMAGE_TEST="loadout-test"   # binaries built inside Docker (from builder)
 
 DOCKERFILE="tests/e2e/linux/docker/Dockerfile"
 
@@ -45,14 +45,14 @@ Images
           Self-contained; no host pre-build required.
           For quickly trying the latest code in an isolated environment.
 
-  test    Pre-built host binaries installed into the OS image.
+  test    Binaries from the builder stage, installed into the OS image.
           No Rust toolchain inside; faster than dev.
-          For running E2E scenarios (CI, release testing).
+          For running E2E scenarios. No host cargo build required.
 
 Build commands
   build-os          Build the bare OS image
   build-dev         Build the self-contained dev image (cargo build inside Docker)
-  build             Ensure host binaries are built, then build the test image
+  build             Build the test image (cargo build runs inside Docker)
 
 Shell commands
   os-shell          Interactive shell in the OS image (no loadout)
@@ -75,7 +75,7 @@ Maintenance
 Examples
   $(basename "$0") build-dev        # Build self-contained dev image
   $(basename "$0") dev-shell        # Explore the dev environment
-  $(basename "$0") build            # Build test image from host release binary
+  $(basename "$0") build            # Build test image (no host cargo build needed)
   $(basename "$0") minimal          # Run minimal scenario
   $(basename "$0") all              # Run all scenarios
   $(basename "$0") os-shell         # Start from bare OS, install manually
@@ -86,37 +86,34 @@ EOF
 
 # ── Image builders ─────────────────────────────────────────────────────────────
 
-# Ensure host release binaries exist (needed for the test stage).
-ensure_host_release() {
-    local loadout_bin="$LOADOUT_ROOT/target/release/loadout"
-    local e2e_bin="$LOADOUT_ROOT/target/release/loadout-e2e"
-
-    if [[ ! -f "$loadout_bin" ]] || [[ ! -f "$e2e_bin" ]]; then
-        log_step "Building host release binaries (cargo build --release)..."
-        cargo build -p loadout -p loadout-e2e --release
-    else
-        log_info "Host release binaries already present — skipping cargo build"
-        log_info "  Run 'cargo build -p loadout -p loadout-e2e --release' to rebuild"
-    fi
-}
-
 build_os_image() {
     log_step "Building OS image (bare, no loadout)..."
-    docker build -f "$DOCKERFILE" --target os -t "$IMAGE_OS" .
+    if ! docker build -f "$DOCKERFILE" --target os -t "$IMAGE_OS" .; then
+        echo ""
+        log_warn "OS image build FAILED"
+        return 1
+    fi
     log_step "OS image ready: $IMAGE_OS"
 }
 
 build_dev_image() {
     log_step "Building dev image (cargo build inside Docker)..."
     log_info "This may take several minutes on first run (Rust toolchain install + compile)"
-    docker build -f "$DOCKERFILE" --target dev -t "$IMAGE_DEV" .
+    if ! docker build -f "$DOCKERFILE" --target dev -t "$IMAGE_DEV" .; then
+        echo ""
+        log_warn "Dev image build FAILED"
+        return 1
+    fi
     log_step "Dev image ready: $IMAGE_DEV"
 }
 
 build_test_image() {
-    ensure_host_release
-    log_step "Building test image (host binaries → container)..."
-    docker build -f "$DOCKERFILE" --target test -t "$IMAGE_TEST" .
+    log_step "Building test image (binaries from builder stage)..."
+    if ! docker build -f "$DOCKERFILE" --target test -t "$IMAGE_TEST" .; then
+        echo ""
+        log_warn "Test image build FAILED"
+        return 1
+    fi
     log_step "Test image ready: $IMAGE_TEST"
 }
 
@@ -159,7 +156,7 @@ open_dev_shell() {
 }
 
 open_test_shell() {
-    log_step "Opening shell in test image (pre-built binary)"
+    log_step "Opening shell in test image (binaries from builder)"
     log_info "loadout and loadout-e2e are installed at ~/.local/bin/"
     log_info "Config: ~/.config/loadout/configs/"
     log_info "Try:"

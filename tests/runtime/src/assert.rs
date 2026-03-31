@@ -150,17 +150,6 @@ pub fn assert_features_empty(state: &State) -> Result<(), String> {
     Ok(())
 }
 
-/// Assert that the features map contains at least `min` entries.
-pub fn assert_feature_count_at_least(state: &State, min: usize) -> Result<(), String> {
-    let count = state.features.len();
-    if count < min {
-        return Err(format!(
-            "expected at least {} feature(s), found {}",
-            min, count
-        ));
-    }
-    Ok(())
-}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Resource-level assertions
