@@ -1,141 +1,65 @@
 # Docker-based Testing
 
-This directory contains Docker-based integration tests for the loadout system.
+Docker-based E2E tests for the loadout system on Linux (Ubuntu).
 
 ## Purpose
 
-Verify loadout behavior in a clean, isolated environment.
+Verify state guarantees by running `loadout apply` in a fresh Ubuntu container.
 
-Tests focus on **state guarantees** defined in STATE_SPEC.md:
+Tests focus on:
 
-* State initialization correctness
-* Idempotent execution
-* No duplicate resources
-* Absolute path invariants
+* State initialization and JSON schema validity
+* Idempotent execution (state unchanged after a second apply)
+* Safe uninstall (no untracked files removed)
+* Version specification recording and upgrade behaviour
 
-## Philosophy
+These are **black-box tests**: only state content and structure are verified,
+not internal implementation details.
 
-These tests are **black-box tests**.
+## E2E Runner
 
-They verify:
+Scenarios are executed by the `loadout-e2e` binary (`tests/runtime/` crate).
 
-* State structure and content
-* Execution determinism
-* System guarantees
-
-They do NOT verify:
-
-* Internal implementation details
-* Specific package manager behavior
-* Feature-specific configuration
-
-State is the single source of truth.
-
-## Test Scenarios
-
-### lifecycle.sh
-
-Verifies the common lifecycle in one pass:
-
-* base apply initializes valid state
-* full apply expands the installed set
-* second full apply is idempotent
-* base apply removes no-longer-desired features safely
-* empty apply removes all tracked resources safely
-
-This is the preferred scenario for `all`, because environment tests may use networked package managers.
-The narrower scenarios remain available for focused debugging.
-
-### minimal.sh
-
-Verifies basic execution:
-
-* State file is created
-* Version field is correct
-* Features are recorded
-* No duplicates exist
-* All paths are absolute
-
-### idempotent.sh
-
-Verifies determinism:
-
-* Second apply does not change state
-* No duplicate packages
-* No duplicate files
-
-### uninstall.sh
-
-Verifies safe removal:
-
-* State-tracked files are removed
-* Non-tracked files are preserved (filesystem scan prohibition)
-* State is properly cleaned
-* Uninstall is idempotent
-* No destructive operations outside state authority
-
-### version_install.sh
-
-Verifies version specification installation:
-
-* Features with version configuration are installed correctly
-* Version is recorded in state runtime metadata
-* Packages include version information
-
-### version_mixed.sh
-
-Verifies mixed version/no-version features:
-
-* Features with version specification record version in state
-* Features without version specification do not record version
-* Both types coexist correctly
-
-### version_upgrade.sh
-
-Verifies version change behavior:
-
-* Version mismatch triggers reinstall
-* Old version is removed before new installation
-* State is updated with new version and package
+`loadout-e2e` deserialises the state file using `model::state::State` for
+type-safe assertions — no dependency on `jq` or other external tools.
+The same binary is intended to be reused for Windows once a cross-compiled
+`loadout-e2e.exe` is available.
 
 ## Docker Image Stages
 
-The `Dockerfile` uses a two-stage build:
+The `Dockerfile` uses a six-stage build. Three stages produce named images;
+three are intermediate layers used only during the build:
 
 | Stage | Image | Contents | Use case |
 |-------|-------|----------|----------|
-| `base` | `loadout-base` | Minimal OS + repo copy | Pre-release binary validation |
-| `installed` | `loadout-test` | base + loadout binary + features/backends | Scenario tests |
+| `os-base` | — (intermediate) | Ubuntu + system deps, no source | Shared base |
+| `os` | `loadout-os` | `os-base` + source | Manual install testing |
+| `rust-toolchain` | — (intermediate) | `os-base` + Rust toolchain (no source) | Cached toolchain layer |
+| `builder` | — (intermediate) | `rust-toolchain` + source + `cargo build` | Foundation for `dev` |
+| `dev` | `loadout-dev` | `builder` + binaries + config | Try the latest source without a host build |
+| `test` | `loadout-test` | `os` + host release binaries + config | Scenario execution / CI |
 
-The `base` stage includes the repository at `/tmp/loadout-repo` for testing pre-release binaries.
+`rust-toolchain` is placed **before** `COPY . .` so that the rustup installation
+is cached across source changes — it is only re-run when the Dockerfile itself changes.
 
-The `installed` stage includes:
-- loadout binary installed at `~/.local/bin/loadout`
-- features/ and backends/ directories at `~/.config/loadout/`
-- Test fixtures at `~/.config/loadout/configs/`
+`dev` runs `cargo build --release` inside Docker — no Rust toolchain required on the host.
+BuildKit cache mounts keep the Cargo registry and `target/` between builds so only
+changed crates are recompiled on subsequent runs.
 
-Scenario tests use the `installed` image for fast execution.
+`test` copies pre-built `target/release/loadout` and `target/release/loadout-e2e`
+from the host, keeping the image small (no Rust toolchain inside).
 
 ## Quick Start
 
-### Run all tests
+### Run scenarios
 
 ```bash
+# Run all scenarios (recommended)
 ./tests/e2e/linux/docker/test.sh all
-```
 
-This will:
-1. Build the bootstrapped image (`loadout-test`)
-2. Run lifecycle scenario
-3. Run version_install scenario
-4. Run version_mixed scenario
-5. Run version_upgrade scenario
-
-### Run specific test
-
-```bash
-./tests/e2e/linux/docker/test.sh minimal
+# Run a specific scenario
 ./tests/e2e/linux/docker/test.sh lifecycle
+./tests/e2e/linux/docker/test.sh minimal
 ./tests/e2e/linux/docker/test.sh idempotent
 ./tests/e2e/linux/docker/test.sh uninstall
 ./tests/e2e/linux/docker/test.sh version-install
@@ -143,14 +67,43 @@ This will:
 ./tests/e2e/linux/docker/test.sh version-upgrade
 ```
 
-### Build images
+`test.sh <scenario>` automatically runs `cargo build --release` on the host if
+the binaries are absent, builds the `loadout-test` image, and runs
+`loadout-e2e <scenario>` inside the container.
+
+### Open an interactive shell
 
 ```bash
-# Build installed image (used by scenario tests)
+# test image: pre-built release binary
+./tests/e2e/linux/docker/test.sh shell
+
+# dev image: built from source inside Docker
+./tests/e2e/linux/docker/test.sh dev-shell
+
+# os image: bare Ubuntu, no loadout — starting point for manual install
+./tests/e2e/linux/docker/test.sh os-shell
+```
+
+Commands available inside `shell` / `dev-shell`:
+
+```bash
+loadout apply --config ~/.config/loadout/configs/config-base.yaml
+loadout-e2e minimal
+loadout-e2e all
+cat "$XDG_STATE_HOME/loadout/state.json"
+```
+
+### Build images only
+
+```bash
+# test image (uses host release binaries)
 ./tests/e2e/linux/docker/test.sh build
 
-# Build base image only (for pre-release binary validation)
-./tests/e2e/linux/docker/test.sh build-base
+# dev image (cargo build inside Docker — requires network on first run)
+./tests/e2e/linux/docker/test.sh build-dev
+
+# os image (bare Ubuntu only)
+./tests/e2e/linux/docker/test.sh build-os
 ```
 
 ### Clean up
@@ -159,92 +112,77 @@ This will:
 ./tests/e2e/linux/docker/test.sh clean
 ```
 
-### Interactive shell (for debugging)
+## Test Scenarios
 
-```bash
-# Shell in installed container (loadout ready to use)
-./tests/e2e/linux/docker/test.sh shell
+### lifecycle
 
-# Shell in base container (pre-installation, for binary validation)
-./tests/e2e/linux/docker/test.sh base-shell
-```
+The most comprehensive scenario — verifies the full lifecycle in a single pass:
 
-`shell` is useful for:
-- Testing plan command: `loadout plan -c ~/.config/loadout/configs/config-base.yaml`
-- Testing apply command: `loadout apply -c ~/.config/loadout/configs/config-base.yaml`
-- Running a scenario manually: `./tests/e2e/linux/docker/scenarios/minimal.sh`
-- Inspecting state: `cat ~/.local/state/loadout/state.json`
+1. base apply — state initialised correctly
+2. full apply — additional features installed
+3. full apply (repeat) — idempotency confirmed
+4. base apply — unwanted features removed safely
+5. empty apply — all tracked resources removed
 
-`base-shell` is useful for:
-- Testing pre-release binaries: `./target/debug/loadout --help`
-- Validating binary before installation
-- Testing from repository root without installation
+`all` runs this scenario as the primary test.
 
-## Expected Behavior
+### minimal
 
-All scenarios should:
+Basic execution:
 
-* Execute without errors
-* Exit with status 0
-* Print "PASSED" at the end
+* State file created
+* Version field correct (`version == 3`)
+* Features recorded
+* No duplicate resource IDs
+* All `fs` paths are absolute
 
-Any failure indicates a violation of system guarantees.
+### idempotent
 
-## Design Principles
+Determinism:
 
-### Why Docker?
+* Second apply does not change state
 
-* Reproducible clean environment
-* No host system pollution
-* Easy CI integration
-* Platform consistency
+### uninstall
 
-### Why State-Based Verification?
+Safe removal — three sub-tests:
 
-From ARCHITECTURE.md:
+1. Partial uninstall (full → base profile)
+2. Full uninstall (base → empty profile)
+3. Idempotent uninstall (empty → empty)
 
-> State is both input and output of execution.
-> No other layer persists execution memory.
+Verifies that tracked files are removed and untracked files are preserved.
 
-If state is correct, the system is correct.
+### version-install
 
-### What These Tests Do NOT Cover
+Version specification:
 
-* Package manager availability
-* Network failures
-* External system changes
-* Runtime state outside loadout scope
+* `runtime` resource in state records the installed version
+* `package` resource name includes the version
 
-These are environmental concerns, not architectural guarantees.
+### version-mixed
 
-## Adding New Scenarios
+Coexistence of versioned and unversioned features:
 
-When adding new test scenarios:
+* Features with a version spec record a `runtime` resource
+* Features without a version spec do not
 
-1. Create `tests/e2e/linux/docker/scenarios/<name>.sh`
-2. Follow `set -euo pipefail` pattern
-3. Verify state only — not implementation
-4. Exit 1 on any violation
-5. Print clear failure messages
+### version-upgrade
 
-Document guarantees being tested.
+Version change:
+
+* Version mismatch triggers reinstall
+* State updated to reflect the new version
 
 ## File Structure
 
 ```
 tests/e2e/linux/docker/
-├── Dockerfile           # Two-stage build (base / bootstrapped)
-├── test.sh              # Test execution script
-├── README.md            # This file
-└── scenarios/           # Test scenarios (run against bootstrapped image)
-    ├── minimal.sh       # Basic execution test
-    ├── lifecycle.sh     # Consolidated apply/uninstall lifecycle test
-    ├── idempotent.sh    # Determinism test
-    ├── uninstall.sh     # Safe removal test
-    ├── version_install.sh   # Version specification test
-    ├── version_mixed.sh     # Mixed version/no-version test
-    └── version_upgrade.sh   # Version change test
-
-# Note: .dockerignore is in the repository root
-# (Docker requires it at the build context root)
+├── Dockerfile    # 6-stage build (os-base / os / rust-toolchain / builder / dev / test)
+├── test.sh       # Test execution script
+└── README.md     # This file
 ```
+
+Scenario implementations live in `tests/runtime/src/scenarios/` (Rust).
+Inside the container they are invoked as `loadout-e2e <scenario>`.
+
+`.dockerignore` is located at the repository root (required by Docker).
