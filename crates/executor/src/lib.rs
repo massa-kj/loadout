@@ -1060,8 +1060,13 @@ fn remove_fs(path: &str, entry_type: &FsEntryType) -> Result<(), String> {
 }
 
 fn expand_home(path: &str) -> PathBuf {
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
+    // Strip `~/` (Unix) or `~\` (Windows) prefix.
+    let rest = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\"));
+    if let Some(rest) = rest {
+        // HOME is set on Linux/WSL and sometimes on Windows (Git Bash, etc.).
+        // USERPROFILE is the canonical home variable on Windows.
+        let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"));
+        if let Ok(home) = home {
             return PathBuf::from(home).join(rest);
         }
     }
