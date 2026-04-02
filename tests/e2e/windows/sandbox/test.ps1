@@ -22,11 +22,19 @@
     - version-upgrade: Version mismatch triggers reinstall; state updated
     - version-mixed:   Versioned and unversioned features coexist correctly
     - shell:           Open an interactive Sandbox session (no scenario)
-    - clean:           Remove generated .wsb files and logs
+    - clean:           Remove generated .wsb files, logs, and release binaries
+
+.PARAMETER Build
+    Build host release binaries before running (cargo build --release).
+    By default the script uses whatever binaries already exist in target\release\.
 
 .EXAMPLE
     .\test.ps1 all
-    Run all test scenarios
+    Run all test scenarios using existing binaries
+
+.EXAMPLE
+    .\test.ps1 all -Build
+    Build fresh binaries, then run all test scenarios
 
 .EXAMPLE
     .\test.ps1 minimal
@@ -38,7 +46,7 @@
 
 .EXAMPLE
     .\test.ps1 clean
-    Remove generated .wsb files
+    Remove generated .wsb files, logs, and release binaries
 #>
 
 [CmdletBinding()]
@@ -47,7 +55,9 @@ param(
     [ValidateSet("all", "minimal", "idempotent", "lifecycle", "uninstall",
                  "version-install", "version-mixed", "version-upgrade",
                  "shell", "clean")]
-    [string]$Command = "all"
+    [string]$Command = "all",
+
+    [switch]$Build
 )
 
 Set-StrictMode -Version Latest
@@ -101,22 +111,38 @@ function Test-SandboxAvailable {
     }
 }
 
-# Ensure host release binaries exist; build them if necessary.
+# Check or build host release binaries.
 # The sandbox mounts the repo read-only, so binaries must be in target\release\
 # before launching.
-function Ensure-HostRelease {
-    $LoadoutBin = Join-Path $PSScriptRoot "..\..\..\..\target\release\loadout.exe"
-    $E2eBin     = Join-Path $PSScriptRoot "..\..\..\..\target\release\loadout-e2e.exe"
+#
+# Default: verify binaries exist and abort with a hint if they don't.
+# -ForceBuild: always run cargo build --release.
+function Invoke-HostRelease {
+    param([bool]$ForceBuild = $false)
 
-    if ((Test-Path $LoadoutBin) -and (Test-Path $E2eBin)) {
-        Write-Info "Host release binaries present — skipping cargo build"
-        Write-Info "  Run 'cargo build -p loadout -p loadout-e2e --release' to rebuild"
-    } else {
+    $RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..\..")).Path
+    $LoadoutBin = Join-Path $RepoRoot "target\release\loadout.exe"
+    $E2eBin     = Join-Path $RepoRoot "target\release\loadout-e2e.exe"
+
+    if ($ForceBuild) {
         Write-Step "Building host release binaries (cargo build --release)..."
-        & cargo build -p loadout -p loadout-e2e --release
-        if (-not $?) {
-            throw "cargo build --release failed"
+        Push-Location $RepoRoot
+        try {
+            & cargo build -p loadout -p loadout-e2e --release
+            if (-not $?) { throw "cargo build --release failed" }
+        } finally {
+            Pop-Location
         }
+    } else {
+        if (-not ((Test-Path $LoadoutBin) -and (Test-Path $E2eBin))) {
+            Write-Host ""
+            Write-Warn "Host release binaries not found in target\release\"
+            Write-Info "Build them first with --build:"
+            Write-Host "  .\test.ps1 $Command --build" -ForegroundColor Yellow
+            Write-Host ""
+            exit 1
+        }
+        Write-Info "Using existing host release binaries (pass --build to rebuild)"
     }
 }
 
@@ -158,7 +184,7 @@ function Invoke-Shell {
     Start-Process -FilePath "WindowsSandbox.exe" -ArgumentList $WsbPath -Wait
 }
 
-# Remove generated files.
+# Remove generated files and release binaries.
 function Invoke-Clean {
     Write-Step "Cleaning up..."
 
@@ -172,6 +198,15 @@ function Invoke-Clean {
     if (Test-Path $LogsDir) {
         Remove-Item $LogsDir -Recurse -Force
         Write-Info "Removed: logs/"
+    }
+
+    $RepoRoot = (Resolve-Path (Join-Path $ScriptDir "..\..\..\..")).Path
+    foreach ($bin in @("loadout.exe", "loadout-e2e.exe")) {
+        $p = Join-Path $RepoRoot "target\release\$bin"
+        if (Test-Path $p) {
+            Remove-Item $p -Force
+            Write-Info "Removed: target\release\$bin"
+        }
     }
 
     Write-Step "Clean complete"
@@ -191,8 +226,8 @@ if ($Command -eq "clean") {
 
 if (-not (Test-SandboxAvailable)) { exit 1 }
 
-# Build host binaries before any scenario (sandbox mounts repo read-only).
-Ensure-HostRelease
+# Check or build host binaries before any scenario (sandbox mounts repo read-only).
+Invoke-HostRelease -ForceBuild $Build.IsPresent
 Write-Host ""
 
 switch ($Command) {

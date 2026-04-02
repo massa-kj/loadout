@@ -76,10 +76,27 @@ if ($Scenario) {
     # Automated test mode: set SCENARIO and run the test script.
     $InnerCommand = $CopyRepoCmd + "`$env:SCENARIO='$Scenario'; .\tests\e2e\windows\sandbox\run-in-sandbox.ps1"
 } else {
-    # Manual mode: copy repo and show instructions.
-    $InnerCommand = $CopyRepoCmd + @"
+    # Manual mode: copy repo, set up config directory, and show instructions.
+    $SetupConfigCmd = @"
+Write-Host 'Setting up loadout config...' -ForegroundColor Cyan;
+`$LoadoutRoot = Join-Path `$env:APPDATA 'loadout';
+`$FeaturesDir = Join-Path `$LoadoutRoot 'features';
+`$BackendsDir = Join-Path `$LoadoutRoot 'backends';
+`$ConfigsDir  = Join-Path `$LoadoutRoot 'configs';
+New-Item -ItemType Directory -Force -Path `$FeaturesDir, `$BackendsDir, `$ConfigsDir | Out-Null;
+Copy-Item 'features\*'                   `$FeaturesDir -Recurse -Force;
+Copy-Item 'backends\*'                   `$BackendsDir -Recurse -Force;
+Copy-Item 'tests\fixtures\backends\*'   `$BackendsDir -Recurse -Force;
+Copy-Item 'tests\fixtures\features\*'   `$FeaturesDir -Recurse -Force;
+Copy-Item 'tests\fixtures\configs\*'    `$ConfigsDir  -Force;
+`$env:XDG_CONFIG_HOME = `$env:APPDATA;
+`$env:XDG_STATE_HOME  = `$env:APPDATA;
+Write-Host 'Config root: ' -NoNewline -ForegroundColor Gray; Write-Host `$LoadoutRoot;
+"@
+    $InnerCommand = $CopyRepoCmd + $SetupConfigCmd + @"
 Write-Host 'Ready for manual testing!' -ForegroundColor Green;
 Write-Host 'Binaries are at: target\release\' -ForegroundColor Yellow;
+Write-Host 'Config names (e.g. -c config-base) resolve from: ' -NoNewline -ForegroundColor Yellow; Write-Host (Join-Path `$env:APPDATA 'loadout\configs');
 Write-Host 'To run a scenario: `$env:SCENARIO=''minimal''; .\tests\e2e\windows\sandbox\run-in-sandbox.ps1' -ForegroundColor Yellow;
 "@
 }
