@@ -62,21 +62,40 @@ function Write-Warn { param([string]$m); Write-Host "[WARN]" -ForegroundColor Ye
 
 # Check that Windows Sandbox is available.
 function Test-SandboxAvailable {
-    try {
-        $f = Get-WindowsOptionalFeature -Online -FeatureName "Containers-DisposableClientVM" -ErrorAction Stop
-        if ($f.State -ne "Enabled") {
+    # Get-WindowsOptionalFeature -Online requires elevation.
+    # Fall back to checking for WindowsSandbox.exe when not running as admin.
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)
+
+    if ($isAdmin) {
+        try {
+            $f = Get-WindowsOptionalFeature -Online -FeatureName "Containers-DisposableClientVM" -ErrorAction Stop
+            if ($f.State -ne "Enabled") {
+                Write-Host ""
+                Write-Warn "Windows Sandbox is not enabled"
+                Write-Info "Enable it with:"
+                Write-Host "  Enable-WindowsOptionalFeature -Online -FeatureName 'Containers-DisposableClientVM' -All" -ForegroundColor Yellow
+                Write-Host ""
+                return $false
+            }
+            return $true
+        } catch {
             Write-Host ""
-            Write-Warn "Windows Sandbox is not enabled"
-            Write-Info "Enable it with:"
-            Write-Host "  Enable-WindowsOptionalFeature -Online -FeatureName 'Containers-DisposableClientVM' -All" -ForegroundColor Yellow
+            Write-Warn "Windows Sandbox feature not found"
+            Write-Info "Ensure you are running Windows 10 Pro/Enterprise (1903+) or Windows 11"
             Write-Host ""
             return $false
         }
-        return $true
-    } catch {
+    } else {
+        # Non-admin fallback: check for the sandbox executable.
+        $sandboxExe = "$env:SystemRoot\System32\WindowsSandbox.exe"
+        if (Test-Path $sandboxExe) {
+            return $true
+        }
         Write-Host ""
         Write-Warn "Windows Sandbox feature not found"
         Write-Info "Ensure you are running Windows 10 Pro/Enterprise (1903+) or Windows 11"
+        Write-Info "(Run as administrator to perform a definitive feature-state check)"
         Write-Host ""
         return $false
     }
@@ -95,7 +114,7 @@ function Ensure-HostRelease {
     } else {
         Write-Step "Building host release binaries (cargo build --release)..."
         & cargo build -p loadout -p loadout-e2e --release
-        if ($LASTEXITCODE -ne 0) {
+        if (-not $?) {
             throw "cargo build --release failed"
         }
     }
@@ -109,10 +128,6 @@ function Invoke-TestScenario {
 
     $CreateWsbScript = Join-Path $ScriptDir "create-wsb.ps1"
     & $CreateWsbScript -Scenario $Scenario
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to generate .wsb configuration for scenario: $Scenario"
-    }
 
     $WsbPath = Join-Path $ScriptDir "loadout.wsb"
 
@@ -132,10 +147,6 @@ function Invoke-Shell {
 
     $CreateWsbScript = Join-Path $ScriptDir "create-wsb.ps1"
     & $CreateWsbScript  # no -Scenario: manual mode
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to generate .wsb configuration"
-    }
 
     $WsbPath = Join-Path $ScriptDir "loadout.wsb"
 
