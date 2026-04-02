@@ -790,12 +790,19 @@ fn apply_one_resource(
         } => {
             // Phase 4: Fs operations are handled directly by the executor.
             // Phase 5 will extract this into a builtin `core/fs` backend.
+            //
+            // Expand `~` before executing AND before storing in state.
+            // Storing the expanded (absolute) path is required for the state
+            // invariant check (`fs.path must be absolute`) and ensures that
+            // `remove_fs` later receives an absolute path from state.
+            let expanded = expand_home(path);
+            let expanded_str = expanded.to_string_lossy().into_owned();
             apply_fs(path, entry_type, op)?;
             Ok(Resource {
                 id: dr.id.clone(),
                 kind: ResourceKind::Fs {
                     fs: FsDetails {
-                        path: path.clone(),
+                        path: expanded_str,
                         entry_type: map_fs_entry_type(entry_type, op),
                         op: map_fs_op(op),
                     },
