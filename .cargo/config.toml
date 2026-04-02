@@ -1,0 +1,5 @@
+# Embed the MSVC runtime statically so the loadout.exe binary is
+# self-contained and does not depend on a vcredist installation.
+# This is required for running in clean environments such as Windows Sandbox.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
