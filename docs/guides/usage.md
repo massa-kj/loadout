@@ -98,6 +98,10 @@ See [strategies default location](../specs/data/strategy.md#File-Location).
 
 See [state file default location](../specs/data/state.md#File-Location).
 
+## Command Reference
+
+For a complete list of all CLI commands and flags, see **[commands.md](./commands.md)**.
+
 ## Plan Command
 
 Preview what would happen without making any changes:

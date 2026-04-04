@@ -26,6 +26,10 @@ To understand the system:
 2. **[architecture/layers.md](./architecture/layers.md)** — how the layers relate
 3. **[architecture/boundaries.md](./architecture/boundaries.md)** — what is forbidden
 
+To use the CLI:
+1. **[guides/usage.md](./guides/usage.md)** — workflow overview
+2. **[guides/commands.md](./guides/commands.md)** — full command reference
+
 To implement a feature:
 1. **[guides/features.md](./guides/features.md)**
 2. **[specs/data/state.md](./specs/data/state.md)** — state interaction rules
@@ -50,6 +54,7 @@ docs/
 │   └── boundaries.md
 ├── guides/
 │   ├── usage.md
+│   ├── commands.md
 │   ├── features.md
 │   └── backends.md
 └── development/

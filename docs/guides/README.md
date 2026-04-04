@@ -17,6 +17,8 @@
 
 **[usage.md](./usage.md)** — Basic usage: installation, bootstrap, profiles, plan/apply workflow.
 
+**[commands.md](./commands.md)** — Full CLI command reference: every subcommand, flag, and common usage pattern.
+
 **[features.md](./features.md)** — How to create and maintain a feature module.
 
 **[backends.md](./backends.md)** — How to implement a backend plugin.
