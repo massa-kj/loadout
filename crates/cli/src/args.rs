@@ -71,6 +71,12 @@ pub enum Command {
         command: BackendCommand,
     },
 
+    /// Read and list sources
+    Source {
+        #[command(subcommand)]
+        command: SourceCommand,
+    },
+
     /// Diagnose the loadout environment
     Doctor(DoctorArgs),
 
@@ -276,6 +282,26 @@ pub struct BackendListArgs {
 #[derive(Debug, clap::Args)]
 pub struct BackendShowArgs {
     /// Canonical backend ID (e.g. `local/mise`)
+    pub id: String,
+
+    #[command(flatten)]
+    pub output: OutputArgs,
+}
+
+// ── source ───────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Subcommand)]
+pub enum SourceCommand {
+    /// List all sources (implicit and declared)
+    List(OutputArgs),
+
+    /// Show details for a specific source
+    Show(SourceShowArgs),
+}
+
+#[derive(Debug, clap::Args)]
+pub struct SourceShowArgs {
+    /// Source ID (`core`, `local`, or an external source ID)
     pub id: String,
 
     #[command(flatten)]
