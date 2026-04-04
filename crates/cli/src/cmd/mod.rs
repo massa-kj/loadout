@@ -7,3 +7,4 @@ pub mod context;
 pub mod doctor;
 pub mod migrate;
 pub mod plan;
+pub mod state;

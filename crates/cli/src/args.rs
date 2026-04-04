@@ -41,6 +41,12 @@ pub enum Command {
     ///   pwsh:      Invoke-Expression (loadout activate --shell pwsh)
     Activate(ActivateArgs),
 
+    /// Manage loadout state
+    State {
+        #[command(subcommand)]
+        command: StateCommand,
+    },
+
     /// Manage the current context (active config)
     Context {
         #[command(subcommand)]
@@ -49,11 +55,6 @@ pub enum Command {
 
     /// Diagnose the loadout environment
     Doctor(DoctorArgs),
-
-    /// Migrate state file to the latest schema version
-    ///
-    /// Note: this command will move to `loadout state migrate` in a future release.
-    Migrate(MigrateArgs),
 
     /// Generate shell completion scripts
     ///
@@ -136,6 +137,15 @@ pub struct CompletionsArgs {
     /// Target shell
     pub shell: Shell,
 }
+
+// ── state ────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Subcommand)]
+pub enum StateCommand {
+    /// Migrate state file to the latest schema version
+    Migrate(MigrateArgs),
+}
+
 // ── context ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Subcommand)]
