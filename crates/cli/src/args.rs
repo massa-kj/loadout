@@ -2,9 +2,9 @@
 //
 // All subcommand argument structs live here. No application logic.
 //
-// Phase 1: apply, plan, activate, migrate, completions
+// Phase 1: apply, plan, activate, completions
 // Phase 2: state (migrate), context (set/show/unset), doctor
-// Phase 3+: config, feature, backend, source
+// Phase 3: state show, config, feature, backend, source (read-only commands)
 
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
@@ -53,6 +53,12 @@ pub enum Command {
         command: ContextCommand,
     },
 
+    /// Read and list config files
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommand,
+    },
+
     /// Diagnose the loadout environment
     Doctor(DoctorArgs),
 
@@ -60,6 +66,24 @@ pub enum Command {
     ///
     /// Example: loadout completions bash >> ~/.bashrc
     Completions(CompletionsArgs),
+}
+
+/// Output format for `list` and `show` commands.
+#[derive(Debug, Clone, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum OutputFormat {
+    /// Human-readable text (default)
+    #[default]
+    Text,
+    /// Machine-readable JSON
+    Json,
+}
+
+/// Arguments for `--output` shared by all `list` and `show` subcommands.
+#[derive(Debug, clap::Args)]
+pub struct OutputArgs {
+    /// Output format
+    #[arg(long, value_name = "FORMAT", default_value = "text")]
+    pub output: OutputFormat,
 }
 
 /// Arguments shared by commands that accept a config file.
@@ -164,6 +188,26 @@ pub enum ContextCommand {
 pub struct ContextSetArgs {
     /// Config name to set as the active context (e.g. `linux`)
     pub name: String,
+}
+
+// ── config ───────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Subcommand)]
+pub enum ConfigCommand {
+    /// Show the resolved profile for a config file
+    Show(ConfigShowArgs),
+
+    /// List all config files in the config directory
+    List(OutputArgs),
+}
+
+#[derive(Debug, clap::Args)]
+pub struct ConfigShowArgs {
+    /// Config name (e.g. `linux`) or path. Defaults to the current context.
+    pub name: Option<String>,
+
+    #[command(flatten)]
+    pub output: OutputArgs,
 }
 
 // ── doctor ───────────────────────────────────────────────────────────────────
