@@ -2,6 +2,7 @@
 
 pub mod activate;
 pub mod apply;
+pub mod backend;
 pub mod completions;
 pub mod config;
 pub mod context;

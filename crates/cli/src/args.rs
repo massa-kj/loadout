@@ -65,6 +65,12 @@ pub enum Command {
         command: FeatureCommand,
     },
 
+    /// Read and list available backends
+    Backend {
+        #[command(subcommand)]
+        command: BackendCommand,
+    },
+
     /// Diagnose the loadout environment
     Doctor(DoctorArgs),
 
@@ -240,6 +246,36 @@ pub struct FeatureListArgs {
 #[derive(Debug, clap::Args)]
 pub struct FeatureShowArgs {
     /// Canonical feature ID (e.g. `core/git` or `local/nvim`)
+    pub id: String,
+
+    #[command(flatten)]
+    pub output: OutputArgs,
+}
+
+// ── backend ──────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Subcommand)]
+pub enum BackendCommand {
+    /// List all available backends
+    List(BackendListArgs),
+
+    /// Show details for a specific backend
+    Show(BackendShowArgs),
+}
+
+#[derive(Debug, clap::Args)]
+pub struct BackendListArgs {
+    /// Filter by source ID (e.g. `local`)
+    #[arg(long, value_name = "SOURCE")]
+    pub source: Option<String>,
+
+    #[command(flatten)]
+    pub output: OutputArgs,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct BackendShowArgs {
+    /// Canonical backend ID (e.g. `local/mise`)
     pub id: String,
 
     #[command(flatten)]
