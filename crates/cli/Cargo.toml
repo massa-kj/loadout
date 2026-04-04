@@ -18,5 +18,6 @@ app           = { path = "../app" }
 state         = { path = "../state" }
 model         = { path = "../model" }
 platform      = { path = "../platform" }
+config        = { path = "../config" }
 clap          = { version = "4", features = ["derive"] }
 clap_complete = "4"

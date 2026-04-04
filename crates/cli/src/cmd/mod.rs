@@ -3,5 +3,6 @@
 pub mod activate;
 pub mod apply;
 pub mod completions;
+pub mod context;
 pub mod migrate;
 pub mod plan;

@@ -352,6 +352,7 @@ dependencies = [
  "app",
  "clap",
  "clap_complete",
+ "config",
  "model",
  "platform",
  "state",

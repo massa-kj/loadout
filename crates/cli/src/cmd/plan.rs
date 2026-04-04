@@ -8,15 +8,7 @@ use std::process;
 pub fn run(args: PlanArgs) {
     let mut ctx = build_app_context();
 
-    let config_value = match args.config.config {
-        Some(v) => v,
-        None => {
-            eprintln!("error: plan requires -c / --config <name|path>");
-            eprintln!("  name example:  loadout plan -c linux");
-            eprintln!("  path example:  loadout plan -c ./configs/work.yaml");
-            process::exit(1);
-        }
-    };
+    let config_value = resolve_config_arg(args.config.config, "plan", &ctx.dirs);
     let config_path = resolve_config_path(&config_value, &ctx.dirs);
     ctx.sources_override = args.config.sources;
 
@@ -32,4 +24,24 @@ pub fn run(args: PlanArgs) {
             process::exit(1);
         }
     }
+}
+
+/// Resolve the config name/path, falling back to the current context if `-c` is omitted.
+fn resolve_config_arg(
+    config_flag: Option<String>,
+    subcommand: &str,
+    dirs: &platform::Dirs,
+) -> String {
+    if let Some(v) = config_flag {
+        return v;
+    }
+    if let Some(name) = crate::cmd::context::read_current_context(dirs) {
+        eprintln!("Using context: {name}");
+        return name;
+    }
+    eprintln!("error: {subcommand} requires -c / --config <name|path>");
+    eprintln!("  name example:  loadout {subcommand} -c linux");
+    eprintln!("  path example:  loadout {subcommand} -c ./configs/work.yaml");
+    eprintln!("  or set a context: loadout context set <name>");
+    std::process::exit(1);
 }

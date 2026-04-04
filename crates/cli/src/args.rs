@@ -2,8 +2,9 @@
 //
 // All subcommand argument structs live here. No application logic.
 //
-// Future subcommand namespaces (state, context, config, feature, backend,
-// source) are added here in later phases alongside their cmd/ modules.
+// Phase 1: apply, plan, activate, migrate, completions
+// Phase 2: state (migrate), context (set/show/unset), doctor
+// Phase 3+: config, feature, backend, source
 
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
@@ -39,6 +40,15 @@ pub enum Command {
     ///   fish:      loadout activate --shell fish | source
     ///   pwsh:      Invoke-Expression (loadout activate --shell pwsh)
     Activate(ActivateArgs),
+
+    /// Manage the current context (active config)
+    Context {
+        #[command(subcommand)]
+        command: ContextCommand,
+    },
+
+    /// Diagnose the loadout environment
+    Doctor(DoctorArgs),
 
     /// Migrate state file to the latest schema version
     ///
@@ -125,4 +135,23 @@ pub struct MigrateArgs {
 pub struct CompletionsArgs {
     /// Target shell
     pub shell: Shell,
+}
+// ── context ──────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Subcommand)]
+pub enum ContextCommand {
+    /// Show the currently active context (config name)
+    Show,
+
+    /// Set the active context to the given config name
+    Set(ContextSetArgs),
+
+    /// Clear the active context
+    Unset,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct ContextSetArgs {
+    /// Config name to set as the active context (e.g. `linux`)
+    pub name: String,
 }
