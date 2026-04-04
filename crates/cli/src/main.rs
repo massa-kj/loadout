@@ -26,6 +26,7 @@ fn main() {
         args::Command::Activate(args) => cmd::activate::run(args),
         args::Command::Migrate(args) => cmd::migrate::run(args),
         args::Command::Context { command } => cmd::context::run(command),
+        args::Command::Doctor(args) => cmd::doctor::run(args),
         args::Command::Completions(args) => cmd::completions::run(args),
     }
 }

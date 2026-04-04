@@ -155,3 +155,12 @@ pub struct ContextSetArgs {
     /// Config name to set as the active context (e.g. `linux`)
     pub name: String,
 }
+
+// ── doctor ───────────────────────────────────────────────────────────────────
+
+#[derive(Debug, clap::Args)]
+pub struct DoctorArgs {
+    /// Also check a specific config file for readability
+    #[arg(short, long, value_name = "NAME|PATH")]
+    pub config: Option<String>,
+}
