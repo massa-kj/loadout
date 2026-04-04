@@ -59,6 +59,12 @@ pub enum Command {
         command: ConfigCommand,
     },
 
+    /// Read and list available features
+    Feature {
+        #[command(subcommand)]
+        command: FeatureCommand,
+    },
+
     /// Diagnose the loadout environment
     Doctor(DoctorArgs),
 
@@ -205,6 +211,36 @@ pub enum ConfigCommand {
 pub struct ConfigShowArgs {
     /// Config name (e.g. `linux`) or path. Defaults to the current context.
     pub name: Option<String>,
+
+    #[command(flatten)]
+    pub output: OutputArgs,
+}
+
+// ── feature ──────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Subcommand)]
+pub enum FeatureCommand {
+    /// List all available features
+    List(FeatureListArgs),
+
+    /// Show details for a specific feature
+    Show(FeatureShowArgs),
+}
+
+#[derive(Debug, clap::Args)]
+pub struct FeatureListArgs {
+    /// Filter by source ID (e.g. `local`, `core`)
+    #[arg(long, value_name = "SOURCE")]
+    pub source: Option<String>,
+
+    #[command(flatten)]
+    pub output: OutputArgs,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct FeatureShowArgs {
+    /// Canonical feature ID (e.g. `core/git` or `local/nvim`)
+    pub id: String,
 
     #[command(flatten)]
     pub output: OutputArgs,
