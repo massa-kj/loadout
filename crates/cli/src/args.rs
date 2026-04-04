@@ -184,8 +184,17 @@ pub struct CompletionsArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum StateCommand {
+    /// Show the current loadout state
+    Show(StateShowArgs),
+
     /// Migrate state file to the latest schema version
     Migrate(MigrateArgs),
+}
+
+#[derive(Debug, clap::Args)]
+pub struct StateShowArgs {
+    #[command(flatten)]
+    pub output: OutputArgs,
 }
 
 // ── context ──────────────────────────────────────────────────────────────────
