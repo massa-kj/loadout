@@ -355,6 +355,8 @@ dependencies = [
  "config",
  "model",
  "platform",
+ "serde",
+ "serde_json",
  "state",
 ]
 
