@@ -8,7 +8,6 @@ pub mod config;
 pub mod context;
 pub mod doctor;
 pub mod feature;
-pub mod migrate;
 pub mod plan;
 pub mod source;
 pub mod state;

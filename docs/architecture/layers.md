@@ -32,7 +32,9 @@ Must NOT: contain logic, OS branching, commands, or install details.
 
 ### app
 
-Coordinate execution flow.
+Coordinate execution flow and provide use-case entry points for the CLI.
+
+**Mutation pipeline:**
 
 `plan`: load → resolve → compile → plan → display. Must NOT modify state.
 `apply`: load → resolve → compile → plan → execute → commit state.
@@ -44,13 +46,22 @@ The `prepare_execution`/`execute` separation allows CLI to insert confirmation p
 `apply` remains as a convenience wrapper around `prepare_execution` + `execute`.
 The env plan cache is an **ephemeral artifact** — not part of authoritative state.
 
+**Read-only queries:**
+
+The app layer also exposes read-only use cases that do not involve the planner or executor.
+These build a lightweight pipeline (load config → discover sources/features/backends → query)
+and return typed results to the caller without modifying state.
+
+Query operations: feature index queries, backend discovery queries, source registry queries,
+config file queries, and state inspection.
+
+Must NOT: perform package management directly, re-classify after planner has decided.
+
 The `load` step includes all of the following before handing off to core:
 - Bundle expansion (`bundle.use` → merge `bundles:` definitions)
 - Namespace grouping normalization (`source_id: { name: {} }` → `source_id/name`)
 - Canonicalization (flat `HashMap<String, ProfileFeatureConfig>` keyed by canonical ID)
 - Validation (empty keys, undefined bundle names, duplicate canonicals)
-
-Must NOT: perform package management directly, re-classify after planner has decided.
 
 ### core
 
