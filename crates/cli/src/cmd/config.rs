@@ -1,11 +1,45 @@
-// crates/cli/src/cmd/config/show.rs — `loadout config show` implementation
+// crates/cli/src/cmd/config.rs — `loadout config` subcommand dispatch and implementations
 
 use std::process;
 
 use serde::Serialize;
 
-use crate::args::{ConfigShowArgs, OutputFormat};
+use crate::args::{ConfigCommand, ConfigShowArgs, OutputArgs, OutputFormat};
 use crate::context::{build_app_context, resolve_config_path};
+
+pub fn run(cmd: ConfigCommand) {
+    match cmd {
+        ConfigCommand::Show(args) => show(args),
+        ConfigCommand::List(args) => list(args),
+    }
+}
+
+fn list(args: OutputArgs) {
+    let ctx = build_app_context();
+    let active = crate::cmd::context::read_current_context(&ctx.dirs);
+    let entries = app::list_configs(&ctx, active.as_deref());
+
+    match args.output {
+        OutputFormat::Json => {
+            let json = serde_json::to_string_pretty(&entries).unwrap_or_else(|e| {
+                eprintln!("error: {e}");
+                process::exit(1);
+            });
+            println!("{json}");
+        }
+        OutputFormat::Text => {
+            if entries.is_empty() {
+                let configs_dir = ctx.dirs.config_home.join("configs");
+                println!("(no configs found in {})", configs_dir.display());
+                return;
+            }
+            for e in &entries {
+                let marker = if e.active { " *" } else { "  " };
+                println!("{marker} {:<24}  {}", e.name, e.path);
+            }
+        }
+    }
+}
 
 #[derive(Serialize)]
 struct ConfigShowOutput {
@@ -20,7 +54,7 @@ struct FeatureEntry {
     version: Option<String>,
 }
 
-pub fn run(args: ConfigShowArgs) {
+fn show(args: ConfigShowArgs) {
     let ctx = build_app_context();
 
     // Resolve which config to show: explicit arg > current context > error.

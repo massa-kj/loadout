@@ -1,11 +1,45 @@
-// crates/cli/src/cmd/backend/show.rs — `loadout backend show` implementation
+// crates/cli/src/cmd/backend.rs — `loadout backend` subcommand dispatch and implementations
 
 use std::process;
 
-use crate::args::{BackendShowArgs, OutputFormat};
+use crate::args::{BackendCommand, BackendListArgs, BackendShowArgs, OutputFormat};
 use crate::context::build_app_context;
 
-pub fn run(args: BackendShowArgs) {
+pub fn run(cmd: BackendCommand) {
+    match cmd {
+        BackendCommand::List(args) => list(args),
+        BackendCommand::Show(args) => show(args),
+    }
+}
+
+fn list(args: BackendListArgs) {
+    let ctx = build_app_context();
+    let items = app::list_backends(&ctx, args.source.as_deref()).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        process::exit(1);
+    });
+
+    match args.output.output {
+        OutputFormat::Json => {
+            let json = serde_json::to_string_pretty(&items).unwrap_or_else(|e| {
+                eprintln!("error: {e}");
+                process::exit(1);
+            });
+            println!("{json}");
+        }
+        OutputFormat::Text => {
+            if items.is_empty() {
+                println!("(no backends found)");
+                return;
+            }
+            for b in &items {
+                println!("  {:<32}  {}", b.id, b.dir);
+            }
+        }
+    }
+}
+
+fn show(args: BackendShowArgs) {
     let ctx = build_app_context();
     let detail = app::show_backend(&ctx, &args.id).unwrap_or_else(|e| {
         eprintln!("error: {e}");

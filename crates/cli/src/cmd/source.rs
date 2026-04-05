@@ -1,11 +1,42 @@
-// crates/cli/src/cmd/source/show.rs — `loadout source show` implementation
+// crates/cli/src/cmd/source.rs — `loadout source` subcommand dispatch and implementations
 
 use std::process;
 
-use crate::args::{OutputFormat, SourceShowArgs};
+use crate::args::{OutputArgs, OutputFormat, SourceCommand, SourceShowArgs};
 use crate::context::build_app_context;
 
-pub fn run(args: SourceShowArgs) {
+pub fn run(cmd: SourceCommand) {
+    match cmd {
+        SourceCommand::List(args) => list(args),
+        SourceCommand::Show(args) => show(args),
+    }
+}
+
+fn list(args: OutputArgs) {
+    let ctx = build_app_context();
+    let entries = app::list_sources(&ctx).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        process::exit(1);
+    });
+
+    match args.output {
+        OutputFormat::Json => {
+            let json = serde_json::to_string_pretty(&entries).unwrap_or_else(|e| {
+                eprintln!("error: {e}");
+                process::exit(1);
+            });
+            println!("{json}");
+        }
+        OutputFormat::Text => {
+            for e in &entries {
+                let url_part = e.url.as_deref().unwrap_or("-");
+                println!("  {:<16}  {:<8}  {url_part}", e.id, e.kind);
+            }
+        }
+    }
+}
+
+fn show(args: SourceShowArgs) {
     let ctx = build_app_context();
     let detail = app::show_source(&ctx, &args.id).unwrap_or_else(|e| {
         eprintln!("error: {e}");
