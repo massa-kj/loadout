@@ -41,6 +41,18 @@ pub enum AppError {
     #[error("executor error: {0}")]
     Executor(#[from] executor::ExecutorError),
 
+    /// Feature not found in the index.
+    #[error("feature '{id}' not found")]
+    FeatureNotFound { id: String },
+
+    /// Backend not found in any source root.
+    #[error("backend '{id}' not found")]
+    BackendNotFound { id: String },
+
+    /// Source not found in sources.yaml.
+    #[error("source '{id}' not found")]
+    SourceNotFound { id: String },
+
     /// No cached env plan found; `loadout apply` must be run first.
     #[error("no cached env plan — run 'loadout apply' first")]
     EnvPlanNotFound,

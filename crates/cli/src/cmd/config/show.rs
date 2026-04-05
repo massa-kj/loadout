@@ -5,7 +5,7 @@ use std::process;
 use serde::Serialize;
 
 use crate::args::{ConfigShowArgs, OutputFormat};
-use crate::context::{build_app_context, config_id_from_path, resolve_config_path};
+use crate::context::{build_app_context, resolve_config_path};
 
 #[derive(Serialize)]
 struct ConfigShowOutput {
@@ -35,22 +35,15 @@ pub fn run(args: ConfigShowArgs) {
     };
 
     let config_path = resolve_config_path(&name_or_path, &ctx.dirs);
-
-    if !config_path.exists() {
-        eprintln!("error: config not found: {}", config_path.display());
-        process::exit(1);
-    }
-
-    let (profile, _strategy) = config::load_config(&config_path).unwrap_or_else(|e| {
+    let detail = app::show_config(&ctx, &config_path).unwrap_or_else(|e| {
         eprintln!("error: {e}");
         process::exit(1);
     });
 
-    let name = config_id_from_path(&config_path);
-
     match args.output.output {
         OutputFormat::Json => {
-            let mut features: Vec<FeatureEntry> = profile
+            let mut features: Vec<FeatureEntry> = detail
+                .profile
                 .features
                 .iter()
                 .map(|(id, cfg)| FeatureEntry {
@@ -59,10 +52,9 @@ pub fn run(args: ConfigShowArgs) {
                 })
                 .collect();
             features.sort_by(|a, b| a.id.cmp(&b.id));
-
             let out = ConfigShowOutput {
-                name,
-                path: config_path.display().to_string(),
+                name: detail.name.clone(),
+                path: detail.path.display().to_string(),
                 features,
             };
             let json = serde_json::to_string_pretty(&out).unwrap_or_else(|e| {
@@ -72,12 +64,12 @@ pub fn run(args: ConfigShowArgs) {
             println!("{json}");
         }
         OutputFormat::Text => {
-            println!("name:  {name}");
-            println!("path:  {}", config_path.display());
-            println!("features ({}):", profile.features.len());
+            println!("name:  {}", detail.name);
+            println!("path:  {}", detail.path.display());
+            println!("features ({}):", detail.profile.features.len());
 
             let mut features: Vec<(&String, &config::ProfileFeatureConfig)> =
-                profile.features.iter().collect();
+                detail.profile.features.iter().collect();
             features.sort_by_key(|(id, _)| id.as_str());
 
             for (id, cfg) in &features {

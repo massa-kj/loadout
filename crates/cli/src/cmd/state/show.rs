@@ -7,7 +7,7 @@ use crate::context::build_app_context;
 
 pub fn run(args: StateShowArgs) {
     let ctx = build_app_context();
-    let state = state::load(&ctx.state_path()).unwrap_or_else(|e| {
+    let state = app::show_state(&ctx).unwrap_or_else(|e| {
         eprintln!("error: {e}");
         process::exit(1);
     });

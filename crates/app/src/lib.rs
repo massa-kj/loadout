@@ -34,7 +34,11 @@ pub use context::{AppContext, AppError};
 pub use executor::{Event, ExecutorReport};
 pub use model::plan::Plan;
 pub use plan::plan;
-pub use read::{build_feature_index, load_sources, scan_backend_dirs};
+pub use read::{
+    list_backends, list_configs, list_features, list_sources, show_backend, show_config,
+    show_feature, show_source, show_state, BackendDetail, BackendScripts, BackendSummary,
+    ConfigDetail, ConfigSummary, FeatureDetail, FeatureSummary, SourceSummary,
+};
 
 #[cfg(test)]
 mod tests;

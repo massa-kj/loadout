@@ -7,36 +7,26 @@ use crate::context::build_app_context;
 
 pub fn run(args: FeatureShowArgs) {
     let ctx = build_app_context();
-
-    let sources = app::load_sources(&ctx).unwrap_or_else(|e| {
+    let detail = app::show_feature(&ctx, &args.id).unwrap_or_else(|e| {
         eprintln!("error: {e}");
-        process::exit(1);
-    });
-
-    let index = app::build_feature_index(&ctx, &sources).unwrap_or_else(|e| {
-        eprintln!("error: {e}");
-        process::exit(1);
-    });
-
-    let meta = index.features.get(&args.id).unwrap_or_else(|| {
-        eprintln!("error: feature '{}' not found", args.id);
         process::exit(1);
     });
 
     match args.output.output {
         OutputFormat::Json => {
-            let json = serde_json::to_string_pretty(meta).unwrap_or_else(|e| {
+            let json = serde_json::to_string_pretty(&detail).unwrap_or_else(|e| {
                 eprintln!("error: {e}");
                 process::exit(1);
             });
             println!("{json}");
         }
-        OutputFormat::Text => print_feature_text(&args.id, meta),
+        OutputFormat::Text => print_feature_text(&detail),
     }
 }
 
-fn print_feature_text(id: &str, meta: &model::feature_index::FeatureMeta) {
-    println!("feature:    {id}");
+fn print_feature_text(detail: &app::FeatureDetail) {
+    let meta = &detail.meta;
+    println!("feature:    {}", detail.id);
     println!(
         "mode:       {}",
         match meta.mode {
@@ -73,7 +63,7 @@ fn print_feature_text(id: &str, meta: &model::feature_index::FeatureMeta) {
                     op,
                     ..
                 } => {
-                    println!("    kind: fs  path: {path}  type: {entry_type:?}  op: {op:?}",);
+                    println!("    kind: fs  path: {path}  type: {entry_type:?}  op: {op:?}");
                 }
             }
         }
