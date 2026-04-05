@@ -1,11 +1,11 @@
 // crates/cli/src/cmd/feature.rs — `loadout feature` subcommand dispatch and implementations
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::process;
 
 use crate::args::{
-    FeatureCommand, FeatureEditArgs, FeatureListArgs, FeatureShowArgs, OutputFormat,
+    FeatureCommand, FeatureEditArgs, FeatureListArgs, FeatureNewArgs, FeatureShowArgs,
+    FeatureTemplate, FeatureValidateArgs, OutputFormat,
 };
 use crate::context::build_app_context;
 
@@ -14,6 +14,8 @@ pub fn run(cmd: FeatureCommand) {
         FeatureCommand::List(args) => list(args),
         FeatureCommand::Show(args) => show(args),
         FeatureCommand::Edit(args) => edit(args),
+        FeatureCommand::New(args) => new(args),
+        FeatureCommand::Validate(args) => validate(args),
     }
 }
 
@@ -132,12 +134,19 @@ fn edit(args: FeatureEditArgs) {
     // Resolve bare name to `local/<name>`; reject non-local sources.
     let id = resolve_local_id(&args.name, "feature");
 
-    let detail = app::show_feature(&ctx, &id).unwrap_or_else(|e| {
-        eprintln!("error: {e}");
+    // Derive the path directly from local_root — avoids building the full
+    // feature index (which would fail if any OTHER local feature is broken).
+    let name = id.trim_start_matches("local/");
+    let feature_yaml = ctx
+        .local_root
+        .join("features")
+        .join(name)
+        .join("feature.yaml");
+    if !feature_yaml.exists() {
+        eprintln!("error: feature not found: {}", feature_yaml.display());
+        eprintln!("hint: run 'loadout feature new {name}' to create it");
         process::exit(1);
-    });
-
-    let feature_yaml = PathBuf::from(&detail.meta.source_dir).join("feature.yaml");
+    }
     super::editor::open(&feature_yaml);
 }
 
@@ -153,5 +162,69 @@ fn resolve_local_id(name: &str, kind: &str) -> String {
         name.to_string()
     } else {
         format!("local/{name}")
+    }
+}
+
+/// Resolve a bare name or canonical ID for validation.
+/// Unlike `resolve_local_id`, this accepts any source prefix.
+fn resolve_id_for_validate(name: &str) -> String {
+    if name.contains('/') {
+        name.to_string()
+    } else {
+        format!("local/{name}")
+    }
+}
+
+// ── new ───────────────────────────────────────────────────────────────────────
+
+fn new(args: FeatureNewArgs) {
+    let ctx = build_app_context();
+    let template = match args.template {
+        FeatureTemplate::Declarative => app::FeatureTemplate::Declarative,
+        FeatureTemplate::Script => app::FeatureTemplate::Script,
+    };
+    let dir = app::feature_new(&ctx, &args.name, template).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        process::exit(1);
+    });
+    println!("Created: {}", dir.display());
+    println!(
+        "Edit feature.yaml, then run 'loadout config feature add {}' to include it.",
+        args.name
+    );
+}
+
+// ── validate ──────────────────────────────────────────────────────────────────
+
+fn validate(args: FeatureValidateArgs) {
+    let ctx = build_app_context();
+    let id = resolve_id_for_validate(&args.id);
+
+    let report = app::feature_validate(&ctx, &id).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        process::exit(1);
+    });
+
+    print_validation_report(&report);
+
+    if !report.is_ok() {
+        process::exit(1);
+    }
+}
+
+fn print_validation_report(report: &app::ValidationReport) {
+    println!("feature:  {}", report.id);
+    println!("path:     {}", report.path.display());
+    if report.issues.is_empty() {
+        println!("result:   OK");
+    } else {
+        println!("result:   {} issue(s)", report.issues.len());
+        for issue in &report.issues {
+            let tag = match issue.level {
+                app::IssueLevel::Error => "[error]",
+                app::IssueLevel::Warning => "[warn] ",
+            };
+            println!("  {tag}  {}", issue.message);
+        }
     }
 }

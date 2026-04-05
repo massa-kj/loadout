@@ -343,6 +343,53 @@ loadout feature edit local/git   # same
 
 Features from external sources (e.g. `core/node`) cannot be edited this way.
 
+### `loadout feature new`
+
+```
+loadout feature new <NAME> [--template declarative|script]
+```
+
+Scaffolds a new local feature directory at
+`$XDG_CONFIG_HOME/loadout/features/<NAME>/`.
+
+| Flag | Description |
+|---|---|
+| `--template <TEMPLATE>` | `declarative` (default) or `script`. |
+
+**`declarative`** — creates `feature.yaml` with a commented `resources:` skeleton.
+
+**`script`** — creates `feature.yaml` with `mode: script` and stub `install.sh` /
+`uninstall.sh` scripts (made executable on Unix).
+
+```sh
+loadout feature new mypkg                       # declarative
+loadout feature new myscript --template script  # script mode
+```
+
+Fails with an error if the directory already exists.
+
+### `loadout feature validate`
+
+```
+loadout feature validate <ID>
+```
+
+Validates a feature's directory structure and `feature.yaml`. Accepts a canonical
+ID or a bare name (resolved to `local/<name>`).
+
+Checks performed:
+1. `feature.yaml` is parseable and `spec_version` / `mode` are valid.
+2. `install.sh` and `uninstall.sh` exist (script mode only).
+3. Resource IDs are unique within the feature (declarative mode).
+4. Each `depends` entry is present in the full feature index (warning if absent).
+
+Exit code is non-zero if any **errors** are found. Warnings do not affect the exit code.
+
+```sh
+loadout feature validate git         # validates local/git
+loadout feature validate local/nvim  # same with explicit source
+```
+
 ## Backend
 
 ### `loadout backend list`
@@ -386,6 +433,52 @@ Opens the `backend.yaml` of a local backend in `$EDITOR`. Only `local` source ba
 ```sh
 loadout backend edit mise         # opens backends/mise/backend.yaml
 loadout backend edit local/mise   # same
+```
+
+### `loadout backend new`
+
+```
+loadout backend new <NAME> [--platform unix|unix-windows]
+```
+
+Scaffolds a new local backend directory at
+`$XDG_CONFIG_HOME/loadout/backends/<NAME>/`.
+
+| Flag | Description |
+|---|---|
+| `--platform <PLATFORM>` | `unix` (default) or `unix-windows`. |
+
+**`unix`** — creates `backend.yaml` + stub `apply.sh`, `remove.sh`, `status.sh`
+(made executable on Unix).
+
+**`unix-windows`** — also creates `apply.ps1`, `remove.ps1`, `status.ps1`.
+
+```sh
+loadout backend new mypkg                          # Unix scripts only
+loadout backend new mypkg --platform unix-windows  # also PowerShell
+```
+
+Fails with an error if the directory already exists.
+
+### `loadout backend validate`
+
+```
+loadout backend validate <ID>
+```
+
+Validates a backend's directory structure and `backend.yaml`. Accepts a canonical
+ID or a bare name (resolved to `local/<name>`).
+
+Checks performed:
+1. `backend.yaml` is parseable and `api_version` is valid.
+2. Required scripts are present for the current platform:
+   `apply`, `remove`, and `status` (error if absent).
+
+Exit code is non-zero if any errors are found.
+
+```sh
+loadout backend validate mise         # validates local/mise
+loadout backend validate local/mypkg  # same with explicit source
 ```
 
 ## Source

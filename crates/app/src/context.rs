@@ -68,6 +68,18 @@ pub enum AppError {
     /// No config specified and no context is currently set.
     #[error("no config specified and no context is set — use 'loadout context set <name>'")]
     NoActiveContext,
+
+    /// The target directory or file already exists.
+    #[error("already exists: {}", path.display())]
+    AlreadyExists { path: PathBuf },
+
+    /// I/O error during a scaffold (create-file) operation.
+    #[error("I/O error at {}: {source}", path.display())]
+    ScaffoldIo {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 /// Stable, run-level context shared by all use cases.

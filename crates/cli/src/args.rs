@@ -5,6 +5,8 @@
 // Phase 1: apply, plan, activate, completions
 // Phase 2: state (migrate), context (set/show/unset), doctor
 // Phase 3: state show, config, feature, backend, source (read-only commands)
+// Phase 4: config edit/init/feature/raw, feature/backend/source edit (mutation commands)
+// Phase 5: feature/backend new, feature/backend validate (scaffold/validation)
 
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
@@ -347,12 +349,44 @@ pub enum FeatureCommand {
 
     /// Open a local feature's `feature.yaml` in $EDITOR
     Edit(FeatureEditArgs),
+
+    /// Scaffold a new local feature directory from a template
+    New(FeatureNewArgs),
+
+    /// Validate a feature's `feature.yaml` and directory structure
+    Validate(FeatureValidateArgs),
 }
 
 #[derive(Debug, clap::Args)]
 pub struct FeatureEditArgs {
     /// Feature name or canonical ID. Bare name resolves to `local/<name>`.
     pub name: String,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct FeatureNewArgs {
+    /// Feature name (e.g. `myfeature` → creates `features/myfeature/`)
+    pub name: String,
+
+    /// Template to use: `declarative` (default) or `script`
+    #[arg(long, value_name = "TEMPLATE", default_value = "declarative")]
+    pub template: FeatureTemplate,
+}
+
+/// Template choice for `feature new`.
+#[derive(Debug, Clone, Default, clap::ValueEnum)]
+pub enum FeatureTemplate {
+    /// Declarative feature: `feature.yaml` with a `resources:` skeleton
+    #[default]
+    Declarative,
+    /// Script feature: `feature.yaml` + stub `install.sh` / `uninstall.sh`
+    Script,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct FeatureValidateArgs {
+    /// Feature canonical ID (e.g. `local/git`) or bare name (resolves to `local/<name>`)
+    pub id: String,
 }
 
 #[derive(Debug, clap::Args)]
@@ -386,12 +420,45 @@ pub enum BackendCommand {
 
     /// Open a local backend's `backend.yaml` in $EDITOR
     Edit(BackendEditArgs),
+
+    /// Scaffold a new local backend directory from a template
+    New(BackendNewArgs),
+
+    /// Validate a backend's `backend.yaml` and directory structure
+    Validate(BackendValidateArgs),
 }
 
 #[derive(Debug, clap::Args)]
 pub struct BackendEditArgs {
     /// Backend name or canonical ID. Bare name resolves to `local/<name>`.
     pub name: String,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct BackendNewArgs {
+    /// Backend name (e.g. `mypkg` → creates `backends/mypkg/`)
+    pub name: String,
+
+    /// Target platform(s) for generated scripts
+    #[arg(long, value_name = "PLATFORM", default_value = "unix")]
+    pub platform: BackendPlatform,
+}
+
+/// Platform choice for `backend new`.
+#[derive(Debug, Clone, Default, clap::ValueEnum)]
+pub enum BackendPlatform {
+    /// Generate `.sh` scripts only (Linux / macOS / WSL)
+    #[default]
+    Unix,
+    /// Generate both `.sh` and `.ps1` scripts
+    #[value(name = "unix-windows")]
+    UnixWindows,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct BackendValidateArgs {
+    /// Backend canonical ID (e.g. `local/mise`) or bare name (resolves to `local/<name>`)
+    pub id: String,
 }
 
 #[derive(Debug, clap::Args)]

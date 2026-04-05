@@ -28,6 +28,8 @@ mod mutate;
 mod pipeline;
 mod plan;
 mod read;
+mod scaffold;
+mod validate;
 
 pub use activate::{activate, ShellKind};
 pub use apply::{apply, execute, prepare_execution, ExecutionPlan};
@@ -43,6 +45,10 @@ pub use read::{
     list_backends, list_configs, list_features, list_sources, show_backend, show_config,
     show_feature, show_source, show_state, BackendDetail, BackendScripts, BackendSummary,
     ConfigDetail, ConfigSummary, FeatureDetail, FeatureSummary, SourceSummary,
+};
+pub use scaffold::{backend_new, feature_new, BackendPlatform, FeatureTemplate};
+pub use validate::{
+    backend_validate, feature_validate, IssueLevel, ValidationIssue, ValidationReport,
 };
 
 #[cfg(test)]
