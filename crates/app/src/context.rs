@@ -64,6 +64,10 @@ pub enum AppError {
     /// Failed to deserialize the env plan cache.
     #[error("failed to deserialize env plan cache: {0}")]
     EnvPlanDeserialize(serde_json::Error),
+
+    /// No config specified and no context is currently set.
+    #[error("no config specified and no context is set — use 'loadout context set <name>'")]
+    NoActiveContext,
 }
 
 /// Stable, run-level context shared by all use cases.
@@ -127,5 +131,31 @@ impl AppContext {
     /// Not part of the authoritative state — callers must handle absence gracefully.
     pub fn env_plan_cache_path(&self) -> PathBuf {
         self.dirs.cache_home.join("env_plan.json")
+    }
+
+    /// Return the currently active context name, or `None` if not set.
+    ///
+    /// The context is stored as a bare config name in `{config_home}/current`.
+    pub fn current_context(&self) -> Option<String> {
+        let path = self.dirs.config_home.join("current");
+        std::fs::read_to_string(&path)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
+
+    /// Resolve a config name-or-path string to a `PathBuf`.
+    ///
+    /// - Value containing `.yaml` or `.yml` → literal path.
+    /// - Otherwise → `{config_home}/configs/{value}.yaml`.
+    pub fn resolve_config_path(&self, value: &str) -> PathBuf {
+        if value.contains(".yaml") || value.contains(".yml") {
+            PathBuf::from(value)
+        } else {
+            self.dirs
+                .config_home
+                .join("configs")
+                .join(format!("{value}.yaml"))
+        }
     }
 }

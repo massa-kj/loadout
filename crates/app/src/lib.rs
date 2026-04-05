@@ -24,6 +24,7 @@
 mod activate;
 mod apply;
 mod context;
+mod mutate;
 mod pipeline;
 mod plan;
 mod read;
@@ -33,6 +34,10 @@ pub use apply::{apply, execute, prepare_execution, ExecutionPlan};
 pub use context::{AppContext, AppError};
 pub use executor::{Event, ExecutorReport};
 pub use model::plan::Plan;
+pub use mutate::{
+    config_feature_add, config_feature_remove, config_init, config_raw_set, config_raw_show,
+    config_raw_unset,
+};
 pub use plan::plan;
 pub use read::{
     list_backends, list_configs, list_features, list_sources, show_backend, show_config,

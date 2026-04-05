@@ -5,8 +5,6 @@ and which flags it accepts.
 
 For the big-picture workflow see [usage.md](./usage.md).
 
----
-
 ## Command Groups
 
 | Group | Purpose |
@@ -14,14 +12,12 @@ For the big-picture workflow see [usage.md](./usage.md).
 | [Execution](#execution) | Apply or preview changes to the system |
 | [State](#state) | Inspect and migrate the state file |
 | [Context](#context) | Set the active config shorthand |
-| [Config](#config) | Read declared configs |
-| [Feature](#feature) | Explore available features |
-| [Backend](#backend) | Explore available backends |
-| [Source](#source) | Inspect declared sources |
+| [Config](#config) | Manage configs |
+| [Feature](#feature) | Manage features |
+| [Backend](#backend) | Manage backends |
+| [Source](#source) | Manage sources |
 | [Diagnostics](#diagnostics) | Health-check the loadout environment |
 | [Shell](#shell) | Generate shell completions |
-
----
 
 ## Execution
 
@@ -46,8 +42,6 @@ Use this to preview changes before committing.
 - Value containing `.yaml` or `.yml` → treated as a literal path
 - Omitted → falls back to the active context (see [`context set`](#context-set))
 
----
-
 ### `loadout apply`
 
 ```
@@ -65,8 +59,6 @@ Atomically commits state after each successful feature.
 
 Feature-level failures are non-fatal: the run continues and a summary is printed.
 Exit code is non-zero if any feature failed.
-
----
 
 ### `loadout activate`
 
@@ -96,8 +88,6 @@ The shell is auto-detected from `$SHELL` when `--shell` is omitted.
 
 Error if `apply` has never been run (no cached env plan).
 
----
-
 ## State
 
 ### `loadout state show`
@@ -113,8 +103,6 @@ resources. With `--output json`, outputs the full raw state JSON.
 |---|---|
 | `--output <FORMAT>` | `text` (default) or `json`. |
 
----
-
 ### `loadout state migrate`
 
 ```
@@ -128,8 +116,6 @@ Run this after upgrading loadout if `plan` or `apply` reports a migration error.
 |---|---|
 | `--dry-run` | Show what would change without writing. |
 
----
-
 ## Context
 
 The active context is the default config used by `plan` and `apply` when `-c` is
@@ -142,8 +128,6 @@ loadout context show
 ```
 
 Prints the currently active context name, or a message if none is set.
-
----
 
 ### `loadout context set`
 
@@ -159,8 +143,6 @@ loadout context set linux
 
 After this, `loadout plan` and `loadout apply` (without `-c`) use `linux.yaml`.
 
----
-
 ### `loadout context unset`
 
 ```
@@ -168,8 +150,6 @@ loadout context unset
 ```
 
 Clears the active context. Subsequent `plan` / `apply` calls require `-c`.
-
----
 
 ## Config
 
@@ -186,8 +166,6 @@ The active context is marked with `*` in text mode.
 |---|---|
 | `--output <FORMAT>` | `text` (default) or `json`. JSON includes `name`, `path`, `active` fields. |
 
----
-
 ### `loadout config show`
 
 ```
@@ -202,7 +180,120 @@ When `<NAME>` is omitted, the active context is used.
 | `<NAME>` | Config name or path. Defaults to the active context. |
 | `--output <FORMAT>` | `text` (default) or `json`. |
 
----
+### `loadout config edit`
+
+```
+loadout config edit
+```
+
+Opens the active context's config file in `$EDITOR` (falls back to `$VISUAL`,
+then `vi`, then `nano` on Unix; `notepad` on Windows).
+
+Requires an active context. Error if none is set:
+
+```sh
+loadout context set linux
+loadout config edit   # opens ~/.config/loadout/configs/linux.yaml
+```
+
+### `loadout config init`
+
+```
+loadout config init <NAME>
+```
+
+Creates a new config file from the built-in template at
+`$XDG_CONFIG_HOME/loadout/configs/<NAME>.yaml`. Fails if the file already exists.
+
+```sh
+loadout config init linux
+loadout context set linux
+loadout config edit   # fill in features
+```
+
+### `loadout config feature add`
+
+```
+loadout config feature add <ID> [-c <NAME|PATH>]
+```
+
+Adds a feature to `profile.features` in the config file. When `-c` is omitted, the active context is used.
+
+`<ID>` is a canonical feature ID or a bare name:
+
+| Input | Resolved |
+|---|---|
+| `git` | `local/git` |
+| `local/git` | `local/git` |
+| `core/node` | `core/node` |
+
+```sh
+loadout config feature add git            # adds local/git to the active config
+loadout config feature add core/node -c work
+```
+
+> **Note:** Write operations parse and re-emit the YAML. YAML comments in the
+> config file are **not preserved**. Use `config edit` if you need to keep
+> comments.
+
+### `loadout config feature remove`
+
+```
+loadout config feature remove <ID> [-c <NAME|PATH>]
+```
+
+Removes a feature from `profile.features`. Prints `no change` if the feature is not present. Same `-c` resolution and `<ID>` expansion as `feature add`.
+
+> **Note:** Write operations do not preserve YAML comments. See above.
+
+### `loadout config raw show`
+
+```
+loadout config raw show [-c <NAME|PATH>]
+```
+
+Prints the raw YAML content of the config file as-is, including any comments.
+When `-c` is omitted, the active context is used.
+
+This command does **not** modify the file.
+
+### `loadout config raw set`
+
+```
+loadout config raw set <PATH> <VALUE> [-c <NAME|PATH>]
+```
+
+Sets the value at a dot-separated YAML path. `<VALUE>` is parsed as YAML, so:
+
+| Input | Result type |
+|---|---|
+| `{}` | empty mapping |
+| `true` | boolean |
+| `42` | integer |
+| `"hello"` | string |
+
+```sh
+loadout config raw set profile.features.local.git '{}'
+loadout config raw set strategy.package.default_backend local/mise
+```
+
+Missing intermediate nodes are created as empty mappings.
+
+> **Note:** Write operations do not preserve YAML comments.
+
+### `loadout config raw unset`
+
+```
+loadout config raw unset <PATH> [-c <NAME|PATH>]
+```
+
+Removes the key at the dot-separated path. Prints `no change` if the key is not present.
+
+```sh
+loadout config raw unset strategy.package.default_backend
+```
+
+> **Note:** Write operations do not preserve YAML comments.
 
 ## Feature
 
@@ -221,8 +312,6 @@ Features are grouped by source in text mode.
 | `--source <ID>` | Filter to one source (e.g. `--source local`). |
 | `--output <FORMAT>` | `text` (default) or `json`. JSON is the full feature index keyed by canonical ID. |
 
----
-
 ### `loadout feature show`
 
 ```
@@ -237,7 +326,22 @@ dependencies, and declared resources (declarative mode only).
 | `<ID>` | Canonical feature ID, e.g. `local/nvim` or `core/git`. |
 | `--output <FORMAT>` | `text` (default) or `json`. |
 
----
+### `loadout feature edit`
+
+```
+loadout feature edit <NAME>
+```
+
+Opens the `feature.yaml` of a local feature in `$EDITOR`. Only `local` source features are editable.
+
+`<NAME>` is a bare name or a `local/`-prefixed ID:
+
+```sh
+loadout feature edit git         # opens features/git/feature.yaml
+loadout feature edit local/git   # same
+```
+
+Features from external sources (e.g. `core/node`) cannot be edited this way.
 
 ## Backend
 
@@ -255,8 +359,6 @@ directories. Built-in (Rust-native) backends are not listed; see `backends-built
 | `--source <ID>` | Filter to one source (e.g. `--source local`). |
 | `--output <FORMAT>` | `text` (default) or `json`. |
 
----
-
 ### `loadout backend show`
 
 ```
@@ -271,7 +373,20 @@ scripts (`apply`, `remove`, `status`, `env_pre`, `env_post`) are present.
 | `<ID>` | Canonical backend ID, e.g. `local/mise` or `local/npm`. |
 | `--output <FORMAT>` | `text` (default) or `json`. |
 
----
+### `loadout backend edit`
+
+```
+loadout backend edit <NAME>
+```
+
+Opens the `backend.yaml` of a local backend in `$EDITOR`. Only `local` source backends are editable.
+
+`<NAME>` is a bare name or a `local/`-prefixed ID:
+
+```sh
+loadout backend edit mise         # opens backends/mise/backend.yaml
+loadout backend edit local/mise   # same
+```
 
 ## Source
 
@@ -288,8 +403,6 @@ sources declared in `sources.yaml`.
 |---|---|
 | `--output <FORMAT>` | `text` (default) or `json`. JSON includes `id`, `kind`, `url`, `commit`, `allow`, `local_path`. |
 
----
-
 ### `loadout source show`
 
 ```
@@ -303,7 +416,13 @@ Shows details for a single source.
 | `<ID>` | `core`, `local`, or an external source ID declared in `sources.yaml`. |
 | `--output <FORMAT>` | `text` (default) or `json`. |
 
----
+### `loadout source edit`
+
+```
+loadout source edit
+```
+
+Opens `$XDG_CONFIG_HOME/loadout/sources.yaml` in `$EDITOR`. If the file does notexist, a template is created first.
 
 ## Diagnostics
 
@@ -335,8 +454,6 @@ Checks performed:
 |---|---|
 | `-c, --config <NAME\|PATH>` | Also check the specified config file for readability. |
 
----
-
 ## Shell
 
 ### `loadout completions`
@@ -359,14 +476,15 @@ loadout completions zsh > ~/.zfunc/_loadout
 loadout completions fish > ~/.config/fish/completions/loadout.fish
 ```
 
----
-
 ## Common Patterns
 
 ### First-time setup
 
 ```sh
+loadout config init linux
 loadout context set linux
+loadout config feature add git
+loadout config feature add core/node
 loadout plan         # preview
 loadout apply        # install
 eval "$(loadout activate)"
@@ -397,4 +515,29 @@ loadout state show --output json | jq '.features | keys'
 
 # Get details of a specific feature
 loadout feature show local/nvim --output json | jq '.mode'
+```
+
+### Editing configs and features
+
+```sh
+# Open the active config with $EDITOR (comments preserved)
+loadout config edit
+
+# Add/remove a feature without opening an editor
+loadout config feature add local/git
+loadout config feature remove local/git -c work
+
+# Low-level YAML access
+loadout config raw show
+loadout config raw set strategy.package.default_backend local/mise
+loadout config raw unset strategy.package.default_backend
+
+# Edit a local feature's feature.yaml directly
+loadout feature edit git
+
+# Edit a local backend's backend.yaml directly
+loadout backend edit mise
+
+# Edit sources.yaml (created from template if absent)
+loadout source edit
 ```

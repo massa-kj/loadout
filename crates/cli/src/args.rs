@@ -226,6 +226,104 @@ pub enum ConfigCommand {
 
     /// List all config files in the config directory
     List(OutputArgs),
+
+    /// Open the active config file in $EDITOR
+    Edit,
+
+    /// Create a new config file from the built-in template
+    Init(ConfigInitArgs),
+
+    /// Manage features declared in a config file
+    Feature {
+        #[command(subcommand)]
+        command: ConfigFeatureCommand,
+    },
+
+    /// Low-level YAML access (escape hatch; prefer typed commands)
+    Raw {
+        #[command(subcommand)]
+        command: ConfigRawCommand,
+    },
+}
+
+#[derive(Debug, clap::Args)]
+pub struct ConfigInitArgs {
+    /// Config name to create (e.g. `linux` → `configs/linux.yaml`)
+    pub name: String,
+}
+
+// ── config feature ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Subcommand)]
+pub enum ConfigFeatureCommand {
+    /// Add a feature to the config file
+    Add(ConfigFeatureAddArgs),
+
+    /// Remove a feature from the config file
+    Remove(ConfigFeatureRemoveArgs),
+}
+
+#[derive(Debug, clap::Args)]
+pub struct ConfigFeatureAddArgs {
+    /// Feature ID (`source/name`) or bare name (resolves to `local/<name>`)
+    pub id: String,
+
+    /// Config name or path. Defaults to the active context.
+    #[arg(short, long, value_name = "NAME|PATH")]
+    pub config: Option<String>,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct ConfigFeatureRemoveArgs {
+    /// Feature ID (`source/name`) or bare name (resolves to `local/<name>`)
+    pub id: String,
+
+    /// Config name or path. Defaults to the active context.
+    #[arg(short, long, value_name = "NAME|PATH")]
+    pub config: Option<String>,
+}
+
+// ── config raw ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Subcommand)]
+pub enum ConfigRawCommand {
+    /// Show the raw YAML content of a config file
+    Show(ConfigRawShowArgs),
+
+    /// Set a value at a dot-separated YAML path
+    Set(ConfigRawSetArgs),
+
+    /// Remove a value at a dot-separated YAML path
+    Unset(ConfigRawUnsetArgs),
+}
+
+#[derive(Debug, clap::Args)]
+pub struct ConfigRawShowArgs {
+    /// Config name or path. Defaults to the active context.
+    pub name: Option<String>,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct ConfigRawSetArgs {
+    /// Dot-separated YAML path (e.g. `profile.features.local.git`)
+    pub path: String,
+
+    /// YAML value to set (e.g. `{}`, `true`, `v1`)
+    pub value: String,
+
+    /// Config name or path. Defaults to the active context.
+    #[arg(short, long, value_name = "NAME|PATH")]
+    pub config: Option<String>,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct ConfigRawUnsetArgs {
+    /// Dot-separated YAML path to remove
+    pub path: String,
+
+    /// Config name or path. Defaults to the active context.
+    #[arg(short, long, value_name = "NAME|PATH")]
+    pub config: Option<String>,
 }
 
 #[derive(Debug, clap::Args)]
@@ -246,6 +344,15 @@ pub enum FeatureCommand {
 
     /// Show details for a specific feature
     Show(FeatureShowArgs),
+
+    /// Open a local feature's `feature.yaml` in $EDITOR
+    Edit(FeatureEditArgs),
+}
+
+#[derive(Debug, clap::Args)]
+pub struct FeatureEditArgs {
+    /// Feature name or canonical ID. Bare name resolves to `local/<name>`.
+    pub name: String,
 }
 
 #[derive(Debug, clap::Args)]
@@ -276,6 +383,15 @@ pub enum BackendCommand {
 
     /// Show details for a specific backend
     Show(BackendShowArgs),
+
+    /// Open a local backend's `backend.yaml` in $EDITOR
+    Edit(BackendEditArgs),
+}
+
+#[derive(Debug, clap::Args)]
+pub struct BackendEditArgs {
+    /// Backend name or canonical ID. Bare name resolves to `local/<name>`.
+    pub name: String,
 }
 
 #[derive(Debug, clap::Args)]
@@ -306,6 +422,9 @@ pub enum SourceCommand {
 
     /// Show details for a specific source
     Show(SourceShowArgs),
+
+    /// Open `sources.yaml` in $EDITOR (creates a template if absent)
+    Edit,
 }
 
 #[derive(Debug, clap::Args)]

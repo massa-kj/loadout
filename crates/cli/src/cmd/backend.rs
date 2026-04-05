@@ -1,14 +1,18 @@
 // crates/cli/src/cmd/backend.rs — `loadout backend` subcommand dispatch and implementations
 
+use std::path::PathBuf;
 use std::process;
 
-use crate::args::{BackendCommand, BackendListArgs, BackendShowArgs, OutputFormat};
+use crate::args::{
+    BackendCommand, BackendEditArgs, BackendListArgs, BackendShowArgs, OutputFormat,
+};
 use crate::context::build_app_context;
 
 pub fn run(cmd: BackendCommand) {
     match cmd {
         BackendCommand::List(args) => list(args),
         BackendCommand::Show(args) => show(args),
+        BackendCommand::Edit(args) => edit(args),
     }
 }
 
@@ -77,4 +81,31 @@ fn present(exists: bool) -> &'static str {
     } else {
         "absent"
     }
+}
+
+// ── edit ─────────────────────────────────────────────────────────────────────
+
+fn edit(args: BackendEditArgs) {
+    let ctx = build_app_context();
+
+    let id = if args.name.contains('/') {
+        if !args.name.starts_with("local/") {
+            eprintln!(
+                "error: only 'local' source backends are editable (got '{}')",
+                args.name
+            );
+            process::exit(1);
+        }
+        args.name.clone()
+    } else {
+        format!("local/{}", args.name)
+    };
+
+    let detail = app::show_backend(&ctx, &id).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        process::exit(1);
+    });
+
+    let backend_yaml = PathBuf::from(&detail.dir).join("backend.yaml");
+    super::editor::open(&backend_yaml);
 }

@@ -7,6 +7,7 @@ pub mod completions;
 pub mod config;
 pub mod context;
 pub mod doctor;
+pub(crate) mod editor;
 pub mod feature;
 pub mod plan;
 pub mod source;

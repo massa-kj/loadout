@@ -9,6 +9,7 @@ pub fn run(cmd: SourceCommand) {
     match cmd {
         SourceCommand::List(args) => list(args),
         SourceCommand::Show(args) => show(args),
+        SourceCommand::Edit => edit(),
     }
 }
 
@@ -68,4 +69,43 @@ fn show(args: SourceShowArgs) {
             }
         }
     }
+}
+
+// ── edit ─────────────────────────────────────────────────────────────────────
+
+/// Template written when `sources.yaml` does not exist yet.
+const SOURCES_TEMPLATE: &str = "\
+# loadout sources
+#
+# Declare external plugin sources here.
+# Each source provides features and/or backends.
+#
+# Example:
+#   - kind: git
+#     id: myorg
+#     url: https://github.com/myorg/loadout-plugins
+#     allow:
+#       - features: \"*\"
+#       - backends: \"*\"
+";
+
+fn edit() {
+    let ctx = build_app_context();
+    let sources_path = ctx.dirs.config_home.join("sources.yaml");
+
+    // Create a template if the file does not exist yet.
+    if !sources_path.exists() {
+        if let Some(parent) = sources_path.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                eprintln!("error: failed to create directory: {e}");
+                process::exit(1);
+            }
+        }
+        if let Err(e) = std::fs::write(&sources_path, SOURCES_TEMPLATE) {
+            eprintln!("error: failed to create sources.yaml: {e}");
+            process::exit(1);
+        }
+    }
+
+    super::editor::open(&sources_path);
 }

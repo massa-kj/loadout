@@ -43,6 +43,11 @@ pub enum IoError {
         #[source]
         source: serde_json::Error,
     },
+    #[error("failed to serialize YAML: {source}")]
+    SerializeYaml {
+        #[source]
+        source: serde_yaml::Error,
+    },
     #[error("failed to rename {from} to {to}: {source}")]
     Rename {
         from: std::path::PathBuf,
@@ -88,6 +93,37 @@ pub fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), IoE
 
     let serialized =
         serde_json::to_string_pretty(value).map_err(|e| IoError::Serialize { source: e })?;
+
+    let tmp_path = path.with_extension(format!(
+        "{}.tmp",
+        path.extension().and_then(|e| e.to_str()).unwrap_or("")
+    ));
+
+    std::fs::write(&tmp_path, &serialized).map_err(|e| IoError::Write {
+        path: tmp_path.clone(),
+        source: e,
+    })?;
+
+    std::fs::rename(&tmp_path, path).map_err(|e| IoError::Rename {
+        from: tmp_path,
+        to: path.to_path_buf(),
+        source: e,
+    })?;
+
+    Ok(())
+}
+
+/// Write a value as YAML atomically.
+///
+/// Serializes `value` to YAML using `serde_yaml`, then writes via the same
+/// tmp-rename strategy as [`write_json_atomic`].
+pub fn write_yaml_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), IoError> {
+    if let Some(parent) = path.parent() {
+        make_dirs(parent)?;
+    }
+
+    let serialized =
+        serde_yaml::to_string(value).map_err(|e| IoError::SerializeYaml { source: e })?;
 
     let tmp_path = path.with_extension(format!(
         "{}.tmp",

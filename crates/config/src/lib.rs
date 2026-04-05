@@ -53,6 +53,9 @@
 //! See: `docs/specs/data/profile.md`, `docs/specs/data/strategy.md`,
 //!      `docs/specs/data/sources.md`
 
+pub mod write;
+pub use write::{add_feature, create_config, raw_set, raw_show, raw_unset, remove_feature};
+
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -79,6 +82,9 @@ pub enum ConfigError {
 
     #[error("invalid sources: {reason}")]
     InvalidSources { reason: String },
+
+    #[error("config file already exists: {}", path.display())]
+    AlreadyExists { path: std::path::PathBuf },
 }
 
 // ─── Raw profile types (config-crate-local) ─────────────────────────────────
