@@ -58,6 +58,15 @@ fn show(args: SourceShowArgs) {
             if let Some(url) = &detail.url {
                 println!("url:        {url}");
             }
+            if let Some(ref_spec) = &detail.ref_spec {
+                println!("ref:        {ref_spec}");
+            }
+            if let Some(resolved_commit) = &detail.resolved_commit {
+                println!("commit:     {resolved_commit}");
+            }
+            if let Some(fetched_at) = &detail.fetched_at {
+                println!("fetched_at: {fetched_at}");
+            }
             if let Some(allow) = &detail.allow {
                 println!("allow:      {allow}");
             }

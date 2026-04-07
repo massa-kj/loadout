@@ -83,6 +83,16 @@ pub struct SourceSummary {
     pub allow: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_path: Option<String>,
+    /// Human-readable ref label: `"branch:main"` / `"tag:v1.0"` / `"commit:<hash>"`.
+    /// Set only for `type: git` sources that declare a `ref:` field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ref_spec: Option<String>,
+    /// Full commit hash from `sources.lock.yaml`. `None` if the source is not locked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_commit: Option<String>,
+    /// UTC RFC3339 timestamp of the last successful fetch. `None` if not yet locked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fetched_at: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -253,6 +263,7 @@ pub fn show_backend(ctx: &AppContext, id: &str) -> Result<BackendDetail, AppErro
 /// List all sources: implicit (`core`, `local`) + declared external sources.
 pub fn list_sources(ctx: &AppContext) -> Result<Vec<SourceSummary>, AppError> {
     let sources = load_sources_optional(ctx)?;
+    let lock = load_lock_optional(ctx);
 
     let mut entries = vec![
         SourceSummary {
@@ -261,6 +272,9 @@ pub fn list_sources(ctx: &AppContext) -> Result<Vec<SourceSummary>, AppError> {
             url: None,
             allow: Some("*".to_string()),
             local_path: None,
+            ref_spec: None,
+            resolved_commit: None,
+            fetched_at: None,
         },
         SourceSummary {
             id: "local".to_string(),
@@ -268,18 +282,14 @@ pub fn list_sources(ctx: &AppContext) -> Result<Vec<SourceSummary>, AppError> {
             url: None,
             allow: Some("*".to_string()),
             local_path: Some(ctx.local_root.display().to_string()),
+            ref_spec: None,
+            resolved_commit: None,
+            fetched_at: None,
         },
     ];
 
     for entry in &sources.sources {
-        let (kind, local_path) = source_kind_and_path(ctx, entry);
-        entries.push(SourceSummary {
-            id: entry.id.clone(),
-            kind,
-            url: entry.url.clone(),
-            allow: format_allow(&entry.allow),
-            local_path: Some(local_path),
-        });
+        entries.push(build_external_source_summary(ctx, entry, &lock));
     }
 
     Ok(entries)
@@ -302,6 +312,9 @@ pub fn show_source(ctx: &AppContext, id: &str) -> Result<SourceSummary, AppError
             url: None,
             allow: Some("*".to_string()),
             local_path: None,
+            ref_spec: None,
+            resolved_commit: None,
+            fetched_at: None,
         }),
         "local" => Ok(SourceSummary {
             id: "local".to_string(),
@@ -309,6 +322,9 @@ pub fn show_source(ctx: &AppContext, id: &str) -> Result<SourceSummary, AppError
             url: None,
             allow: Some("*".to_string()),
             local_path: Some(ctx.local_root.display().to_string()),
+            ref_spec: None,
+            resolved_commit: None,
+            fetched_at: None,
         }),
         other => {
             let sources = load_sources_optional(ctx)?;
@@ -319,14 +335,8 @@ pub fn show_source(ctx: &AppContext, id: &str) -> Result<SourceSummary, AppError
                 .ok_or_else(|| AppError::SourceNotFound {
                     id: other.to_string(),
                 })?;
-            let (kind, local_path) = source_kind_and_path(ctx, entry);
-            Ok(SourceSummary {
-                id: entry.id.clone(),
-                kind,
-                url: entry.url.clone(),
-                allow: format_allow(&entry.allow),
-                local_path: Some(local_path),
-            })
+            let lock = load_lock_optional(ctx);
+            Ok(build_external_source_summary(ctx, entry, &lock))
         }
     }
 }
@@ -531,5 +541,93 @@ fn source_kind_and_path(ctx: &AppContext, entry: &config::SourceEntry) -> (Strin
             let local_path = entry.path.clone().unwrap_or_else(|| entry.id.clone());
             (kind, local_path)
         }
+    }
+}
+
+/// Build a `SourceSummary` for an external (non-implicit) source entry.
+///
+/// Looks up the lock entry for `type: git` sources to populate
+/// `resolved_commit` and `fetched_at`.
+fn build_external_source_summary(
+    ctx: &AppContext,
+    entry: &config::SourceEntry,
+    lock: &config::SourcesLock,
+) -> SourceSummary {
+    let (kind, local_path) = source_kind_and_path(ctx, entry);
+    let ref_spec = ref_spec_label(&entry.source_ref);
+    let lock_entry = lock.sources.get(&entry.id);
+    SourceSummary {
+        id: entry.id.clone(),
+        kind,
+        url: entry.url.clone(),
+        allow: format_allow(&entry.allow),
+        local_path: Some(local_path),
+        ref_spec,
+        resolved_commit: lock_entry.map(|l| l.resolved_commit.clone()),
+        fetched_at: lock_entry.map(|l| l.fetched_at.clone()),
+    }
+}
+
+/// Format a `SourceRef` into a human-readable label.
+///
+/// Returns `"branch:<name>"`, `"tag:<name>"`, or `"commit:<hash>"`,
+/// depending on which field is set.
+/// Returns `None` if the ref is absent or all fields are unset.
+fn ref_spec_label(source_ref: &Option<config::SourceRef>) -> Option<String> {
+    source_ref.as_ref().and_then(|r| {
+        r.branch
+            .as_ref()
+            .map(|b| format!("branch:{b}"))
+            .or_else(|| r.tag.as_ref().map(|t| format!("tag:{t}")))
+            .or_else(|| r.commit.as_ref().map(|c| format!("commit:{c}")))
+    })
+}
+
+/// Load the sources lock file; return an empty lock on absence or error.
+///
+/// The lock file is advisory for display purposes; absence is not an error.
+fn load_lock_optional(ctx: &AppContext) -> config::SourcesLock {
+    config::load_sources_lock(&ctx.sources_lock_path()).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ref_spec_label_branch() {
+        let r = Some(config::SourceRef {
+            branch: Some("main".into()),
+            ..Default::default()
+        });
+        assert_eq!(ref_spec_label(&r), Some("branch:main".to_string()));
+    }
+
+    #[test]
+    fn ref_spec_label_tag() {
+        let r = Some(config::SourceRef {
+            tag: Some("v1.0".into()),
+            ..Default::default()
+        });
+        assert_eq!(ref_spec_label(&r), Some("tag:v1.0".to_string()));
+    }
+
+    #[test]
+    fn ref_spec_label_commit() {
+        let r = Some(config::SourceRef {
+            commit: Some("abc123def456".into()),
+            ..Default::default()
+        });
+        assert_eq!(ref_spec_label(&r), Some("commit:abc123def456".to_string()));
+    }
+
+    #[test]
+    fn ref_spec_label_none() {
+        assert_eq!(ref_spec_label(&None), None);
+    }
+
+    #[test]
+    fn ref_spec_label_empty_struct() {
+        assert_eq!(ref_spec_label(&Some(config::SourceRef::default())), None);
     }
 }

@@ -137,6 +137,14 @@ impl AppContext {
         self.dirs.config_home.join("sources.yaml")
     }
 
+    /// Absolute path to the sources lock file: `{config_home}/sources.lock.yaml`.
+    ///
+    /// Lives in the same directory as `sources.yaml`.
+    /// May not exist; callers should treat absence as an empty `SourcesLock`.
+    pub fn sources_lock_path(&self) -> PathBuf {
+        self.dirs.config_home.join("sources.lock.yaml")
+    }
+
     /// Absolute path to the ephemeral env plan cache: `{cache_home}/env_plan.json`.
     ///
     /// Written by `execute()` on successful apply; read by `activate()`.
