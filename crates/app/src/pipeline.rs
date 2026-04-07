@@ -101,14 +101,22 @@ pub(crate) fn build_source_roots(
     }];
 
     for entry in &sources.sources {
-        roots.push(feature_index::SourceRoot {
-            source_id: entry.id.clone(),
-            features_dir: ctx
+        let features_dir = match entry.source_type {
+            config::SourceType::Git => ctx
                 .dirs
                 .data_home
                 .join("sources")
                 .join(&entry.id)
                 .join("features"),
+            config::SourceType::Path => {
+                // path is pre-resolved to absolute by config::load_sources.
+                let Some(ref p) = entry.path else { continue };
+                std::path::Path::new(p).join("features")
+            }
+        };
+        roots.push(feature_index::SourceRoot {
+            source_id: entry.id.clone(),
+            features_dir,
         });
     }
 

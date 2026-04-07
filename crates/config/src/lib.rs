@@ -63,7 +63,10 @@ use serde::Deserialize;
 
 pub use model::{
     profile::{Profile, ProfileFeatureConfig},
-    sources::{AllowList, AllowSpec, SourceEntry, SourceType, SourcesSpec, WildcardAll},
+    sources::{
+        AllowList, AllowSpec, SourceEntry, SourceLockEntry, SourceRef, SourceType, SourcesLock,
+        SourcesSpec, WildcardAll,
+    },
     strategy::{BackendOverride, BackendStrategy, FsStrategy, Strategy},
 };
 use thiserror::Error;
@@ -364,17 +367,48 @@ pub fn load_config(path: &Path) -> Result<(Profile, Strategy), ConfigError> {
 const RESERVED_SOURCE_IDS: &[&str] =
     &["core", "local", "official", "sample", "example", "external"];
 
-/// Load and validate a sources spec from a YAML file.
+/// Load, validate, and path-resolve a sources spec from a YAML file.
+///
+/// For `type: path` entries, the `path` field is resolved to an absolute path
+/// relative to the directory containing `sources.yaml`.
+/// `~`-prefixed paths are expanded using the user's home directory.
 pub fn load_sources(path: &Path) -> Result<SourcesSpec, ConfigError> {
     let raw: SourcesSpec = io::load_yaml(path)?;
-    validate_sources(raw)
+    let sources_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    validate_and_resolve_sources(raw, sources_dir)
 }
 
-fn validate_sources(spec: SourcesSpec) -> Result<SourcesSpec, ConfigError> {
+/// Load a sources lock file.
+///
+/// Returns an empty `SourcesLock` if the file does not exist.
+pub fn load_sources_lock(path: &Path) -> Result<SourcesLock, ConfigError> {
+    if !path.exists() {
+        return Ok(SourcesLock::default());
+    }
+    let lock: SourcesLock = io::load_yaml(path)?;
+    Ok(lock)
+}
+
+/// Write a sources spec to a YAML file atomically.
+pub fn save_sources(path: &Path, spec: &SourcesSpec) -> Result<(), ConfigError> {
+    io::write_yaml_atomic(path, spec)?;
+    Ok(())
+}
+
+/// Write a sources lock file atomically.
+pub fn save_sources_lock(path: &Path, lock: &SourcesLock) -> Result<(), ConfigError> {
+    io::write_yaml_atomic(path, lock)?;
+    Ok(())
+}
+
+fn validate_and_resolve_sources(
+    mut spec: SourcesSpec,
+    sources_dir: &Path,
+) -> Result<SourcesSpec, ConfigError> {
     let mut seen_ids: HashSet<String> = HashSet::new();
 
-    for entry in &spec.sources {
-        // Reserved ID check
+    for entry in &mut spec.sources {
+        // Reserved ID check.
         if RESERVED_SOURCE_IDS.contains(&entry.id.as_str()) {
             return Err(ConfigError::InvalidSources {
                 reason: format!(
@@ -384,21 +418,111 @@ fn validate_sources(spec: SourcesSpec) -> Result<SourcesSpec, ConfigError> {
             });
         }
 
-        // Uniqueness check
+        // Uniqueness check.
         if !seen_ids.insert(entry.id.clone()) {
             return Err(ConfigError::InvalidSources {
                 reason: format!("duplicate source id '{}'", entry.id),
             });
         }
 
-        // URL must not be empty
-        if entry.url.is_empty() {
-            return Err(ConfigError::InvalidSources {
-                reason: format!("source '{}': url must not be empty", entry.id),
-            });
+        match entry.source_type {
+            SourceType::Git => {
+                // url required and non-empty.
+                match &entry.url {
+                    None => {
+                        return Err(ConfigError::InvalidSources {
+                            reason: format!("source '{}': url is required for type: git", entry.id),
+                        });
+                    }
+                    Some(u) if u.is_empty() => {
+                        return Err(ConfigError::InvalidSources {
+                            reason: format!("source '{}': url is required for type: git", entry.id),
+                        });
+                    }
+                    _ => {}
+                }
+
+                // path (git repo subpath): no absolute path, no `..` components.
+                if let Some(ref p) = entry.path {
+                    if p.is_empty() {
+                        return Err(ConfigError::InvalidSources {
+                            reason: format!("source '{}': path must not be empty", entry.id),
+                        });
+                    }
+                    let subpath = std::path::Path::new(p.as_str());
+                    if subpath.is_absolute() {
+                        return Err(ConfigError::InvalidSources {
+                            reason: format!(
+                                "source '{}': path must be relative (no absolute paths in git repo subpath)",
+                                entry.id
+                            ),
+                        });
+                    }
+                    if subpath
+                        .components()
+                        .any(|c| c == std::path::Component::ParentDir)
+                    {
+                        return Err(ConfigError::InvalidSources {
+                            reason: format!(
+                                "source '{}': path must not contain '..' components",
+                                entry.id
+                            ),
+                        });
+                    }
+                }
+
+                // ref: exactly one of branch, tag, or commit.
+                if let Some(ref r) = entry.source_ref {
+                    let set_count = [r.branch.is_some(), r.tag.is_some(), r.commit.is_some()]
+                        .iter()
+                        .filter(|&&b| b)
+                        .count();
+                    if set_count != 1 {
+                        return Err(ConfigError::InvalidSources {
+                            reason: format!(
+                                "source '{}': ref must specify exactly one of branch, tag, or commit",
+                                entry.id
+                            ),
+                        });
+                    }
+                }
+            }
+            SourceType::Path => {
+                // url must not be specified for type:path.
+                if entry.url.is_some() {
+                    return Err(ConfigError::InvalidSources {
+                        reason: format!(
+                            "source '{}': url must not be specified for type: path",
+                            entry.id
+                        ),
+                    });
+                }
+
+                // path required and non-empty.
+                let raw_path = match &entry.path {
+                    None => {
+                        return Err(ConfigError::InvalidSources {
+                            reason: format!(
+                                "source '{}': path is required for type: path",
+                                entry.id
+                            ),
+                        });
+                    }
+                    Some(p) if p.is_empty() => {
+                        return Err(ConfigError::InvalidSources {
+                            reason: format!("source '{}': path must not be empty", entry.id),
+                        });
+                    }
+                    Some(p) => p.clone(),
+                };
+
+                // Resolve to absolute path.
+                let resolved = resolve_source_path(&raw_path, sources_dir);
+                entry.path = Some(resolved.display().to_string());
+            }
         }
 
-        // Validate allow-list names if Detailed
+        // Validate allow-list names if Detailed (applies to both source types).
         if let Some(AllowSpec::Detailed(ref detail)) = entry.allow {
             if let Some(AllowList::Names(ref names)) = detail.features {
                 for n in names {
@@ -428,6 +552,61 @@ fn validate_sources(spec: SourcesSpec) -> Result<SourcesSpec, ConfigError> {
     }
 
     Ok(spec)
+}
+
+/// Resolve a `type: path` source path to an absolute `PathBuf`.
+///
+/// Resolution rules (in order):
+/// 1. `~` or `~/...` — expanded against the user's home directory.
+/// 2. Absolute path — used as-is.
+/// 3. Relative path — resolved against `sources_dir` (parent of `sources.yaml`).
+fn resolve_source_path(raw: &str, sources_dir: &Path) -> std::path::PathBuf {
+    // Home directory expansion.
+    if raw == "~" {
+        if let Some(home) = home_dir() {
+            return home;
+        }
+    } else if let Some(rest) = raw.strip_prefix("~/") {
+        if let Some(home) = home_dir() {
+            return home.join(rest);
+        }
+    }
+
+    let p = std::path::Path::new(raw);
+    let joined = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        sources_dir.join(p)
+    };
+    // Normalize away `.` components without requiring the path to exist.
+    normalize_path(&joined)
+}
+
+/// Remove `.` components from a path without hitting the filesystem.
+fn normalize_path(path: &std::path::Path) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut out = std::path::PathBuf::new();
+    for comp in path.components() {
+        match comp {
+            Component::CurDir => {}
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Return the user's home directory from the environment.
+fn home_dir() -> Option<std::path::PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var("USERPROFILE")
+            .ok()
+            .map(std::path::PathBuf::from)
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var("HOME").ok().map(std::path::PathBuf::from)
+    }
 }
 
 #[cfg(test)]
@@ -882,5 +1061,121 @@ profile:
         let (profile, _) = load_config(&p).unwrap();
         assert!(profile.features.contains_key("core/git"));
         assert_eq!(profile.features.len(), 1);
+    }
+
+    // ── Additional Sources tests ───────────────────────────────────────────
+
+    #[test]
+    fn sources_type_git_with_ref_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "sources:\n  - id: ext\n    type: git\n    url: https://x.com\n    ref:\n      branch: main\n";
+        let p = write_yaml_file(dir.path(), "sources.yaml", yaml);
+        let spec = load_sources(&p).unwrap();
+        let r = spec.sources[0].source_ref.as_ref().unwrap();
+        assert_eq!(r.branch.as_deref(), Some("main"));
+        assert!(r.tag.is_none());
+        assert!(r.commit.is_none());
+    }
+
+    #[test]
+    fn sources_type_git_ref_multiple_fields_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "sources:\n  - id: ext\n    type: git\n    url: https://x.com\n    ref:\n      branch: main\n      tag: v1\n";
+        let p = write_yaml_file(dir.path(), "sources.yaml", yaml);
+        let err = load_sources(&p).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidSources { .. }));
+    }
+
+    #[test]
+    fn sources_type_git_dotdot_subpath_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml =
+            "sources:\n  - id: ext\n    type: git\n    url: https://x.com\n    path: ../sibling\n";
+        let p = write_yaml_file(dir.path(), "sources.yaml", yaml);
+        let err = load_sources(&p).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidSources { .. }));
+    }
+
+    #[test]
+    fn sources_type_git_absolute_subpath_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml =
+            "sources:\n  - id: ext\n    type: git\n    url: https://x.com\n    path: /absolute\n";
+        let p = write_yaml_file(dir.path(), "sources.yaml", yaml);
+        let err = load_sources(&p).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidSources { .. }));
+    }
+
+    #[test]
+    fn sources_type_path_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        // Use absolute path so resolution doesn't depend on tempdir.
+        let yaml = format!(
+            "sources:\n  - id: mylab\n    type: path\n    path: {}\n",
+            dir.path().display()
+        );
+        let p = write_yaml_file(dir.path(), "sources.yaml", &yaml);
+        let spec = load_sources(&p).unwrap();
+        assert_eq!(spec.sources[0].source_type, SourceType::Path);
+        // After resolution, path is absolute (was already absolute).
+        assert!(spec.sources[0].path.as_deref().unwrap().starts_with('/'));
+    }
+
+    #[test]
+    fn sources_type_path_no_path_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "sources:\n  - id: mylab\n    type: path\n";
+        let p = write_yaml_file(dir.path(), "sources.yaml", yaml);
+        let err = load_sources(&p).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidSources { .. }));
+    }
+
+    #[test]
+    fn sources_type_path_with_url_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = format!(
+            "sources:\n  - id: mylab\n    type: path\n    path: {}\n    url: https://x.com\n",
+            dir.path().display()
+        );
+        let p = write_yaml_file(dir.path(), "sources.yaml", &yaml);
+        let err = load_sources(&p).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidSources { .. }));
+    }
+
+    #[test]
+    fn sources_type_path_relative_resolved_against_sources_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        // Create the subdir so it's a plausible path (resolve doesn't check existence).
+        let yaml = "sources:\n  - id: mylab\n    type: path\n    path: ./subdir\n";
+        let p = write_yaml_file(dir.path(), "sources.yaml", yaml);
+        let spec = load_sources(&p).unwrap();
+        let resolved = spec.sources[0].path.as_deref().unwrap();
+        let expected = dir.path().join("subdir").display().to_string();
+        assert_eq!(resolved, expected);
+    }
+
+    #[test]
+    fn sources_lock_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "sources:\n  community:\n    resolved_commit: abcdef1234567890abcdef1234567890abcdef12\n    fetched_at: '2026-04-07T00:00:00Z'\n    manifest_hash: 'sha256:abc'\n";
+        let p = write_yaml_file(dir.path(), "sources.lock.yaml", yaml);
+        let lock = load_sources_lock(&p).unwrap();
+        assert_eq!(
+            lock.sources["community"].resolved_commit,
+            "abcdef1234567890abcdef1234567890abcdef12"
+        );
+        // Round-trip: save and reload.
+        let p2 = dir.path().join("sources2.lock.yaml");
+        save_sources_lock(&p2, &lock).unwrap();
+        let lock2 = load_sources_lock(&p2).unwrap();
+        assert_eq!(lock, lock2);
+    }
+
+    #[test]
+    fn sources_lock_absent_returns_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("sources.lock.yaml");
+        let lock = load_sources_lock(&p).unwrap();
+        assert!(lock.sources.is_empty());
     }
 }

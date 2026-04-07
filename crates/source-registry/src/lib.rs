@@ -45,7 +45,7 @@ use std::path::{Path, PathBuf};
 
 use model::{
     id::{CanonicalBackendId, CanonicalFeatureId},
-    sources::{AllowList, AllowSpec, SourceEntry, SourcesSpec},
+    sources::{AllowList, AllowSpec, SourceEntry, SourceType, SourcesSpec},
 };
 use thiserror::Error;
 
@@ -183,20 +183,28 @@ impl SourceRegistry {
         match source_id {
             "local" => Ok(self.config_home.join(kind.dir_segment()).join(name)),
             ext => {
-                // External source must be declared. `core` has no filesystem path
-                // (it is embedded in the binary) and is not in `sources`, so it
-                // also falls here and returns UnknownSource.
-                if !self.sources.iter().any(|e| e.id == ext) {
-                    return Err(RegistryError::UnknownSource {
-                        source_id: ext.to_string(),
-                    });
+                // `core` has no filesystem path (embedded in binary) and is not in
+                // `sources`, so it also falls here and returns UnknownSource.
+                let entry = self.find_source(ext)?;
+                match entry.source_type {
+                    SourceType::Git => Ok(self
+                        .data_home
+                        .join("sources")
+                        .join(ext)
+                        .join(kind.dir_segment())
+                        .join(name)),
+                    SourceType::Path => {
+                        // path is pre-resolved to absolute by config::load_sources.
+                        let base =
+                            entry
+                                .path
+                                .as_deref()
+                                .ok_or_else(|| RegistryError::UnknownSource {
+                                    source_id: ext.to_string(),
+                                })?;
+                        Ok(PathBuf::from(base).join(kind.dir_segment()).join(name))
+                    }
                 }
-                Ok(self
-                    .data_home
-                    .join("sources")
-                    .join(ext)
-                    .join(kind.dir_segment())
-                    .join(name))
             }
         }
     }
@@ -316,8 +324,9 @@ mod tests {
         model::sources::SourceEntry {
             id: id.into(),
             source_type: SourceType::Git,
-            url: format!("https://example.com/{id}"),
-            commit: None,
+            url: Some(format!("https://example.com/{id}")),
+            source_ref: None,
+            path: None,
             allow,
         }
     }
@@ -549,6 +558,49 @@ mod tests {
     fn unknown_source_in_check_backend_errors() {
         let r = empty_registry();
         let err = r.check_backend_allowed(&backend("ghost/brew")).unwrap_err();
+        assert!(matches!(err, RegistryError::UnknownSource { .. }));
+    }
+
+    // ── type: path sources ────────────────────────────────────────────────────
+
+    fn path_source_entry(id: &str, resolved_path: &str) -> model::sources::SourceEntry {
+        model::sources::SourceEntry {
+            id: id.into(),
+            source_type: SourceType::Path,
+            url: None,
+            source_ref: None,
+            path: Some(resolved_path.into()),
+            allow: Some(AllowSpec::All(WildcardAll)),
+        }
+    }
+
+    #[test]
+    fn feature_dir_type_path() {
+        let r = registry_with(spec_with(vec![path_source_entry("mylab", "/home/u/mylab")]));
+        let dir = r.feature_dir(&feature("mylab/mytool")).unwrap();
+        assert_eq!(dir, PathBuf::from("/home/u/mylab/features/mytool"));
+    }
+
+    #[test]
+    fn backend_dir_type_path() {
+        let r = registry_with(spec_with(vec![path_source_entry("mylab", "/home/u/mylab")]));
+        let dir = r.backend_dir(&backend("mylab/mybrew")).unwrap();
+        assert_eq!(dir, PathBuf::from("/home/u/mylab/backends/mybrew"));
+    }
+
+    #[test]
+    fn type_path_source_without_path_field_returns_unknown_source() {
+        // Represents an internally inconsistent entry (should not occur after validation).
+        let entry = model::sources::SourceEntry {
+            id: "mylab".into(),
+            source_type: SourceType::Path,
+            url: None,
+            source_ref: None,
+            path: None,
+            allow: None,
+        };
+        let r = registry_with(spec_with(vec![entry]));
+        let err = r.feature_dir(&feature("mylab/mytool")).unwrap_err();
         assert!(matches!(err, RegistryError::UnknownSource { .. }));
     }
 }

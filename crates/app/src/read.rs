@@ -72,15 +72,13 @@ pub struct BackendDetail {
 // Source types
 // ---------------------------------------------------------------------------
 
-/// Summary of a single source entry (implicit or git) for list/show output.
+/// Summary of a single source entry (implicit or external) for list/show output.
 #[derive(Debug, Serialize)]
 pub struct SourceSummary {
     pub id: String,
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub commit: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -261,7 +259,6 @@ pub fn list_sources(ctx: &AppContext) -> Result<Vec<SourceSummary>, AppError> {
             id: "core".to_string(),
             kind: "implicit".to_string(),
             url: None,
-            commit: None,
             allow: Some("*".to_string()),
             local_path: None,
         },
@@ -269,25 +266,17 @@ pub fn list_sources(ctx: &AppContext) -> Result<Vec<SourceSummary>, AppError> {
             id: "local".to_string(),
             kind: "implicit".to_string(),
             url: None,
-            commit: None,
             allow: Some("*".to_string()),
             local_path: Some(ctx.local_root.display().to_string()),
         },
     ];
 
     for entry in &sources.sources {
-        let local_path = ctx
-            .dirs
-            .data_home
-            .join("sources")
-            .join(&entry.id)
-            .display()
-            .to_string();
+        let (kind, local_path) = source_kind_and_path(ctx, entry);
         entries.push(SourceSummary {
             id: entry.id.clone(),
-            kind: "git".to_string(),
-            url: Some(entry.url.clone()),
-            commit: entry.commit.clone(),
+            kind,
+            url: entry.url.clone(),
             allow: format_allow(&entry.allow),
             local_path: Some(local_path),
         });
@@ -311,7 +300,6 @@ pub fn show_source(ctx: &AppContext, id: &str) -> Result<SourceSummary, AppError
             id: "core".to_string(),
             kind: "implicit".to_string(),
             url: None,
-            commit: None,
             allow: Some("*".to_string()),
             local_path: None,
         }),
@@ -319,7 +307,6 @@ pub fn show_source(ctx: &AppContext, id: &str) -> Result<SourceSummary, AppError
             id: "local".to_string(),
             kind: "implicit".to_string(),
             url: None,
-            commit: None,
             allow: Some("*".to_string()),
             local_path: Some(ctx.local_root.display().to_string()),
         }),
@@ -332,18 +319,11 @@ pub fn show_source(ctx: &AppContext, id: &str) -> Result<SourceSummary, AppError
                 .ok_or_else(|| AppError::SourceNotFound {
                     id: other.to_string(),
                 })?;
-            let local_path = ctx
-                .dirs
-                .data_home
-                .join("sources")
-                .join(&entry.id)
-                .display()
-                .to_string();
+            let (kind, local_path) = source_kind_and_path(ctx, entry);
             Ok(SourceSummary {
                 id: entry.id.clone(),
-                kind: "git".to_string(),
-                url: Some(entry.url.clone()),
-                commit: entry.commit.clone(),
+                kind,
+                url: entry.url.clone(),
                 allow: format_allow(&entry.allow),
                 local_path: Some(local_path),
             })
@@ -527,6 +507,29 @@ fn format_allow(allow: &Option<model::sources::AllowSpec>) -> Option<String> {
                     .collect::<Vec<_>>()
                     .join(" "),
             )
+        }
+    }
+}
+
+/// Return the `kind` label and resolved `local_path` string for an external source entry.
+fn source_kind_and_path(ctx: &AppContext, entry: &config::SourceEntry) -> (String, String) {
+    match entry.source_type {
+        config::SourceType::Git => {
+            let kind = "git".to_string();
+            let local_path = ctx
+                .dirs
+                .data_home
+                .join("sources")
+                .join(&entry.id)
+                .display()
+                .to_string();
+            (kind, local_path)
+        }
+        config::SourceType::Path => {
+            let kind = "path".to_string();
+            // path is pre-resolved to absolute by config::load_sources.
+            let local_path = entry.path.clone().unwrap_or_else(|| entry.id.clone());
+            (kind, local_path)
         }
     }
 }

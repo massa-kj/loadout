@@ -58,9 +58,6 @@ fn show(args: SourceShowArgs) {
             if let Some(url) = &detail.url {
                 println!("url:        {url}");
             }
-            if let Some(commit) = &detail.commit {
-                println!("commit:     {commit}");
-            }
             if let Some(allow) = &detail.allow {
                 println!("allow:      {allow}");
             }
@@ -80,13 +77,27 @@ const SOURCES_TEMPLATE: &str = "\
 # Declare external plugin sources here.
 # Each source provides features and/or backends.
 #
-# Example:
-#   - kind: git
-#     id: myorg
-#     url: https://github.com/myorg/loadout-plugins
+# type: git — clone a git repository as a source
+# type: path — use a local directory as a source
+#
+# Examples:
+#
+#   - id: community
+#     type: git
+#     url: https://github.com/example/loadout-community
+#     ref:
+#       branch: main
 #     allow:
-#       - features: \"*\"
-#       - backends: \"*\"
+#       features: \"*\"
+#       backends: \"*\"
+#
+#   - id: mylab
+#     type: path
+#     path: ../loadout-mylab
+#     allow:
+#       features: \"*\"
+
+sources: []
 ";
 
 fn edit() {
