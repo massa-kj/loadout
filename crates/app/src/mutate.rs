@@ -226,19 +226,75 @@ pub fn source_add_path(
         .into());
     }
 
+    // Reject if the path resolves to the same real directory as the implicit
+    // local source root. Canonicalize resolves symlinks, so alias registrations
+    // via different symlink paths are also caught.
+    if let Ok(real_local) = ctx.local_root.canonicalize() {
+        if let Ok(real_resolved) = resolved.canonicalize() {
+            if real_resolved == real_local {
+                return Err(AppError::PathSourceIsLocalRoot {
+                    path: path_str.to_string(),
+                });
+            }
+        }
+    }
+
     let resolved_id = id.map_or_else(|| derive_id_from_path(&resolved), str::to_string);
     validate_source_id(ctx, &resolved_id)?;
+
+    // Determine the value written to sources.yaml.
+    //
+    // - Absolute paths  : canonicalize via the filesystem to strip `..` components
+    //   and resolve symlinks to their real target. The path is known to exist here,
+    //   so canonicalize should not fail; the raw string is kept as a fallback.
+    //   (Shell expansion of `~` always produces an absolute path, so this case
+    //   also handles the common `~/foo` → `/home/user/foo` scenario.)
+    //
+    // - Relative / `~`-prefixed paths : store verbatim. The config loader
+    //   re-resolves them at load time, which preserves portability and the `~`
+    //   shorthand when the user deliberately prevents shell expansion (e.g. by
+    //   quoting the argument).
+    let stored_path = if std::path::Path::new(path_str).is_absolute() {
+        resolved
+            .canonicalize()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| path_str.to_string())
+    } else {
+        path_str.to_string()
+    };
 
     let entry = config::SourceEntry {
         id: resolved_id,
         source_type: config::SourceType::Path,
         url: None,
         source_ref: None,
-        path: Some(resolved.display().to_string()),
+        path: Some(stored_path),
         allow: None,
     };
 
     let mut spec = load_sources_spec_optional(ctx)?;
+
+    // Reject if the new path resolves to the same real directory as any existing
+    // type:path entry. Canonicalize resolves `..` and symlinks on both sides.
+    if let Ok(real_resolved) = resolved.canonicalize() {
+        for existing in spec
+            .sources
+            .iter()
+            .filter(|e| matches!(e.source_type, config::SourceType::Path))
+        {
+            if let Some(ref p) = existing.path {
+                if let Ok(real_existing) = std::path::Path::new(p).canonicalize() {
+                    if real_resolved == real_existing {
+                        return Err(AppError::PathSourceDuplicate {
+                            path: path_str.to_string(),
+                            existing_id: existing.id.clone(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
     spec.sources.push(entry);
     config::save_sources(&sources_path, &spec)?;
     Ok(sources_path)
@@ -784,6 +840,76 @@ mod tests {
         assert!(
             matches!(err, Err(AppError::Config(_))),
             "expected Config error for missing path"
+        );
+    }
+
+    #[test]
+    fn source_add_path_equal_to_local_root_rejected() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let ctx = fake_ctx(&tmpdir);
+        // Create features/ so the structural check passes; the local-root check comes next.
+        std::fs::create_dir_all(ctx.local_root.join("features")).unwrap();
+        let err = source_add_path(&ctx, ctx.local_root.to_str().unwrap(), None);
+        assert!(
+            matches!(err, Err(AppError::PathSourceIsLocalRoot { .. })),
+            "expected PathSourceIsLocalRoot error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn source_add_path_symlink_to_local_root_rejected() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let ctx = fake_ctx(&tmpdir);
+        // Create features/ under local_root.
+        std::fs::create_dir_all(ctx.local_root.join("features")).unwrap();
+        // Create a symlink pointing at local_root.
+        let link = tmpdir.path().join("alias");
+        std::os::unix::fs::symlink(&ctx.local_root, &link).unwrap();
+        let err = source_add_path(&ctx, link.to_str().unwrap(), None);
+        assert!(
+            matches!(err, Err(AppError::PathSourceIsLocalRoot { .. })),
+            "symlink alias should also be rejected, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn source_add_path_duplicate_real_path_rejected() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let ctx = fake_ctx(&tmpdir);
+        // Create external repo with features/.
+        let repo = tmpdir.path().join("external");
+        std::fs::create_dir_all(repo.join("features")).unwrap();
+        // Register the first time.
+        source_add_path(&ctx, repo.to_str().unwrap(), Some("repo")).unwrap();
+        // Attempt to register the same real directory again under a symlink.
+        let link = tmpdir.path().join("alias");
+        std::os::unix::fs::symlink(&repo, &link).unwrap();
+        let err = source_add_path(&ctx, link.to_str().unwrap(), Some("repo2"));
+        assert!(
+            matches!(err, Err(AppError::PathSourceDuplicate { .. })),
+            "same real dir via symlink should be rejected, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn source_add_path_duplicate_dotdot_path_rejected() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let ctx = fake_ctx(&tmpdir);
+        // Create external repo with features/.
+        let repo = tmpdir.path().join("external");
+        std::fs::create_dir_all(repo.join("features")).unwrap();
+        // Register the first time.
+        source_add_path(&ctx, repo.to_str().unwrap(), Some("repo")).unwrap();
+        // Build a path that resolves to the same directory via `..`.
+        let dotdot = repo
+            .join("..")
+            .join(repo.file_name().unwrap_or_default())
+            .display()
+            .to_string();
+        let err = source_add_path(&ctx, &dotdot, Some("repo2"));
+        assert!(
+            matches!(err, Err(AppError::PathSourceDuplicate { .. })),
+            "same real dir via '..' path should be rejected, got {err:?}"
         );
     }
 

@@ -75,6 +75,20 @@ pub enum AppError {
     )]
     UntrustNamesFromWildcard { id: String, dimension: &'static str },
 
+    /// The `type: path` source path resolves to the same real directory as the
+    /// implicit `local` source root. Registering it as an external source would
+    /// create a duplicate of the built-in `local` source.
+    #[error(
+        "path '{path}' resolves to the same directory as the implicit 'local' source root; \
+         use the built-in 'local' source instead"
+    )]
+    PathSourceIsLocalRoot { path: String },
+
+    /// The `type: path` source path resolves to the same real directory as an
+    /// already-registered external source. Duplicate source roots are not allowed.
+    #[error("path '{path}' resolves to the same directory as existing source '{existing_id}'")]
+    PathSourceDuplicate { path: String, existing_id: String },
+
     /// No cached env plan found; `loadout apply` must be run first.
     #[error("no cached env plan — run 'loadout apply' first")]
     EnvPlanNotFound,

@@ -545,7 +545,13 @@ fn source_kind_and_path(ctx: &AppContext, entry: &config::SourceEntry) -> (Strin
         config::SourceType::Path => {
             let kind = "path".to_string();
             // path is pre-resolved to absolute by config::load_sources.
-            let local_path = entry.path.clone().unwrap_or_else(|| entry.id.clone());
+            // Canonicalize for display so that paths with `..` components
+            // (e.g. `/root/../tmp/repo`) are shown as their clean real path.
+            let raw = entry.path.clone().unwrap_or_else(|| entry.id.clone());
+            let local_path = std::path::Path::new(&raw)
+                .canonicalize()
+                .map(|p| p.display().to_string())
+                .unwrap_or(raw);
             (kind, local_path)
         }
     }
