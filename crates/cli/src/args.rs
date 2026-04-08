@@ -492,6 +492,109 @@ pub enum SourceCommand {
 
     /// Open `sources.yaml` in $EDITOR (creates a template if absent)
     Edit,
+
+    /// Add a new external source
+    Add {
+        #[command(subcommand)]
+        command: SourceAddCommand,
+    },
+
+    /// Remove an external source
+    Remove(SourceRemoveArgs),
+
+    /// Grant allow-list entries for a source
+    Trust(SourceTrustArgs),
+
+    /// Revoke allow-list entries for a source
+    Untrust(SourceUntrustArgs),
+}
+
+/// Subcommand for `loadout source add`.
+#[derive(Debug, Subcommand)]
+pub enum SourceAddCommand {
+    /// Register a git repository as a source
+    Git(SourceAddGitArgs),
+
+    /// Register a local directory as a source
+    Path(SourceAddPathArgs),
+}
+
+#[derive(Debug, clap::Args)]
+pub struct SourceAddGitArgs {
+    /// Git repository URL
+    pub url: String,
+
+    /// Source ID (derived from the URL if omitted)
+    #[arg(long)]
+    pub id: Option<String>,
+
+    /// Track a branch (floating ref)
+    #[arg(long, conflicts_with_all = ["tag", "commit"])]
+    pub branch: Option<String>,
+
+    /// Pin to a tag
+    #[arg(long, conflicts_with_all = ["branch", "commit"])]
+    pub tag: Option<String>,
+
+    /// Pin to an exact commit hash
+    #[arg(long, conflicts_with_all = ["branch", "tag"])]
+    pub commit: Option<String>,
+
+    /// Sub-path within the repository (default: repo root)
+    #[arg(long)]
+    pub path: Option<String>,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct SourceAddPathArgs {
+    /// Path to the local directory
+    pub path: String,
+
+    /// Source ID (derived from the directory name if omitted)
+    #[arg(long)]
+    pub id: Option<String>,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct SourceRemoveArgs {
+    /// Source ID to remove
+    pub id: String,
+
+    /// Remove even if the source is still referenced in state or configs
+    #[arg(long)]
+    pub force: bool,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct SourceTrustArgs {
+    /// Source ID to trust
+    pub id: String,
+
+    /// Feature names to allow, comma-separated, or `*` for all
+    #[arg(long, value_name = "NAMES|*")]
+    pub features: Option<String>,
+
+    /// Backend names to allow, comma-separated, or `*` for all
+    #[arg(long, value_name = "NAMES|*")]
+    pub backends: Option<String>,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct SourceUntrustArgs {
+    /// Source ID to untrust
+    pub id: String,
+
+    /// Feature names to revoke, comma-separated, or `*` for all
+    #[arg(long, value_name = "NAMES|*")]
+    pub features: Option<String>,
+
+    /// Backend names to revoke, comma-separated, or `*` for all
+    #[arg(long, value_name = "NAMES|*")]
+    pub backends: Option<String>,
+
+    /// Allow revoking a wildcard (`*`) entry
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Debug, clap::Args)]

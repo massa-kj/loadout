@@ -431,13 +431,20 @@ fn scan_backend_dirs_impl(
     let mut result = Vec::new();
     scan_one_backend_source(&mut result, "local", &ctx.local_root.join("backends"));
     for entry in &sources.sources {
-        let dir = ctx
-            .dirs
-            .data_home
-            .join("sources")
-            .join(&entry.id)
-            .join("backends");
-        scan_one_backend_source(&mut result, &entry.id, &dir);
+        let backends_dir = match entry.source_type {
+            config::SourceType::Git => ctx
+                .dirs
+                .data_home
+                .join("sources")
+                .join(&entry.id)
+                .join("backends"),
+            config::SourceType::Path => {
+                // path is pre-resolved to absolute by config::load_sources.
+                let Some(ref p) = entry.path else { continue };
+                std::path::Path::new(p).join("backends")
+            }
+        };
+        scan_one_backend_source(&mut result, &entry.id, &backends_dir);
     }
     result.sort_by(|a, b| a.0.cmp(&b.0));
     result

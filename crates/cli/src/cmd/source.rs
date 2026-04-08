@@ -2,7 +2,10 @@
 
 use std::process;
 
-use crate::args::{OutputArgs, OutputFormat, SourceCommand, SourceShowArgs};
+use crate::args::{
+    OutputArgs, OutputFormat, SourceAddCommand, SourceCommand, SourceRemoveArgs, SourceShowArgs,
+    SourceTrustArgs, SourceUntrustArgs,
+};
 use crate::context::build_app_context;
 
 pub fn run(cmd: SourceCommand) {
@@ -10,6 +13,10 @@ pub fn run(cmd: SourceCommand) {
         SourceCommand::List(args) => list(args),
         SourceCommand::Show(args) => show(args),
         SourceCommand::Edit => edit(),
+        SourceCommand::Add { command } => add(command),
+        SourceCommand::Remove(args) => remove(args),
+        SourceCommand::Trust(args) => trust(args),
+        SourceCommand::Untrust(args) => untrust(args),
     }
 }
 
@@ -128,4 +135,128 @@ fn edit() {
     }
 
     super::editor::open(&sources_path);
+}
+
+// ── add ───────────────────────────────────────────────────────────────────────
+
+fn add(cmd: SourceAddCommand) {
+    match cmd {
+        SourceAddCommand::Git(args) => add_git(args),
+        SourceAddCommand::Path(args) => add_path(args),
+    }
+}
+
+fn add_git(args: crate::args::SourceAddGitArgs) {
+    let ctx = build_app_context();
+
+    // Build SourceRef from the individual --branch / --tag / --commit flags.
+    let source_ref = if args.branch.is_some() || args.tag.is_some() || args.commit.is_some() {
+        Some(config::SourceRef {
+            branch: args.branch,
+            tag: args.tag,
+            commit: args.commit,
+        })
+    } else {
+        None
+    };
+
+    let path = app::source_add_git(
+        &ctx,
+        &args.url,
+        args.id.as_deref(),
+        source_ref,
+        args.path.as_deref(),
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        process::exit(1);
+    });
+
+    println!("added source to {}", path.display());
+}
+
+fn add_path(args: crate::args::SourceAddPathArgs) {
+    let ctx = build_app_context();
+
+    let path = app::source_add_path(&ctx, &args.path, args.id.as_deref()).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        process::exit(1);
+    });
+
+    println!("added source to {}", path.display());
+}
+
+// ── remove ───────────────────────────────────────────────────────────────────
+
+fn remove(args: SourceRemoveArgs) {
+    let ctx = build_app_context();
+
+    let path = app::source_remove(&ctx, &args.id, args.force).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        process::exit(1);
+    });
+
+    println!("removed '{}' from {}", args.id, path.display());
+}
+
+// ── trust ─────────────────────────────────────────────────────────────────────
+
+fn trust(args: SourceTrustArgs) {
+    let ctx = build_app_context();
+
+    if args.features.is_none() && args.backends.is_none() {
+        eprintln!("error: at least one of --features or --backends must be specified");
+        process::exit(1);
+    }
+
+    let features = args.features.as_deref().map(parse_allow_list);
+    let backends = args.backends.as_deref().map(parse_allow_list);
+
+    let path = app::source_trust(&ctx, &args.id, features, backends).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        process::exit(1);
+    });
+
+    println!("updated allow-list in {}", path.display());
+}
+
+// ── untrust ───────────────────────────────────────────────────────────────────
+
+fn untrust(args: SourceUntrustArgs) {
+    let ctx = build_app_context();
+
+    if args.features.is_none() && args.backends.is_none() {
+        eprintln!("error: at least one of --features or --backends must be specified");
+        process::exit(1);
+    }
+
+    let features = args.features.as_deref().map(parse_allow_list);
+    let backends = args.backends.as_deref().map(parse_allow_list);
+
+    let path =
+        app::source_untrust(&ctx, &args.id, features, backends, args.force).unwrap_or_else(|e| {
+            eprintln!("error: {e}");
+            process::exit(1);
+        });
+
+    println!("updated allow-list in {}", path.display());
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+/// Parse a `--features` / `--backends` string into an `AllowList`.
+///
+/// `"*"` → `AllowList::All`; anything else is treated as comma-separated names.
+fn parse_allow_list(s: &str) -> config::AllowList {
+    if s.trim() == "*" {
+        config::AllowList::All(config::WildcardAll)
+    } else {
+        config::AllowList::Names(
+            s.split(',')
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+                .map(str::to_string)
+                .collect(),
+        )
+    }
 }

@@ -64,8 +64,8 @@ use serde::Deserialize;
 pub use model::{
     profile::{Profile, ProfileFeatureConfig},
     sources::{
-        AllowList, AllowSpec, SourceEntry, SourceLockEntry, SourceRef, SourceType, SourcesLock,
-        SourcesSpec, WildcardAll,
+        AllowList, AllowSpec, DetailedAllow, SourceEntry, SourceLockEntry, SourceRef, SourceType,
+        SourcesLock, SourcesSpec, WildcardAll,
     },
     strategy::{BackendOverride, BackendStrategy, FsStrategy, Strategy},
 };
@@ -399,6 +399,16 @@ pub fn save_sources(path: &Path, spec: &SourcesSpec) -> Result<(), ConfigError> 
 pub fn save_sources_lock(path: &Path, lock: &SourcesLock) -> Result<(), ConfigError> {
     io::write_yaml_atomic(path, lock)?;
     Ok(())
+}
+
+/// Resolve a raw source path (possibly relative, `~`-prefixed, or absolute)
+/// relative to `sources_yaml_path`'s parent directory.
+///
+/// This mirrors the path resolution applied by [`load_sources`] for `type: path` entries.
+/// Useful when building a new `SourceEntry` before writing it to `sources.yaml`.
+pub fn resolve_path_relative_to_sources(raw: &str, sources_yaml_path: &Path) -> std::path::PathBuf {
+    let sources_dir = sources_yaml_path.parent().unwrap_or(sources_yaml_path);
+    resolve_source_path(raw, sources_dir)
 }
 
 fn validate_and_resolve_sources(

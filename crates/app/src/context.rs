@@ -53,6 +53,28 @@ pub enum AppError {
     #[error("source '{id}' not found")]
     SourceNotFound { id: String },
 
+    /// Source ID already exists in sources.yaml.
+    #[error("source '{id}' already exists")]
+    SourceAlreadyExists { id: String },
+
+    /// Source is still referenced and cannot be removed without `--force`.
+    #[error("source '{id}' is still referenced: {reason}")]
+    SourceStillReferenced { id: String, reason: String },
+
+    /// Removing a wildcard allow-list entry (`"*"`) requires `--force`.
+    #[error("removing '*' from source '{id}' allow-list requires --force")]
+    UntrustWildcardRequiresForce { id: String },
+
+    /// Tried to remove individual names from a wildcard (`"*"`) allow-list.
+    ///
+    /// A wildcard grants everything; narrowing it by name removal is not supported.
+    /// Revoke the wildcard first with `--force`, then grant specific entries.
+    #[error(
+        "source '{id}': {dimension} allow-list is '*'; \
+         to restrict, revoke the wildcard with --force first, then re-trust specific entries"
+    )]
+    UntrustNamesFromWildcard { id: String, dimension: &'static str },
+
     /// No cached env plan found; `loadout apply` must be run first.
     #[error("no cached env plan — run 'loadout apply' first")]
     EnvPlanNotFound,
