@@ -857,6 +857,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn source_add_path_symlink_to_local_root_rejected() {
         let tmpdir = tempfile::tempdir().unwrap();
         let ctx = fake_ctx(&tmpdir);
@@ -873,6 +874,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn source_add_path_duplicate_real_path_rejected() {
         let tmpdir = tempfile::tempdir().unwrap();
         let ctx = fake_ctx(&tmpdir);
@@ -884,6 +886,51 @@ mod tests {
         // Attempt to register the same real directory again under a symlink.
         let link = tmpdir.path().join("alias");
         std::os::unix::fs::symlink(&repo, &link).unwrap();
+        let err = source_add_path(&ctx, link.to_str().unwrap(), Some("repo2"));
+        assert!(
+            matches!(err, Err(AppError::PathSourceDuplicate { .. })),
+            "same real dir via symlink should be rejected, got {err:?}"
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn source_add_path_symlink_to_local_root_rejected_windows() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let ctx = fake_ctx(&tmpdir);
+        // Create features/ under local_root.
+        std::fs::create_dir_all(ctx.local_root.join("features")).unwrap();
+        // Create a directory symlink pointing at local_root.
+        let link = tmpdir.path().join("alias");
+        match std::os::windows::fs::symlink_dir(&ctx.local_root, &link) {
+            // 1314 = ERROR_PRIVILEGE_NOT_HELD; requires Developer Mode or elevated prompt
+            Err(e) if e.raw_os_error() == Some(1314) => return,
+            r => r.unwrap(),
+        }
+        let err = source_add_path(&ctx, link.to_str().unwrap(), None);
+        assert!(
+            matches!(err, Err(AppError::PathSourceIsLocalRoot { .. })),
+            "symlink alias should also be rejected, got {err:?}"
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn source_add_path_duplicate_real_path_rejected_windows() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let ctx = fake_ctx(&tmpdir);
+        // Create external repo with features/.
+        let repo = tmpdir.path().join("external");
+        std::fs::create_dir_all(repo.join("features")).unwrap();
+        // Register the first time.
+        source_add_path(&ctx, repo.to_str().unwrap(), Some("repo")).unwrap();
+        // Attempt to register the same real directory again under a symlink.
+        let link = tmpdir.path().join("alias");
+        match std::os::windows::fs::symlink_dir(&repo, &link) {
+            // 1314 = ERROR_PRIVILEGE_NOT_HELD; requires Developer Mode or elevated prompt
+            Err(e) if e.raw_os_error() == Some(1314) => return,
+            r => r.unwrap(),
+        }
         let err = source_add_path(&ctx, link.to_str().unwrap(), Some("repo2"));
         assert!(
             matches!(err, Err(AppError::PathSourceDuplicate { .. })),

@@ -460,7 +460,7 @@ fn validate_and_resolve_sources(
                         });
                     }
                     let subpath = std::path::Path::new(p.as_str());
-                    if subpath.is_absolute() {
+                    if subpath.is_absolute() || p.starts_with('/') || p.starts_with('\\') {
                         return Err(ConfigError::InvalidSources {
                             reason: format!(
                                 "source '{}': path must be relative (no absolute paths in git repo subpath)",
@@ -1128,7 +1128,7 @@ profile:
         let spec = load_sources(&p).unwrap();
         assert_eq!(spec.sources[0].source_type, SourceType::Path);
         // After resolution, path is absolute (was already absolute).
-        assert!(spec.sources[0].path.as_deref().unwrap().starts_with('/'));
+        assert!(std::path::Path::new(spec.sources[0].path.as_deref().unwrap()).is_absolute());
     }
 
     #[test]
