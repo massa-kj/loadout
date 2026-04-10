@@ -494,7 +494,7 @@ sources declared in `sources.yaml`.
 
 | Flag | Description |
 |---|---|
-| `--output <FORMAT>` | `text` (default) or `json`. JSON includes `id`, `kind`, `url`, `commit`, `allow`, `local_path`. |
+| `--output <FORMAT>` | `text` (default) or `json`. JSON includes `id`, `kind`, `url`, `ref_spec`, `resolved_commit`, `fetched_at`, `allow`, `local_path`. |
 
 ### `loadout source show`
 
@@ -515,7 +515,121 @@ Shows details for a single source.
 loadout source edit
 ```
 
-Opens `$XDG_CONFIG_HOME/loadout/sources.yaml` in `$EDITOR`. If the file does notexist, a template is created first.
+Opens `$XDG_CONFIG_HOME/loadout/sources.yaml` in `$EDITOR`. If the file does not
+exist, a template is created first.
+
+### `loadout source add git`
+
+```
+loadout source add git <URL> [--id <ID>] [--branch <BRANCH> | --tag <TAG> | --commit <COMMIT>] [--path <PATH>]
+```
+
+Registers a new `type: git` external source in `sources.yaml`.
+
+| Argument / Flag | Description |
+|---|---|
+| `<URL>` | Git repository URL. |
+| `--id <ID>` | Source ID. Derived from the repository name if omitted. |
+| `--branch <BRANCH>` | Track the tip of this branch (floating ref). |
+| `--tag <TAG>` | Pin to this tag. |
+| `--commit <COMMIT>` | Pin to this full commit hash. |
+| `--path <PATH>` | Repo-relative subdirectory for features/backends. Defaults to `"."`. |
+
+Exactly one of `--branch`, `--tag`, `--commit` may be specified (all optional).
+The repository is **not** cloned automatically; run `loadout source update <ID>` to fetch.
+
+```sh
+loadout source add git https://github.com/example/community-loadout.git --branch main
+loadout source add git https://github.com/example/tools.git --id tools --tag v1.2.0
+```
+
+### `loadout source add path`
+
+```
+loadout source add path <PATH> [--id <ID>]
+```
+
+Registers a new `type: path` external source in `sources.yaml`.
+
+| Argument / Flag | Description |
+|---|---|
+| `<PATH>` | Filesystem path. Relative paths are resolved from `sources.yaml`'s directory. `~` is expanded. |
+| `--id <ID>` | Source ID. Derived from the directory name if omitted. |
+
+The directory must contain at least one of `features/` or `backends/`.
+The path must not resolve to the same real directory as the `local` source root.
+
+```sh
+loadout source add path ~/projects/loadout-mylab
+loadout source add path ../loadout-mylab --id mylab
+```
+
+### `loadout source remove`
+
+```
+loadout source remove <ID> [--force]
+```
+
+Removes a source entry from `sources.yaml`.
+
+Without `--force`, fails if the source is still referenced in any config file
+(`profile.features`, `bundles`, `strategy`) or in the installed state.
+
+With `--force`, removes unconditionally and cleans up the corresponding lock entry.
+
+| Argument / Flag | Description |
+|---|---|
+| `<ID>` | Source ID to remove. |
+| `--force` | Skip reference checks and remove unconditionally. |
+
+### `loadout source trust`
+
+```
+loadout source trust <ID> [--features <CSV|*>] [--backends <CSV|*>]
+```
+
+Adds entries to the `allow` list of a source in `sources.yaml`.
+At least one of `--features` or `--backends` must be specified.
+
+Merges into the existing allow-list; duplicates are removed.
+If `"*"` is already present for a dimension, no change is made.
+
+| Argument / Flag | Description |
+|---|---|
+| `<ID>` | Source ID to trust. |
+| `--features <CSV\|*>` | Comma-separated feature names, or `*` to allow all. |
+| `--backends <CSV\|*>` | Comma-separated backend names, or `*` to allow all. |
+
+```sh
+loadout source trust community --features '*'
+loadout source trust community --backends brew,mise
+```
+
+### `loadout source untrust`
+
+```
+loadout source untrust <ID> [--features <CSV|*>] [--backends <CSV|*>] [--force]
+```
+
+Removes entries from the `allow` list of a source in `sources.yaml`.
+At least one of `--features` or `--backends` must be specified.
+
+Removing `"*"` (wildcard) requires `--force`.
+Attempting to remove specific names when the current allow-list is `"*"` returns an error;
+revoke the wildcard with `--force` first, then re-trust specific entries.
+If the allow-list becomes empty after removal, the source reverts to deny-all (no `allow` field).
+
+| Argument / Flag | Description |
+|---|---|
+| `<ID>` | Source ID to untrust. |
+| `--features <CSV\|*>` | Comma-separated feature names, or `*` to revoke all. |
+| `--backends <CSV\|*>` | Comma-separated backend names, or `*` to revoke all. |
+| `--force` | Required when revoking a wildcard (`*`). |
+
+```sh
+loadout source untrust community --backends brew      # remove brew from backends allow-list
+loadout source untrust community --features '*' --force  # revoke all-features wildcard
+```
 
 ## Diagnostics
 

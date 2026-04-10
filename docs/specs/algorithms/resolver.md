@@ -94,7 +94,7 @@ and injects them as implicit ordering dependencies of the requiring feature.
 
 Source allow-list validation: External and `local` features are subject to source allow-list validation.
 If the feature itself or any declared explicit dependency is not allowed by the source registry,
-resolution must abort.
+resolution must abort. This applies to both `type: git` and `type: path` external sources.
 
 ## Cycle Detection
 

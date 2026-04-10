@@ -67,25 +67,33 @@ See `specs/data/profile.md` for the full schema.
 
 See [source registry file default location](../specs/data/sources.md#File-Location).
 
-Example:
+Example `sources.yaml` with a git source and a local path source:
 
 ```yaml
 sources:
   - id: community
     type: git
-    url: https://github.com/example/community-loadout
-    commit: 0123456
+    url: https://github.com/example/community-loadout.git
+    ref:
+      branch: main
     allow:
       features:
         - node
       backends:
         - npm
+  - id: mylab
+    type: path
+    path: ~/projects/loadout-mylab
+    allow:
+      features:
+        - mypkg
 ```
 
 Place source content at:
 
 * local features/backends: config home `features/`, `backends/`
-* external features/backends: data home `sources/<id>/features/`, `backends/`
+* `type: git` external sources: data home `sources/<id>/features/`, `backends/`
+* `type: path` external sources: `<path>/features/`, `<path>/backends/`
 
 There is no implicit fallback across `core`, `local`, and external sources.
 If you want a non-core source, reference it explicitly in the profile or strategy.
