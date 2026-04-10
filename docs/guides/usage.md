@@ -98,6 +98,54 @@ Place source content at:
 There is no implicit fallback across `core`, `local`, and external sources.
 If you want a non-core source, reference it explicitly in the profile or strategy.
 
+### Source lifecycle
+
+**Add** a new source and fetch it:
+
+```sh
+loadout source add git https://github.com/example/community-loadout.git --branch main
+loadout source trust community --features '*'   # allow all features
+loadout source update community                 # clone / fetch
+```
+
+**Keep up to date** (floating branch):
+
+```sh
+loadout source update community          # fetch latest, update lock
+```
+
+**Pin to a specific commit:**
+
+```sh
+loadout source update community --to-commit <full-hash>
+```
+
+**Refresh the lock hash without fetching** (e.g. after a manual `git` operation):
+
+```sh
+loadout source update community --relock
+```
+
+### Importing a resource into local
+
+If you want to take full ownership of a feature or backend from an external source,
+use `import` to copy it into your `local` source directory:
+
+```sh
+# Copy feature to local/ and rewrite all config references
+loadout feature import community/node --move-config
+
+# Copy backend to local/ and rewrite all strategy references
+loadout backend import community/brew --move-strategy
+
+# Preview without writing
+loadout feature import community/node --dry-run
+```
+
+After import, the external source is no longer required for that resource.
+If the imported feature has bare depends (same-source relative references),
+a warning is printed; review and convert them to canonical IDs if necessary.
+
 ## Policies
 
 See [strategies default location](../specs/data/strategy.md#File-Location).

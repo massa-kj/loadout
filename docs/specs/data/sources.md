@@ -4,9 +4,9 @@
 
 This document defines the normative contract for `sources.yaml` and `sources.lock.yaml`.
 
-Covered: schema, source kinds, implicit sources, allow-list semantics, path resolution, and lock file format.
+Covered: schema, source kinds, implicit sources, allow-list semantics, path resolution, lock file format, and update semantics.
 
-Not covered: source lifecycle commands (`add`, `update`, `remove`), git clone/update automation.
+Not covered: git clone/update implementation details (see `crates/app/src/mutate.rs`).
 
 ## Purpose
 
@@ -282,3 +282,30 @@ sources:
       features:
         - mypkg
 ```
+
+## Update Semantics
+
+`source update` operates exclusively on `type: git` sources and writes `sources.lock.yaml`.
+
+### Modes
+
+| Mode | Trigger | Effect |
+|---|---|---|
+| **Default (floating)** | `source update <id>` | `git fetch --prune`, check out tip of declared `ref`, write lock |
+| **Pinned** | `source update <id> --to-commit <hash>` | `git fetch`, check out exact commit hash, write lock |
+| **Relock** | `source update <id> --relock` | No fetch or checkout; recompute `manifest_hash` only, write lock |
+
+### Lock invariants
+
+- `resolved_commit` is always a full 40-character hex string. Short hashes must not be stored.
+- `fetched_at` is always UTC RFC 3339 (`YYYY-MM-DDTHH:MM:SSZ`).
+- `manifest_hash` covers only `features/**/*.yaml` and `backends/**/*.yaml` under the repo subtree specified by `path`. It does not hash the full repository tree.
+- `type: path` sources are never written to `sources.lock.yaml`.
+
+### Git operations
+
+All git operations use the external `git` CLI (`std::process::Command`). No `git2` crate dependency.
+
+- `git fetch --prune` is run before checkout in non-relock mode.
+- Checkout always uses `git checkout --detach <target>` to produce a detached HEAD state.
+- `git rev-parse HEAD` is used after checkout to obtain the resolved full commit hash.

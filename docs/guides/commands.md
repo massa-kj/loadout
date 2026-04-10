@@ -13,9 +13,9 @@ For the big-picture workflow see [usage.md](./usage.md).
 | [State](#state) | Inspect and migrate the state file |
 | [Context](#context) | Set the active config shorthand |
 | [Config](#config) | Manage configs |
-| [Feature](#feature) | Manage features |
-| [Backend](#backend) | Manage backends |
-| [Source](#source) | Manage sources |
+| [Feature](#feature) | Manage features (list, show, edit, new, validate, import) |
+| [Backend](#backend) | Manage backends (list, show, edit, new, validate, import) |
+| [Source](#source) | Manage sources (add, remove, trust, untrust, update) |
 | [Diagnostics](#diagnostics) | Health-check the loadout environment |
 | [Shell](#shell) | Generate shell completions |
 
@@ -390,6 +390,31 @@ loadout feature validate git         # validates local/git
 loadout feature validate local/nvim  # same with explicit source
 ```
 
+### `loadout feature import`
+
+```
+loadout feature import <SOURCE/NAME> [--move-config] [--dry-run]
+```
+
+Copies a feature from an external source into the `local` source directory
+(`$XDG_CONFIG_HOME/loadout/features/<NAME>/`).
+
+`<SOURCE/NAME>` must be a canonical ID pointing to an external source (not `local` or `core`).
+
+| Argument / Flag | Description |
+|---|---|
+| `<SOURCE/NAME>` | Canonical feature ID from an external source (e.g. `community/node`). |
+| `--move-config` | Also rewrite all config files (`profile.features`, `bundles.*.features`) to reference `local/<NAME>` instead of the external source. |
+| `--dry-run` | Show what would happen without writing any files. |
+
+**Bare depends warning:** If the feature's `dep.depends` contains bare names (entries without a `/`), a warning is printed. Bare depends are same-source relative references that may not resolve correctly after import. Consider converting them to canonical IDs (e.g. `local/helper`) or using `--help` for guidance.
+
+```sh
+loadout feature import community/node              # copy to local; config unchanged
+loadout feature import community/node --move-config  # also rewrite config references
+loadout feature import community/node --dry-run    # preview only
+```
+
 ## Backend
 
 ### `loadout backend list`
@@ -479,6 +504,29 @@ Exit code is non-zero if any errors are found.
 ```sh
 loadout backend validate mise         # validates local/mise
 loadout backend validate local/mypkg  # same with explicit source
+```
+
+### `loadout backend import`
+
+```
+loadout backend import <SOURCE/NAME> [--move-strategy] [--dry-run]
+```
+
+Copies a backend from an external source into the `local` source directory
+(`$XDG_CONFIG_HOME/loadout/backends/<NAME>/`).
+
+`<SOURCE/NAME>` must be a canonical ID pointing to an external source (not `local` or `core`).
+
+| Argument / Flag | Description |
+|---|---|
+| `<SOURCE/NAME>` | Canonical backend ID from an external source (e.g. `community/brew`). |
+| `--move-strategy` | Also rewrite all config files (strategy `default_backend` and `overrides.*.backend`) to reference `local/<NAME>` instead of the external source. |
+| `--dry-run` | Show what would happen without writing any files. |
+
+```sh
+loadout backend import community/brew                  # copy to local; strategy unchanged
+loadout backend import community/brew --move-strategy  # also rewrite strategy references
+loadout backend import community/brew --dry-run        # preview only
 ```
 
 ## Source
@@ -631,6 +679,35 @@ loadout source untrust community --backends brew      # remove brew from backend
 loadout source untrust community --features '*' --force  # revoke all-features wildcard
 ```
 
+### `loadout source update`
+
+```
+loadout source update <ID> [--to-commit <COMMIT>] [--relock]
+```
+
+Fetches the latest commits from a `type: git` source and updates `sources.lock.yaml`.
+Only `type: git` sources are supported; `type: path` sources return an error.
+
+| Argument / Flag | Description |
+|---|---|
+| `<ID>` | Source ID to update. Must be `type: git`. |
+| `--to-commit <COMMIT>` | Check out this specific commit hash instead of following the declared `ref`. |
+| `--relock` | Recompute `manifest_hash` and update the lock file without fetching or checking out. |
+
+**Modes:**
+
+- **Default (floating ref):** `git fetch --prune` → check out the tip of the declared `ref` (branch/tag/commit) → update lock.
+- **`--to-commit`:** `git fetch` → `git checkout --detach <COMMIT>` → update lock.
+- **`--relock`:** Skip fetch and checkout entirely; recompute `manifest_hash` from the current working tree and rewrite the lock entry.
+
+The lock file records `resolved_commit` (full 40-character hash), `fetched_at` (UTC RFC 3339), and `manifest_hash` (SHA-256 over `features/**/*.yaml` + `backends/**/*.yaml`).
+
+```sh
+loadout source update community                          # follow declared ref
+loadout source update community --to-commit abc123def   # pin to specific commit
+loadout source update community --relock                 # refresh lock, no fetch
+```
+
 ## Diagnostics
 
 ### `loadout doctor`
@@ -747,4 +824,38 @@ loadout backend edit mise
 
 # Edit sources.yaml (created from template if absent)
 loadout source edit
+```
+
+### Using external sources
+
+```sh
+# Register a community source (not cloned yet)
+loadout source add git https://github.com/example/community-loadout.git --branch main --id community
+
+# Allow specific features/backends from the source
+loadout source trust community --features 'node,python' --backends npm
+
+# Clone and initialise the repo (writes sources.lock.yaml)
+loadout source update community
+
+# Use the feature in your config
+loadout config feature add community/node
+
+# Keep the source in sync later
+loadout source update community          # follow declared branch
+loadout source update community --to-commit abc123   # pin to a specific commit
+loadout source update community --relock             # refresh lock hash only
+```
+
+### Importing an external resource into local
+
+```sh
+# Preview what importing community/node would do
+loadout feature import community/node --dry-run
+
+# Copy community/node to local and rewrite all config references
+loadout feature import community/node --move-config
+
+# Copy community/brew backend to local and rewrite all strategy references
+loadout backend import community/brew --move-strategy
 ```
