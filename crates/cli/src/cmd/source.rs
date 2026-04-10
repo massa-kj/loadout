@@ -250,11 +250,12 @@ fn untrust(args: SourceUntrustArgs) {
 fn update(args: SourceUpdateArgs) {
     let ctx = build_app_context();
 
-    app::source_update(&ctx, &args.id, args.to_commit.as_deref(), args.relock)
-        .unwrap_or_else(|e| {
+    app::source_update(&ctx, &args.id, args.to_commit.as_deref(), args.relock).unwrap_or_else(
+        |e| {
             eprintln!("error: {e}");
             process::exit(1);
-        });
+        },
+    );
 
     if args.relock {
         println!("relocked '{}'", args.id);

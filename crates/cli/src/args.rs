@@ -355,6 +355,9 @@ pub enum FeatureCommand {
 
     /// Validate a feature's `feature.yaml` and directory structure
     Validate(FeatureValidateArgs),
+
+    /// Copy a feature from an external source into the local source directory
+    Import(FeatureImportArgs),
 }
 
 #[derive(Debug, clap::Args)]
@@ -387,6 +390,20 @@ pub enum FeatureTemplate {
 pub struct FeatureValidateArgs {
     /// Feature canonical ID (e.g. `local/git`) or bare name (resolves to `local/<name>`)
     pub id: String,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct FeatureImportArgs {
+    /// Canonical feature ID to import (e.g. `community/node`)
+    pub id: String,
+
+    /// Also rewrite all config files to reference `local/<name>` instead of the source
+    #[arg(long)]
+    pub move_config: bool,
+
+    /// Show what would happen without making any changes
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Debug, clap::Args)]
@@ -426,6 +443,9 @@ pub enum BackendCommand {
 
     /// Validate a backend's `backend.yaml` and directory structure
     Validate(BackendValidateArgs),
+
+    /// Copy a backend from an external source into the local source directory
+    Import(BackendImportArgs),
 }
 
 #[derive(Debug, clap::Args)]
@@ -459,6 +479,20 @@ pub enum BackendPlatform {
 pub struct BackendValidateArgs {
     /// Backend canonical ID (e.g. `local/mise`) or bare name (resolves to `local/<name>`)
     pub id: String,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct BackendImportArgs {
+    /// Canonical backend ID to import (e.g. `community/brew`)
+    pub id: String,
+
+    /// Also rewrite strategy sections to reference `local/<name>` instead of the source
+    #[arg(long)]
+    pub move_strategy: bool,
+
+    /// Show what would happen without making any changes
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Debug, clap::Args)]

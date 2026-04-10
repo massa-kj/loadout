@@ -37,9 +37,9 @@ pub use context::{AppContext, AppError};
 pub use executor::{Event, ExecutorReport};
 pub use model::plan::Plan;
 pub use mutate::{
-    config_feature_add, config_feature_remove, config_init, config_raw_set, config_raw_show,
-    config_raw_unset, source_add_git, source_add_path, source_remove, source_trust, source_untrust,
-    source_update,
+    backend_import, config_feature_add, config_feature_remove, config_init, config_raw_set,
+    config_raw_show, config_raw_unset, feature_import, source_add_git, source_add_path,
+    source_remove, source_trust, source_untrust, source_update, ImportReport,
 };
 pub use plan::plan;
 pub use read::{

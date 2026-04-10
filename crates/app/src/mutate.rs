@@ -740,11 +740,7 @@ pub fn source_update(
 
     if !relock {
         // Fetch from remote.
-        git_run(
-            id,
-            &["fetch", "--prune"],
-            &repo_dir,
-        )?;
+        git_run(id, &["fetch", "--prune"], &repo_dir)?;
 
         // Determine the target ref to checkout.
         let target = if let Some(commit) = to_commit {
@@ -885,10 +881,11 @@ fn compute_manifest_hash(
             stderr: format!("failed to read manifest file {}: {e}", abs_path.display()),
         })?;
         let mut buf = Vec::new();
-        f.read_to_end(&mut buf).map_err(|e| AppError::GitCommandFailed {
-            source_id: source_id.to_string(),
-            stderr: format!("failed to read manifest file {}: {e}", abs_path.display()),
-        })?;
+        f.read_to_end(&mut buf)
+            .map_err(|e| AppError::GitCommandFailed {
+                source_id: source_id.to_string(),
+                stderr: format!("failed to read manifest file {}: {e}", abs_path.display()),
+            })?;
         hasher.update(&buf);
         hasher.update(b"\0");
     }
@@ -927,8 +924,8 @@ impl Sha256 {
     fn new() -> Self {
         Self {
             h: [
-                0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-                0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+                0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+                0x5be0cd19,
             ],
             buf: [0u8; 64],
             buf_len: 0,
@@ -972,22 +969,16 @@ impl Sha256 {
     #[allow(clippy::unreadable_literal)]
     fn compress(h: &mut [u32; 8], block: &[u8; 64]) {
         const K: [u32; 64] = [
-            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
-            0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-            0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
-            0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-            0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
-            0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-            0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
-            0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-            0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
-            0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-            0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
-            0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-            0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
-            0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
-            0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+            0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+            0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+            0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+            0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+            0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+            0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+            0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+            0xc67178f2,
         ];
 
         let mut w = [0u32; 64];
@@ -1077,6 +1068,378 @@ fn secs_to_rfc3339(secs: u64) -> String {
     let year = 100 * b + d - 4800 + m_raw / 10;
 
     format!("{year:04}-{month:02}-{day:02}T{h:02}:{m:02}:{s:02}Z")
+}
+
+// ---------------------------------------------------------------------------
+// Import result
+// ---------------------------------------------------------------------------
+
+/// Summary returned by `feature_import` and `backend_import`.
+pub struct ImportReport {
+    /// Source directory that was (or would be) copied from.
+    pub source_dir: PathBuf,
+    /// Destination directory that was (or would be) copied to.
+    pub dest_dir: PathBuf,
+    /// Config files that were (or would be) rewritten.
+    pub config_files_updated: Vec<PathBuf>,
+    /// Bare depends found in the imported feature (warnings only).
+    pub bare_depends_warnings: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
+// feature import
+// ---------------------------------------------------------------------------
+
+/// Copy a feature from an external source into the `local` source directory.
+///
+/// - `canonical_id` must be `<source_id>/<feature_name>` (external source only).
+/// - `move_config`: also rewrite all config files to reference `local/<name>`.
+/// - `dry_run`: compute what would happen but do not write any files.
+pub fn feature_import(
+    ctx: &AppContext,
+    canonical_id: &str,
+    move_config: bool,
+    dry_run: bool,
+) -> Result<ImportReport, AppError> {
+    let (source_id, name) = split_canonical_id(canonical_id)?;
+
+    // Reject implicit sources (local, core).
+    match source_id {
+        "local" => {
+            return Err(AppError::NotImportable {
+                id: source_id.to_string(),
+                kind: "local",
+            })
+        }
+        "core" => {
+            return Err(AppError::NotImportable {
+                id: source_id.to_string(),
+                kind: "core",
+            })
+        }
+        _ => {}
+    }
+
+    // Load sources spec and find the entry.
+    let spec = load_sources_spec_optional(ctx)?;
+    let entry = spec
+        .sources
+        .iter()
+        .find(|e| e.id == source_id)
+        .ok_or_else(|| AppError::SourceNotFound {
+            id: source_id.to_string(),
+        })?;
+
+    let source_dir = resolve_external_feature_dir(ctx, entry, name);
+    if !source_dir.exists() {
+        return Err(AppError::FeatureNotFound {
+            id: canonical_id.to_string(),
+        });
+    }
+
+    let dest_dir = ctx.local_root.join("features").join(name);
+    if dest_dir.exists() {
+        return Err(AppError::ImportDestinationExists {
+            path: dest_dir.clone(),
+        });
+    }
+
+    // Collect bare-depend warnings before writing anything.
+    let bare_depends_warnings = read_bare_depends(&source_dir);
+
+    if dry_run {
+        let config_files_updated = if move_config {
+            find_configs_with_feature(ctx, source_id, name)
+        } else {
+            vec![]
+        };
+        return Ok(ImportReport {
+            source_dir,
+            dest_dir,
+            config_files_updated,
+            bare_depends_warnings,
+        });
+    }
+
+    // Copy the feature directory to local.
+    copy_dir_recursive(&source_dir, &dest_dir)?;
+
+    // Optionally rewrite config references.
+    let mut config_files_updated = vec![];
+    if move_config {
+        for cfg_path in list_config_files(ctx) {
+            if config::rewrite_feature_source(&cfg_path, source_id, name, "local")? {
+                config_files_updated.push(cfg_path);
+            }
+        }
+    }
+
+    Ok(ImportReport {
+        source_dir,
+        dest_dir,
+        config_files_updated,
+        bare_depends_warnings,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// backend import
+// ---------------------------------------------------------------------------
+
+/// Copy a backend from an external source into the `local` source directory.
+///
+/// - `canonical_id` must be `<source_id>/<backend_name>` (external source only).
+/// - `move_strategy`: also rewrite strategy sections to reference `local/<name>`.
+/// - `dry_run`: compute what would happen but do not write any files.
+pub fn backend_import(
+    ctx: &AppContext,
+    canonical_id: &str,
+    move_strategy: bool,
+    dry_run: bool,
+) -> Result<ImportReport, AppError> {
+    let (source_id, name) = split_canonical_id(canonical_id)?;
+
+    match source_id {
+        "local" => {
+            return Err(AppError::NotImportable {
+                id: source_id.to_string(),
+                kind: "local",
+            })
+        }
+        "core" => {
+            return Err(AppError::NotImportable {
+                id: source_id.to_string(),
+                kind: "core",
+            })
+        }
+        _ => {}
+    }
+
+    let spec = load_sources_spec_optional(ctx)?;
+    let entry = spec
+        .sources
+        .iter()
+        .find(|e| e.id == source_id)
+        .ok_or_else(|| AppError::SourceNotFound {
+            id: source_id.to_string(),
+        })?;
+
+    let source_dir = resolve_external_backend_dir(ctx, entry, name);
+    if !source_dir.exists() {
+        return Err(AppError::BackendNotFound {
+            id: canonical_id.to_string(),
+        });
+    }
+
+    let dest_dir = ctx.local_root.join("backends").join(name);
+    if dest_dir.exists() {
+        return Err(AppError::ImportDestinationExists {
+            path: dest_dir.clone(),
+        });
+    }
+
+    if dry_run {
+        let config_files_updated = if move_strategy {
+            find_configs_with_backend(ctx, source_id, name)
+        } else {
+            vec![]
+        };
+        return Ok(ImportReport {
+            source_dir,
+            dest_dir,
+            config_files_updated,
+            bare_depends_warnings: vec![],
+        });
+    }
+
+    copy_dir_recursive(&source_dir, &dest_dir)?;
+
+    let mut config_files_updated = vec![];
+    if move_strategy {
+        for cfg_path in list_config_files(ctx) {
+            if config::rewrite_backend_source(&cfg_path, source_id, name, "local")? {
+                config_files_updated.push(cfg_path);
+            }
+        }
+    }
+
+    Ok(ImportReport {
+        source_dir,
+        dest_dir,
+        config_files_updated,
+        bare_depends_warnings: vec![],
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Import helpers
+// ---------------------------------------------------------------------------
+
+/// Split a canonical ID `source/name` into `(source_id, name)`.
+///
+/// Returns an error if the string is not in `<source>/<name>` form.
+fn split_canonical_id(canonical_id: &str) -> Result<(&str, &str), AppError> {
+    let mut parts = canonical_id.splitn(2, '/');
+    let source_id = parts.next().unwrap_or("");
+    let name = parts.next().unwrap_or("");
+    if source_id.is_empty() || name.is_empty() || name.contains('/') {
+        return Err(config::ConfigError::InvalidSources {
+            reason: format!("invalid canonical ID '{canonical_id}': expected '<source>/<name>'"),
+        }
+        .into());
+    }
+    Ok((source_id, name))
+}
+
+/// Resolve the filesystem directory for a feature in an external source.
+fn resolve_external_feature_dir(
+    ctx: &AppContext,
+    entry: &config::SourceEntry,
+    name: &str,
+) -> PathBuf {
+    match entry.source_type {
+        config::SourceType::Git => ctx
+            .dirs
+            .data_home
+            .join("sources")
+            .join(&entry.id)
+            .join("features")
+            .join(name),
+        config::SourceType::Path => {
+            let base = entry.path.as_deref().unwrap_or("");
+            std::path::Path::new(base).join("features").join(name)
+        }
+    }
+}
+
+/// Resolve the filesystem directory for a backend in an external source.
+fn resolve_external_backend_dir(
+    ctx: &AppContext,
+    entry: &config::SourceEntry,
+    name: &str,
+) -> PathBuf {
+    match entry.source_type {
+        config::SourceType::Git => ctx
+            .dirs
+            .data_home
+            .join("sources")
+            .join(&entry.id)
+            .join("backends")
+            .join(name),
+        config::SourceType::Path => {
+            let base = entry.path.as_deref().unwrap_or("");
+            std::path::Path::new(base).join("backends").join(name)
+        }
+    }
+}
+
+/// Recursively copy a directory from `src` to `dst`, skipping `.git` subdirectories.
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), AppError> {
+    std::fs::create_dir_all(dst).map_err(|e| AppError::ScaffoldIo {
+        path: dst.to_path_buf(),
+        source: e,
+    })?;
+    for entry in std::fs::read_dir(src).map_err(|e| AppError::ScaffoldIo {
+        path: src.to_path_buf(),
+        source: e,
+    })? {
+        let entry = entry.map_err(|e| AppError::ScaffoldIo {
+            path: src.to_path_buf(),
+            source: e,
+        })?;
+        let file_type = entry.file_type().map_err(|e| AppError::ScaffoldIo {
+            path: entry.path(),
+            source: e,
+        })?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            if entry.file_name() == ".git" {
+                continue;
+            }
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path).map_err(|e| AppError::ScaffoldIo {
+                path: src_path.clone(),
+                source: e,
+            })?;
+        }
+    }
+    Ok(())
+}
+
+/// List all `*.yaml` config files in `{config_home}/configs/`.
+fn list_config_files(ctx: &AppContext) -> Vec<PathBuf> {
+    let configs_dir = ctx.dirs.config_home.join("configs");
+    let Ok(entries) = std::fs::read_dir(&configs_dir) else {
+        return vec![];
+    };
+    entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("yaml"))
+        .collect()
+}
+
+/// Find config files that are likely to reference `source_id/name` in features sections.
+///
+/// Used for `--dry-run` output. Uses a fast text search heuristic.
+fn find_configs_with_feature(ctx: &AppContext, source_id: &str, name: &str) -> Vec<PathBuf> {
+    list_config_files(ctx)
+        .into_iter()
+        .filter(|p| {
+            std::fs::read_to_string(p)
+                .map(|content| content.contains(source_id) && content.contains(name))
+                .unwrap_or(false)
+        })
+        .collect()
+}
+
+/// Find config files that are likely to reference `source_id/name` in strategy sections.
+///
+/// Used for `--dry-run` output. Uses a fast text search heuristic.
+fn find_configs_with_backend(ctx: &AppContext, source_id: &str, name: &str) -> Vec<PathBuf> {
+    let canonical = format!("{source_id}/{name}");
+    list_config_files(ctx)
+        .into_iter()
+        .filter(|p| {
+            std::fs::read_to_string(p)
+                .map(|content| content.contains(&canonical))
+                .unwrap_or(false)
+        })
+        .collect()
+}
+
+/// Read `feature.yaml` and return any bare depends (depends entries without a `/` prefix).
+///
+/// Returns an empty vec if the file is absent or cannot be parsed.
+fn read_bare_depends(feature_dir: &std::path::Path) -> Vec<String> {
+    let feature_yaml = feature_dir.join("feature.yaml");
+    let Ok(content) = std::fs::read_to_string(&feature_yaml) else {
+        return vec![];
+    };
+
+    // Minimal serde parse to extract dep.depends without pulling in the full feature schema.
+    #[derive(serde::Deserialize, Default)]
+    struct DepSection {
+        #[serde(default)]
+        depends: Vec<String>,
+    }
+    #[derive(serde::Deserialize, Default)]
+    struct MinimalFeature {
+        #[serde(default)]
+        dep: Option<DepSection>,
+    }
+
+    let Ok(f): Result<MinimalFeature, _> = serde_yaml::from_str(&content) else {
+        return vec![];
+    };
+    f.dep
+        .unwrap_or_default()
+        .depends
+        .into_iter()
+        .filter(|d| !d.contains('/'))
+        .collect()
 }
 
 // ---------------------------------------------------------------------------

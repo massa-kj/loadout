@@ -3,8 +3,8 @@
 use std::process;
 
 use crate::args::{
-    BackendCommand, BackendEditArgs, BackendListArgs, BackendNewArgs, BackendPlatform,
-    BackendShowArgs, BackendValidateArgs, OutputFormat,
+    BackendCommand, BackendEditArgs, BackendImportArgs, BackendListArgs, BackendNewArgs,
+    BackendPlatform, BackendShowArgs, BackendValidateArgs, OutputFormat,
 };
 use crate::context::build_app_context;
 
@@ -15,6 +15,7 @@ pub fn run(cmd: BackendCommand) {
         BackendCommand::Edit(args) => edit(args),
         BackendCommand::New(args) => new(args),
         BackendCommand::Validate(args) => validate(args),
+        BackendCommand::Import(args) => import(args),
     }
 }
 
@@ -170,5 +171,42 @@ fn validate(args: BackendValidateArgs) {
 
     if !report.is_ok() {
         process::exit(1);
+    }
+}
+
+// ── import ────────────────────────────────────────────────────────────────────
+
+fn import(args: BackendImportArgs) {
+    let ctx = build_app_context();
+    let report = app::backend_import(&ctx, &args.id, args.move_strategy, args.dry_run)
+        .unwrap_or_else(|e| {
+            eprintln!("error: {e}");
+            process::exit(1);
+        });
+
+    if args.dry_run {
+        println!("(dry run — no changes will be made)");
+    }
+
+    println!("from:  {}", report.source_dir.display());
+    println!("to:    {}", report.dest_dir.display());
+
+    if args.move_strategy {
+        if report.config_files_updated.is_empty() {
+            println!("configs: (no strategy sections reference this backend)");
+        } else {
+            println!("configs rewritten:");
+            for p in &report.config_files_updated {
+                println!("  {}", p.display());
+            }
+        }
+    }
+
+    if !args.dry_run {
+        if args.move_strategy && !report.config_files_updated.is_empty() {
+            println!("imported '{}' and rewrote strategy references", args.id);
+        } else {
+            println!("imported '{}'", args.id);
+        }
     }
 }

@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use std::process;
 
 use crate::args::{
-    FeatureCommand, FeatureEditArgs, FeatureListArgs, FeatureNewArgs, FeatureShowArgs,
-    FeatureTemplate, FeatureValidateArgs, OutputFormat,
+    FeatureCommand, FeatureEditArgs, FeatureImportArgs, FeatureListArgs, FeatureNewArgs,
+    FeatureShowArgs, FeatureTemplate, FeatureValidateArgs, OutputFormat,
 };
 use crate::context::build_app_context;
 
@@ -16,6 +16,7 @@ pub fn run(cmd: FeatureCommand) {
         FeatureCommand::Edit(args) => edit(args),
         FeatureCommand::New(args) => new(args),
         FeatureCommand::Validate(args) => validate(args),
+        FeatureCommand::Import(args) => import(args),
     }
 }
 
@@ -225,6 +226,55 @@ fn print_validation_report(report: &app::ValidationReport) {
                 app::IssueLevel::Warning => "[warn] ",
             };
             println!("  {tag}  {}", issue.message);
+        }
+    }
+}
+
+// ── import ────────────────────────────────────────────────────────────────────
+
+fn import(args: FeatureImportArgs) {
+    let ctx = build_app_context();
+    let report = app::feature_import(&ctx, &args.id, args.move_config, args.dry_run)
+        .unwrap_or_else(|e| {
+            eprintln!("error: {e}");
+            process::exit(1);
+        });
+
+    if args.dry_run {
+        println!("(dry run — no changes will be made)");
+    }
+
+    println!("from:  {}", report.source_dir.display());
+    println!("to:    {}", report.dest_dir.display());
+
+    if !report.bare_depends_warnings.is_empty() {
+        eprintln!("warning: feature has bare depends (same-source references):");
+        for dep in &report.bare_depends_warnings {
+            eprintln!("  - {dep}");
+        }
+        eprintln!(
+            "hint: bare depends may not resolve correctly after import; \
+             consider converting them to canonical IDs (e.g. local/{dep})",
+            dep = report.bare_depends_warnings[0]
+        );
+    }
+
+    if args.move_config {
+        if report.config_files_updated.is_empty() {
+            println!("configs: (no files reference this feature)");
+        } else {
+            println!("configs rewritten:");
+            for p in &report.config_files_updated {
+                println!("  {}", p.display());
+            }
+        }
+    }
+
+    if !args.dry_run {
+        if args.move_config && !report.config_files_updated.is_empty() {
+            println!("imported '{}' and rewrote config references", args.id);
+        } else {
+            println!("imported '{}'", args.id);
         }
     }
 }

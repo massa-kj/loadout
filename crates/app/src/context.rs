@@ -98,6 +98,15 @@ pub enum AppError {
     #[error("git operation failed for source '{source_id}': {stderr}")]
     GitCommandFailed { source_id: String, stderr: String },
 
+    /// Attempted to import a `local` or `core` source.
+    /// Import is only supported for external sources.
+    #[error("'{id}' is a {kind} source; only external sources can be imported")]
+    NotImportable { id: String, kind: &'static str },
+
+    /// The import destination directory already exists.
+    #[error("import destination already exists: {}", path.display())]
+    ImportDestinationExists { path: PathBuf },
+
     /// No cached env plan found; `loadout apply` must be run first.
     #[error("no cached env plan — run 'loadout apply' first")]
     EnvPlanNotFound,

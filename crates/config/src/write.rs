@@ -290,3 +290,216 @@ fn remove_at_path(node: &mut Value, segments: &[&str]) -> bool {
         None => false,
     }
 }
+
+// ---------------------------------------------------------------------------
+// Source ID rewriting — `feature import` / `backend import`
+// ---------------------------------------------------------------------------
+
+/// Rewrite all occurrences of `old_source/<name>` to `new_source/<name>` in the
+/// `profile.features` and `bundles.*.features` sections of a config file.
+///
+/// Returns `true` if any changes were made.
+/// Returns `false` (without error) if the file does not exist or the key is absent.
+pub fn rewrite_feature_source(
+    path: &Path,
+    old_source: &str,
+    name: &str,
+    new_source: &str,
+) -> Result<bool, ConfigError> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let mut doc = load_or_empty(path)?;
+
+    // Collect bundle names first to avoid borrow conflicts later.
+    let bundle_names: Vec<String> = collect_bundle_names(&doc);
+
+    let mut changed = false;
+
+    // Rewrite profile.features.
+    {
+        if let Some(features) = navigate_to_mapping_mut(&mut doc, &["profile", "features"]) {
+            if move_feature_in_mapping(features, old_source, name, new_source) {
+                changed = true;
+            }
+        }
+    }
+
+    // Rewrite bundles.*.features.
+    for bundle_name in &bundle_names {
+        if let Some(features) =
+            navigate_to_mapping_mut(&mut doc, &["bundles", bundle_name.as_str(), "features"])
+        {
+            if move_feature_in_mapping(features, old_source, name, new_source) {
+                changed = true;
+            }
+        }
+    }
+
+    if changed {
+        io::write_yaml_atomic(path, &doc)?;
+    }
+    Ok(changed)
+}
+
+/// Rewrite all occurrences of `old_source/<name>` to `new_source/<name>` in the
+/// `strategy` section of a config file (`default_backend` and `overrides.*.backend`).
+///
+/// Returns `true` if any changes were made.
+/// Returns `false` (without error) if the file does not exist or the strategy section is absent.
+pub fn rewrite_backend_source(
+    path: &Path,
+    old_source: &str,
+    name: &str,
+    new_source: &str,
+) -> Result<bool, ConfigError> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let mut doc = load_or_empty(path)?;
+    let old_id = format!("{old_source}/{name}");
+    let new_id = format!("{new_source}/{name}");
+    let changed = rewrite_strategy_ids(&mut doc, &old_id, &new_id);
+    if changed {
+        io::write_yaml_atomic(path, &doc)?;
+    }
+    Ok(changed)
+}
+
+// -- helpers for source-rewrite functions ------------------------------------
+
+/// Collect all keys in the top-level `bundles:` mapping without holding a borrow.
+fn collect_bundle_names(doc: &Value) -> Vec<String> {
+    let bundles_key = Value::String("bundles".into());
+    doc.as_mapping()
+        .and_then(|m| m.get(&bundles_key))
+        .and_then(|v| v.as_mapping())
+        .map(|m| {
+            m.keys()
+                .filter_map(|k| k.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Navigate through a chain of mapping keys, returning the final node as `&mut Mapping`.
+fn navigate_to_mapping_mut<'a>(
+    root: &'a mut Value,
+    path: &[&str],
+) -> Option<&'a mut serde_yaml::Mapping> {
+    let mut current = root;
+    for key in path {
+        let k = Value::String((*key).to_string());
+        current = current.as_mapping_mut()?.get_mut(&k)?;
+    }
+    current.as_mapping_mut()
+}
+
+/// Move `features[old_source][name]` to `features[new_source][name]`.
+///
+/// Removes the `old_source` key if it becomes empty after the move.
+/// Returns `true` if the move was performed.
+fn move_feature_in_mapping(
+    features: &mut serde_yaml::Mapping,
+    old_source: &str,
+    name: &str,
+    new_source: &str,
+) -> bool {
+    let old_src_key = Value::String(old_source.to_string());
+    let name_key = Value::String(name.to_string());
+
+    // Extract the feature value from the old source entry.
+    let feature_val = {
+        let old_src = match features
+            .get_mut(&old_src_key)
+            .and_then(|v| v.as_mapping_mut())
+        {
+            Some(m) => m,
+            None => return false,
+        };
+        match old_src.remove(&name_key) {
+            Some(v) => v,
+            None => return false,
+        }
+    };
+
+    // Remove the old_source key if it is now empty.
+    if features
+        .get(&old_src_key)
+        .and_then(|v| v.as_mapping())
+        .map(|m| m.is_empty())
+        .unwrap_or(false)
+    {
+        features.remove(&old_src_key);
+    }
+
+    // Insert into new_source, creating the entry if absent.
+    let new_src_key = Value::String(new_source.to_string());
+    if !features.contains_key(&new_src_key) {
+        features.insert(
+            new_src_key.clone(),
+            Value::Mapping(serde_yaml::Mapping::new()),
+        );
+    }
+    if let Some(new_src) = features
+        .get_mut(&new_src_key)
+        .and_then(|v| v.as_mapping_mut())
+    {
+        new_src.insert(name_key, feature_val);
+    }
+    true
+}
+
+/// Rewrite `default_backend` / `overrides.*.backend` values matching `old_id`
+/// to `new_id` in the `strategy:` section of a YAML document.
+fn rewrite_strategy_ids(doc: &mut Value, old_id: &str, new_id: &str) -> bool {
+    let strategy_key = Value::String("strategy".into());
+    let mut changed = false;
+
+    let doc_map = match doc.as_mapping_mut() {
+        Some(m) => m,
+        None => return false,
+    };
+    let strategy_val = match doc_map.get_mut(&strategy_key) {
+        Some(v) => v,
+        None => return false,
+    };
+    let strategy = match strategy_val.as_mapping_mut() {
+        Some(m) => m,
+        None => return false,
+    };
+
+    for (_, kind_val) in strategy.iter_mut() {
+        let Some(kind_map) = kind_val.as_mapping_mut() else {
+            continue;
+        };
+
+        // Rewrite default_backend.
+        let db_key = Value::String("default_backend".into());
+        if let Some(db) = kind_map.get_mut(&db_key) {
+            if db.as_str() == Some(old_id) {
+                *db = Value::String(new_id.to_string());
+                changed = true;
+            }
+        }
+
+        // Rewrite overrides.*.backend.
+        let overrides_key = Value::String("overrides".into());
+        if let Some(overrides_val) = kind_map.get_mut(&overrides_key) {
+            if let Some(overrides) = overrides_val.as_mapping_mut() {
+                for (_, override_val) in overrides.iter_mut() {
+                    if let Some(override_map) = override_val.as_mapping_mut() {
+                        let backend_key = Value::String("backend".into());
+                        if let Some(backend) = override_map.get_mut(&backend_key) {
+                            if backend.as_str() == Some(old_id) {
+                                *backend = Value::String(new_id.to_string());
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    changed
+}

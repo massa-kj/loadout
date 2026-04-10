@@ -54,7 +54,10 @@
 //!      `docs/specs/data/sources.md`
 
 pub mod write;
-pub use write::{add_feature, create_config, raw_set, raw_show, raw_unset, remove_feature};
+pub use write::{
+    add_feature, create_config, raw_set, raw_show, raw_unset, remove_feature,
+    rewrite_backend_source, rewrite_feature_source,
+};
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
