@@ -4,7 +4,7 @@ use std::process;
 
 use crate::args::{
     OutputArgs, OutputFormat, SourceAddCommand, SourceCommand, SourceRemoveArgs, SourceShowArgs,
-    SourceTrustArgs, SourceUntrustArgs,
+    SourceTrustArgs, SourceUntrustArgs, SourceUpdateArgs,
 };
 use crate::context::build_app_context;
 
@@ -17,6 +17,7 @@ pub fn run(cmd: SourceCommand) {
         SourceCommand::Remove(args) => remove(args),
         SourceCommand::Trust(args) => trust(args),
         SourceCommand::Untrust(args) => untrust(args),
+        SourceCommand::Update(args) => update(args),
     }
 }
 
@@ -240,6 +241,26 @@ fn untrust(args: SourceUntrustArgs) {
         });
 
     println!("updated allow-list in {}", path.display());
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+// ── update ───────────────────────────────────────────────────────────────────
+
+fn update(args: SourceUpdateArgs) {
+    let ctx = build_app_context();
+
+    app::source_update(&ctx, &args.id, args.to_commit.as_deref(), args.relock)
+        .unwrap_or_else(|e| {
+            eprintln!("error: {e}");
+            process::exit(1);
+        });
+
+    if args.relock {
+        println!("relocked '{}'", args.id);
+    } else {
+        println!("updated '{}'", args.id);
+    }
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

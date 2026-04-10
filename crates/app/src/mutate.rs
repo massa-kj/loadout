@@ -704,6 +704,382 @@ fn remove_from_allow_list(
 }
 
 // ---------------------------------------------------------------------------
+// source update
+// ---------------------------------------------------------------------------
+
+/// Update a `type: git` external source: fetch, checkout, and rewrite the lock file.
+///
+/// Modes:
+/// - Default (`to_commit = None`, `relock = false`): fetch latest and checkout the
+///   ref declared in `sources.yaml` (e.g. tip of a branch).
+/// - `--to-commit <hash>`: fetch, then checkout the specified commit hash.
+/// - `--relock`: skip fetch/checkout; only recompute `manifest_hash` and update
+///   the lock entry. Useful when the working tree is already at the desired state.
+///
+/// Returns `()` on success. The only file mutated is `sources.lock.yaml`.
+pub fn source_update(
+    ctx: &AppContext,
+    id: &str,
+    to_commit: Option<&str>,
+    relock: bool,
+) -> Result<(), AppError> {
+    let spec = load_sources_spec_optional(ctx)?;
+
+    let entry = spec
+        .sources
+        .iter()
+        .find(|e| e.id == id)
+        .ok_or_else(|| AppError::SourceNotFound { id: id.to_string() })?;
+
+    // type: path sources cannot be updated via git.
+    if matches!(entry.source_type, config::SourceType::Path) {
+        return Err(AppError::GitSourceRequired { id: id.to_string() });
+    }
+
+    let repo_dir = ctx.dirs.data_home.join("sources").join(id);
+
+    if !relock {
+        // Fetch from remote.
+        git_run(
+            id,
+            &["fetch", "--prune"],
+            &repo_dir,
+        )?;
+
+        // Determine the target ref to checkout.
+        let target = if let Some(commit) = to_commit {
+            commit.to_string()
+        } else {
+            // Resolve from the declared ref in sources.yaml.
+            match &entry.source_ref {
+                Some(r) if r.branch.is_some() => {
+                    format!("origin/{}", r.branch.as_deref().unwrap())
+                }
+                Some(r) if r.tag.is_some() => r.tag.clone().unwrap(),
+                Some(r) if r.commit.is_some() => r.commit.clone().unwrap(),
+                _ => {
+                    // No ref declared; resolve HEAD of the tracked remote.
+                    git_rev_parse(id, "FETCH_HEAD", &repo_dir)?
+                }
+            }
+        };
+
+        // Detach HEAD at the resolved target.
+        git_run(id, &["checkout", "--detach", &target], &repo_dir)?;
+    }
+
+    // Resolve the current HEAD to a full commit hash.
+    let resolved_commit = git_rev_parse(id, "HEAD", &repo_dir)?;
+
+    // Compute manifest_hash over features/**/*.yaml and backends/**/*.yaml.
+    let manifest_hash = compute_manifest_hash(id, &repo_dir, entry)?;
+
+    // Update the lock file.
+    let lock_path = ctx.sources_lock_path();
+    let mut lock = config::load_sources_lock(&lock_path).unwrap_or_default();
+
+    lock.sources.insert(
+        id.to_string(),
+        config::SourceLockEntry {
+            resolved_commit,
+            fetched_at: utc_now_rfc3339(),
+            manifest_hash,
+        },
+    );
+
+    config::save_sources_lock(&lock_path, &lock)?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// git helpers
+// ---------------------------------------------------------------------------
+
+/// Run a git sub-command inside `repo_dir`. Returns `Ok(())` on exit code 0,
+/// or `AppError::GitCommandFailed` with captured stderr on failure.
+fn git_run(source_id: &str, args: &[&str], repo_dir: &std::path::Path) -> Result<(), AppError> {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(repo_dir)
+        .output()
+        .map_err(|e| AppError::GitCommandFailed {
+            source_id: source_id.to_string(),
+            stderr: format!("failed to spawn git: {e}"),
+        })?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(AppError::GitCommandFailed {
+            source_id: source_id.to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        })
+    }
+}
+
+/// Run `git rev-parse <rev>` and return the trimmed output as a full commit hash.
+fn git_rev_parse(
+    source_id: &str,
+    rev: &str,
+    repo_dir: &std::path::Path,
+) -> Result<String, AppError> {
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", rev])
+        .current_dir(repo_dir)
+        .output()
+        .map_err(|e| AppError::GitCommandFailed {
+            source_id: source_id.to_string(),
+            stderr: format!("failed to spawn git: {e}"),
+        })?;
+
+    if !output.status.success() {
+        return Err(AppError::GitCommandFailed {
+            source_id: source_id.to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        });
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Compute a `sha256:<hex>` manifest hash over all `*.yaml` files found under
+/// `features/` and `backends/` within the source's subtree (as declared by
+/// `entry.path`). Files are sorted by relative path for determinism.
+fn compute_manifest_hash(
+    source_id: &str,
+    repo_dir: &std::path::Path,
+    entry: &config::SourceEntry,
+) -> Result<String, AppError> {
+    use std::io::Read;
+
+    // The repo subtree path declared in the source entry (default ".").
+    let subtree = entry
+        .path
+        .as_deref()
+        .filter(|p| !p.is_empty())
+        .unwrap_or(".");
+    let root = repo_dir.join(subtree);
+
+    let mut paths: Vec<std::path::PathBuf> = Vec::new();
+    for subdir in ["features", "backends"] {
+        let dir = root.join(subdir);
+        if !dir.exists() {
+            continue;
+        }
+        collect_yaml_files(&dir, &mut paths);
+    }
+    paths.sort();
+
+    // Build a SHA-256 over pair of (relative path bytes, file content).
+    let mut hasher = Sha256::new();
+    for abs_path in &paths {
+        let rel = abs_path
+            .strip_prefix(repo_dir)
+            .unwrap_or(abs_path)
+            .to_string_lossy();
+        hasher.update(rel.as_bytes());
+        hasher.update(b"\0");
+
+        let mut f = std::fs::File::open(abs_path).map_err(|e| AppError::GitCommandFailed {
+            source_id: source_id.to_string(),
+            stderr: format!("failed to read manifest file {}: {e}", abs_path.display()),
+        })?;
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf).map_err(|e| AppError::GitCommandFailed {
+            source_id: source_id.to_string(),
+            stderr: format!("failed to read manifest file {}: {e}", abs_path.display()),
+        })?;
+        hasher.update(&buf);
+        hasher.update(b"\0");
+    }
+
+    Ok(format!("sha256:{}", hex_encode(hasher.finalize())))
+}
+
+/// Recursively collect `*.yaml` files under `dir` into `out`.
+fn collect_yaml_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut children: Vec<_> = entries.flatten().map(|e| e.path()).collect();
+    children.sort();
+    for path in children {
+        if path.is_dir() {
+            collect_yaml_files(&path, out);
+        } else if path.extension().and_then(|e| e.to_str()) == Some("yaml") {
+            out.push(path);
+        }
+    }
+}
+
+/// Minimal SHA-256 state machine (no external dependency).
+///
+/// Implements FIPS 180-4 SHA-256.
+struct Sha256 {
+    h: [u32; 8],
+    buf: [u8; 64],
+    buf_len: usize,
+    total_len: u64,
+}
+
+impl Sha256 {
+    #[allow(clippy::unreadable_literal)]
+    fn new() -> Self {
+        Self {
+            h: [
+                0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+            ],
+            buf: [0u8; 64],
+            buf_len: 0,
+            total_len: 0,
+        }
+    }
+
+    fn update(&mut self, data: &[u8]) {
+        let mut offset = 0;
+        while offset < data.len() {
+            let to_copy = (64 - self.buf_len).min(data.len() - offset);
+            self.buf[self.buf_len..self.buf_len + to_copy]
+                .copy_from_slice(&data[offset..offset + to_copy]);
+            self.buf_len += to_copy;
+            offset += to_copy;
+            self.total_len += to_copy as u64;
+            if self.buf_len == 64 {
+                let block = self.buf;
+                Self::compress(&mut self.h, &block);
+                self.buf_len = 0;
+            }
+        }
+    }
+
+    fn finalize(mut self) -> [u8; 32] {
+        // Padding
+        let bit_len = self.total_len * 8;
+        self.update(&[0x80]);
+        while self.buf_len != 56 {
+            self.update(&[0x00]);
+        }
+        self.update(&bit_len.to_be_bytes());
+
+        let mut out = [0u8; 32];
+        for (i, &word) in self.h.iter().enumerate() {
+            out[i * 4..i * 4 + 4].copy_from_slice(&word.to_be_bytes());
+        }
+        out
+    }
+
+    #[allow(clippy::unreadable_literal)]
+    fn compress(h: &mut [u32; 8], block: &[u8; 64]) {
+        const K: [u32; 64] = [
+            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+            0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+            0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+            0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+            0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+            0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+            0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+            0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+            0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+            0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+            0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+            0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+            0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+            0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+            0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+        ];
+
+        let mut w = [0u32; 64];
+        for i in 0..16 {
+            w[i] = u32::from_be_bytes(block[i * 4..i * 4 + 4].try_into().unwrap());
+        }
+        for i in 16..64 {
+            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
+            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16]
+                .wrapping_add(s0)
+                .wrapping_add(w[i - 7])
+                .wrapping_add(s1);
+        }
+
+        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh] = *h;
+
+        for i in 0..64 {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let ch = (e & f) ^ ((!e) & g);
+            let temp1 = hh
+                .wrapping_add(s1)
+                .wrapping_add(ch)
+                .wrapping_add(K[i])
+                .wrapping_add(w[i]);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let temp2 = s0.wrapping_add(maj);
+
+            hh = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(temp1);
+            d = c;
+            c = b;
+            b = a;
+            a = temp1.wrapping_add(temp2);
+        }
+
+        h[0] = h[0].wrapping_add(a);
+        h[1] = h[1].wrapping_add(b);
+        h[2] = h[2].wrapping_add(c);
+        h[3] = h[3].wrapping_add(d);
+        h[4] = h[4].wrapping_add(e);
+        h[5] = h[5].wrapping_add(f);
+        h[6] = h[6].wrapping_add(g);
+        h[7] = h[7].wrapping_add(hh);
+    }
+}
+
+/// Encode a byte slice as a lowercase hex string.
+fn hex_encode(bytes: [u8; 32]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Return the current UTC time as an RFC 3339 string (`YYYY-MM-DDTHH:MM:SSZ`).
+///
+/// Uses only `std` to avoid adding external time dependencies.
+fn utc_now_rfc3339() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    secs_to_rfc3339(secs)
+}
+
+/// Convert a Unix timestamp (seconds since epoch) to `YYYY-MM-DDTHH:MM:SSZ`.
+fn secs_to_rfc3339(secs: u64) -> String {
+    // Days since 1970-01-01
+    let days = secs / 86400;
+    let time = secs % 86400;
+    let h = time / 3600;
+    let m = (time % 3600) / 60;
+    let s = time % 60;
+
+    // Gregorian calendar calculation from Julian Day Number.
+    let jd = days + 2440588; // 2440588 = Julian day of 1970-01-01
+    let a = jd + 32044;
+    let b = (4 * a + 3) / 146097;
+    let c = a - (146097 * b) / 4;
+    let d = (4 * c + 3) / 1461;
+    let e = c - (1461 * d) / 4;
+    let m_raw = (5 * e + 2) / 153;
+
+    let day = e - (153 * m_raw + 2) / 5 + 1;
+    let month = m_raw + 3 - 12 * (m_raw / 10);
+    let year = 100 * b + d - 4800 + m_raw / 10;
+
+    format!("{year:04}-{month:02}-{day:02}T{h:02}:{m:02}:{s:02}Z")
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

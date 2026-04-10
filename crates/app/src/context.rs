@@ -89,6 +89,15 @@ pub enum AppError {
     #[error("path '{path}' resolves to the same directory as existing source '{existing_id}'")]
     PathSourceDuplicate { path: String, existing_id: String },
 
+    /// A `source update` was requested on a source that is not `type: git`.
+    /// Only git sources can be updated this way.
+    #[error("source '{id}' is type: path; only type: git sources can be updated")]
+    GitSourceRequired { id: String },
+
+    /// A `git` CLI operation failed.
+    #[error("git operation failed for source '{source_id}': {stderr}")]
+    GitCommandFailed { source_id: String, stderr: String },
+
     /// No cached env plan found; `loadout apply` must be run first.
     #[error("no cached env plan — run 'loadout apply' first")]
     EnvPlanNotFound,

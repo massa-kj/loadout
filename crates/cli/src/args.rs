@@ -507,6 +507,9 @@ pub enum SourceCommand {
 
     /// Revoke allow-list entries for a source
     Untrust(SourceUntrustArgs),
+
+    /// Fetch latest commits and update the lock file for a git source
+    Update(SourceUpdateArgs),
 }
 
 /// Subcommand for `loadout source add`.
@@ -604,6 +607,20 @@ pub struct SourceShowArgs {
 
     #[command(flatten)]
     pub output: OutputArgs,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct SourceUpdateArgs {
+    /// Source ID to update
+    pub id: String,
+
+    /// Check out this specific commit hash instead of following the declared ref
+    #[arg(long, value_name = "COMMIT")]
+    pub to_commit: Option<String>,
+
+    /// Recompute manifest_hash and update the lock without fetching or checking out
+    #[arg(long)]
+    pub relock: bool,
 }
 
 // ── doctor ───────────────────────────────────────────────────────────────────
