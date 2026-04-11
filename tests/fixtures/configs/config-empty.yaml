@@ -2,7 +2,7 @@
 # Used by: lifecycle, uninstall scenarios (full uninstall phase)
 
 profile:
-  features: {}
+  components: {}
 
 strategy:
   package:

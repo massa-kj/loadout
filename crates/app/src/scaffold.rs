@@ -1,4 +1,4 @@
-// Scaffold use cases: create a new local feature or backend directory from a template.
+// Scaffold use cases: create a new local component or backend directory from a template.
 //
 // Files are always created with `create_new` (fails if path exists) so that
 // accidental overwrites cannot happen.
@@ -10,12 +10,12 @@ use crate::context::{AppContext, AppError};
 
 // ── Template / platform choices ──────────────────────────────────────────────
 
-/// Content template for `feature new`.
+/// Content template for `component new`.
 #[derive(Debug, Clone, Copy)]
-pub enum FeatureTemplate {
-    /// Declarative feature: `feature.yaml` with a `resources:` skeleton.
+pub enum ComponentTemplate {
+    /// Declarative component: `component.yaml` with a `resources:` skeleton.
     Declarative,
-    /// Script feature: `feature.yaml` + stub `install.sh` / `uninstall.sh`.
+    /// Script component: `component.yaml` + stub `install.sh` / `uninstall.sh`.
     Script,
 }
 
@@ -30,7 +30,7 @@ pub enum BackendPlatform {
 
 // ── Static templates ─────────────────────────────────────────────────────────
 
-const FEATURE_YAML_DECLARATIVE: &str = "\
+const COMPONENT_YAML_DECLARATIVE: &str = "\
 spec_version: 1
 # mode: declarative  (default; uncomment to make explicit once resources are declared)
 description: TODO
@@ -53,28 +53,28 @@ resources:
   #   op: link
 ";
 
-const FEATURE_YAML_SCRIPT: &str = "\
+const COMPONENT_YAML_SCRIPT: &str = "\
 spec_version: 1
 mode: script
 description: TODO
 
 # Uncomment to declare dependencies:
 # depends:
-#   - other-feature
+#   - other-component
 ";
 
 const INSTALL_SH: &str = "\
 #!/usr/bin/env bash
 set -euo pipefail
 # Available environment variables:
-#   LOADOUT_FEATURE_ID      — canonical feature ID (e.g. local/myfeature)
+#   LOADOUT_COMPONENT_ID      — canonical component ID (e.g. local/mycomponent)
 #   LOADOUT_CONFIG_HOME     — loadout config directory
 #   LOADOUT_DATA_HOME       — loadout data directory
 #   LOADOUT_STATE_HOME      — loadout state directory
 #
-# Working directory: this feature's source directory.
+# Working directory: this component's source directory.
 
-echo \"Installing ${LOADOUT_FEATURE_ID}...\"
+echo \"Installing ${LOADOUT_COMPONENT_ID}...\"
 
 # TODO: implement install logic
 ";
@@ -83,7 +83,7 @@ const UNINSTALL_SH: &str = "\
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo \"Uninstalling ${LOADOUT_FEATURE_ID}...\"
+echo \"Uninstalling ${LOADOUT_COMPONENT_ID}...\"
 
 # TODO: implement uninstall logic
 ";
@@ -151,21 +151,21 @@ const STATUS_PS1: &str = "\
 Write-Output \"unknown\"
 ";
 
-// ── feature new ──────────────────────────────────────────────────────────────
+// ── component new ──────────────────────────────────────────────────────────────
 
-/// Scaffold a new local feature directory under `{local_root}/features/<name>/`.
+/// Scaffold a new local component directory under `{local_root}/components/<name>/`.
 ///
-/// Creates `feature.yaml` from the chosen template. For `Script` mode, also
+/// Creates `component.yaml` from the chosen template. For `Script` mode, also
 /// creates stub `install.sh` / `uninstall.sh` and makes them executable on Unix.
 ///
 /// Returns the path of the created directory. Fails with [`AppError::AlreadyExists`]
 /// if the directory already exists.
-pub fn feature_new(
+pub fn component_new(
     ctx: &AppContext,
     name: &str,
-    template: FeatureTemplate,
+    template: ComponentTemplate,
 ) -> Result<PathBuf, AppError> {
-    let dir = ctx.local_root.join("features").join(name);
+    let dir = ctx.local_root.join("components").join(name);
     if dir.exists() {
         return Err(AppError::AlreadyExists { path: dir });
     }
@@ -174,13 +174,13 @@ pub fn feature_new(
         source: e,
     })?;
 
-    let feature_yaml = match template {
-        FeatureTemplate::Declarative => FEATURE_YAML_DECLARATIVE,
-        FeatureTemplate::Script => FEATURE_YAML_SCRIPT,
+    let component_yaml = match template {
+        ComponentTemplate::Declarative => COMPONENT_YAML_DECLARATIVE,
+        ComponentTemplate::Script => COMPONENT_YAML_SCRIPT,
     };
-    write_new_file(&dir.join("feature.yaml"), feature_yaml)?;
+    write_new_file(&dir.join("component.yaml"), component_yaml)?;
 
-    if matches!(template, FeatureTemplate::Script) {
+    if matches!(template, ComponentTemplate::Script) {
         let install = dir.join("install.sh");
         let uninstall = dir.join("uninstall.sh");
         write_new_file(&install, INSTALL_SH)?;

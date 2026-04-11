@@ -6,7 +6,7 @@ use std::fmt;
 /// Canonical feature identifier: `<source_id>/<name>` (e.g. `core/git`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct CanonicalFeatureId(String);
+pub struct CanonicalComponentId(String);
 
 /// Canonical backend identifier: `<source_id>/<name>` (e.g. `core/brew`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -18,12 +18,12 @@ pub struct CanonicalBackendId(String);
 #[serde(transparent)]
 pub struct SourceId(String);
 
-/// Topologically sorted list of feature IDs produced by the resolver.
-pub type ResolvedFeatureOrder = Vec<CanonicalFeatureId>;
+/// Topologically sorted list of component IDs produced by the resolver.
+pub type ResolvedComponentOrder = Vec<CanonicalComponentId>;
 
-// --- CanonicalFeatureId impl ---
+// --- CanonicalComponentId impl ---
 
-impl CanonicalFeatureId {
+impl CanonicalComponentId {
     /// Construct from a string that is already in canonical form.
     /// Returns an error if the string does not contain exactly one `/`
     /// or if either part is empty.
@@ -49,14 +49,14 @@ impl CanonicalFeatureId {
     }
 }
 
-impl fmt::Display for CanonicalFeatureId {
+impl fmt::Display for CanonicalComponentId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
     }
 }
 
-impl From<CanonicalFeatureId> for String {
-    fn from(id: CanonicalFeatureId) -> Self {
+impl From<CanonicalComponentId> for String {
+    fn from(id: CanonicalComponentId) -> Self {
         id.0
     }
 }
@@ -176,31 +176,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn canonical_feature_id_valid() {
-        let id = CanonicalFeatureId::new("core/git").unwrap();
+    fn canonical_component_id_valid() {
+        let id = CanonicalComponentId::new("core/git").unwrap();
         assert_eq!(id.source(), "core");
         assert_eq!(id.name(), "git");
         assert_eq!(id.as_str(), "core/git");
     }
 
     #[test]
-    fn canonical_feature_id_no_slash() {
-        assert!(CanonicalFeatureId::new("git").is_err());
+    fn canonical_component_id_no_slash() {
+        assert!(CanonicalComponentId::new("git").is_err());
     }
 
     #[test]
-    fn canonical_feature_id_multiple_slashes() {
-        assert!(CanonicalFeatureId::new("core/local/git").is_err());
+    fn canonical_component_id_multiple_slashes() {
+        assert!(CanonicalComponentId::new("core/local/git").is_err());
     }
 
     #[test]
-    fn canonical_feature_id_empty_source() {
-        assert!(CanonicalFeatureId::new("/git").is_err());
+    fn canonical_component_id_empty_source() {
+        assert!(CanonicalComponentId::new("/git").is_err());
     }
 
     #[test]
-    fn canonical_feature_id_empty_name() {
-        assert!(CanonicalFeatureId::new("core/").is_err());
+    fn canonical_component_id_empty_name() {
+        assert!(CanonicalComponentId::new("core/").is_err());
     }
 
     #[test]

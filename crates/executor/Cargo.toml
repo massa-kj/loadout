@@ -7,7 +7,7 @@ edition = "2021"
 model = { path = "../model" }
 state = { path = "../state" }
 backend-host = { path = "../backend-host" }
-feature-host = { path = "../feature-host" }
+component-host = { path = "../component-host" }
 platform = { path = "../platform" }
 thiserror = "2"
 

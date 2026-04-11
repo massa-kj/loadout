@@ -12,26 +12,26 @@ cd ~/loadout
 ```
 
 Bootstrap installs the minimum dependencies (git, jq, yq) and sets up the environment.
-It does not install any features.
+It does not install any components.
 
 ## Bootstrap
 
 Bootstrap prepares the execution environment only.
-It does not install features. Run `apply` after bootstrap to install your environment.
+It does not install components. Run `apply` after bootstrap to install your environment.
 
 ## Profiles
 
 See [profiles default location](../specs/data/profile.md#File-Location).
 
-Each profile declares which features should be present and (optionally) which version.
+Each profile declares which components should be present and (optionally) which version.
 
-Feature keys use **namespace grouping syntax**: the outer key is the source id (`core`, `local`,
-or an external source id declared in `sources.yaml`), the inner key is the feature name.
+Component keys use **namespace grouping syntax**: the outer key is the source id (`core`, `local`,
+or an external source id declared in `sources.yaml`), the inner key is the component name.
 
 ```yaml
 # configs/linux.yaml
 profile:
-  features:
+  components:
     core:
       git: {}
     local:
@@ -40,7 +40,7 @@ profile:
       neovim: {}
 ```
 
-Bundles let you reuse feature sets across configs:
+Bundles let you reuse component sets across configs:
 
 ```yaml
 bundle:
@@ -49,17 +49,17 @@ bundle:
 
 bundles:
   base:
-    features:
+    components:
       core:
         git: {}
 
 profile:
-  features:
+  components:
     local:
-      node: {}    # profile.features takes priority over bundles
+      node: {}    # profile.components takes priority over bundles
 ```
 
-Edit your config to add or remove features, or change versions.
+Edit your config to add or remove components, or change versions.
 
 See `specs/data/profile.md` for the full schema.
 
@@ -77,7 +77,7 @@ sources:
     ref:
       branch: main
     allow:
-      features:
+      components:
         - node
       backends:
         - npm
@@ -85,15 +85,15 @@ sources:
     type: path
     path: ~/projects/loadout-mylab
     allow:
-      features:
+      components:
         - mypkg
 ```
 
 Place source content at:
 
-* local features/backends: config home `features/`, `backends/`
-* `type: git` external sources: data home `sources/<id>/features/`, `backends/`
-* `type: path` external sources: `<path>/features/`, `<path>/backends/`
+* local components/backends: config home `components/`, `backends/`
+* `type: git` external sources: data home `sources/<id>/components/`, `backends/`
+* `type: path` external sources: `<path>/components/`, `<path>/backends/`
 
 There is no implicit fallback across `core`, `local`, and external sources.
 If you want a non-core source, reference it explicitly in the profile or strategy.
@@ -104,7 +104,7 @@ If you want a non-core source, reference it explicitly in the profile or strateg
 
 ```sh
 loadout source add git https://github.com/example/community-loadout.git --branch main
-loadout source trust community --features '*'   # allow all features
+loadout source trust community --components '*'   # allow all components
 loadout source update community                 # clone / fetch
 ```
 
@@ -128,22 +128,22 @@ loadout source update community --relock
 
 ### Importing a resource into local
 
-If you want to take full ownership of a feature or backend from an external source,
+If you want to take full ownership of a component or backend from an external source,
 use `import` to copy it into your `local` source directory:
 
 ```sh
-# Copy feature to local/ and rewrite all config references
-loadout feature import community/node --move-config
+# Copy component to local/ and rewrite all config references
+loadout component import community/node --move-config
 
 # Copy backend to local/ and rewrite all strategy references
 loadout backend import community/brew --move-strategy
 
 # Preview without writing
-loadout feature import community/node --dry-run
+loadout component import community/node --dry-run
 ```
 
 After import, the external source is no longer required for that resource.
-If the imported feature has bare depends (same-source relative references),
+If the imported component has bare depends (same-source relative references),
 a warning is printed; review and convert them to canonical IDs if necessary.
 
 ## Policies
@@ -166,7 +166,7 @@ Preview what would happen without making any changes:
 ./loadout plan
 ```
 
-Output shows: features to create, destroy, or replace, plus any blocked features.
+Output shows: components to create, destroy, or replace, plus any blocked components.
 
 The plan command never modifies state.
 
@@ -179,30 +179,30 @@ Execute the plan and apply changes to your environment:
 ```
 
 Apply runs planner → executor → state commit.
-Each feature operation is committed atomically.
-If a feature fails, execution aborts and state remains unchanged.
+Each component operation is committed atomically.
+If a component fails, execution aborts and state remains unchanged.
 
 ## Updating Environment
 
-To install a new feature: add it to your profile, then run `apply`.
+To install a new component: add it to your profile, then run `apply`.
 
-To remove a feature: remove it from your profile, then run `apply`.
+To remove a component: remove it from your profile, then run `apply`.
 
 To change a version: update the `version` field in your profile, then run `apply`.
-The feature will be uninstalled and reinstalled at the new version.
+The component will be uninstalled and reinstalled at the new version.
 
 ## Troubleshooting
 
-**Feature is blocked in plan output**
-The feature has an unknown resource kind in state. Check the authoritative state file under your platform state directory for the affected feature.
+**Component is blocked in plan output**
+The component has an unknown resource kind in state. Check the authoritative state file under your platform state directory for the affected component.
 
 **Dependency not found in profile**
-A feature declares `requires` for a capability that no current feature provides.
-Add the provider feature (e.g. `brew`, `mise`) to your profile.
+A component declares `requires` for a capability that no current component provides.
+Add the provider component (e.g. `brew`, `mise`) to your profile.
 
-**External feature or backend is rejected**
+**External component or backend is rejected**
 The source exists on disk but is not allowed by `sources.yaml`.
-Add it to the relevant `allow.features` or `allow.backends` entry, or use `allow: "*"` if you intend to trust the entire source.
+Add it to the relevant `allow.components` or `allow.backends` entry, or use `allow: "*"` if you intend to trust the entire source.
 
 **State is corrupt**
 If `apply` aborts with a state invariant error, do not modify state manually.

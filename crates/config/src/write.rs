@@ -1,6 +1,6 @@
 // Configuration write operations.
 //
-// Provides typed mutations (add/remove feature) and raw YAML path-based operations
+// Provides typed mutations (add/remove component) and raw YAML path-based operations
 // for config files. All writes are atomic (write to .tmp, then rename).
 //
 // Note: round-trip operations do NOT preserve YAML comments. This is a known
@@ -20,13 +20,13 @@ use crate::ConfigError;
 const CONFIG_TEMPLATE: &str = "\
 # loadout config
 #
-# profile: list of features to enable, grouped by source
+# profile: list of components to enable, grouped by source
 # strategy: backend selection overrides (optional)
 profile:
-  features:
-    # Add features using the grouped syntax:
+  components:
+    # Add components using the grouped syntax:
     #   <source_id>:
-    #     <feature_name>: {}
+    #     <component_name>: {}
     #
     # Example:
     #   local:
@@ -83,12 +83,12 @@ pub fn create_config(path: &Path) -> Result<(), ConfigError> {
 // Typed mutations
 // ---------------------------------------------------------------------------
 
-/// Add a feature to `profile.features.<source>.<name>` in a config file.
+/// Add a component to `profile.components.<source>.<name>` in a config file.
 ///
 /// If the file does not exist it is created. If intermediate YAML nodes are
-/// absent they are created as empty mappings. If the feature is already present
+/// absent they are created as empty mappings. If the component is already present
 /// the value is overwritten with `{}` (idempotent for the grouped syntax).
-pub fn add_feature(path: &Path, source: &str, name: &str) -> Result<(), ConfigError> {
+pub fn add_component(path: &Path, source: &str, name: &str) -> Result<(), ConfigError> {
     validate_non_empty("source", source)?;
     validate_non_empty("name", name)?;
 
@@ -96,7 +96,7 @@ pub fn add_feature(path: &Path, source: &str, name: &str) -> Result<(), ConfigEr
 
     insert_at_path(
         &mut doc,
-        &["profile", "features", source, name],
+        &["profile", "components", source, name],
         Value::Mapping(serde_yaml::Mapping::new()),
     )?;
 
@@ -104,10 +104,10 @@ pub fn add_feature(path: &Path, source: &str, name: &str) -> Result<(), ConfigEr
     Ok(())
 }
 
-/// Remove a feature from `profile.features.<source>.<name>` in a config file.
+/// Remove a component from `profile.components.<source>.<name>` in a config file.
 ///
-/// Returns `true` if the feature was found and removed, `false` if it was not present.
-pub fn remove_feature(path: &Path, source: &str, name: &str) -> Result<bool, ConfigError> {
+/// Returns `true` if the component was found and removed, `false` if it was not present.
+pub fn remove_component(path: &Path, source: &str, name: &str) -> Result<bool, ConfigError> {
     validate_non_empty("source", source)?;
     validate_non_empty("name", name)?;
 
@@ -116,7 +116,7 @@ pub fn remove_feature(path: &Path, source: &str, name: &str) -> Result<bool, Con
     }
 
     let mut doc = load_or_empty(path)?;
-    let found = remove_at_path(&mut doc, &["profile", "features", source, name]);
+    let found = remove_at_path(&mut doc, &["profile", "components", source, name]);
 
     if found {
         io::write_yaml_atomic(path, &doc)?;
@@ -140,9 +140,9 @@ pub fn raw_show(path: &Path) -> Result<String, ConfigError> {
 
 /// Set the value at a dot-separated YAML path.
 ///
-/// `key_path` uses `.` as the separator. Feature IDs containing `/` are treated
-/// as a single key segment (e.g. `profile.features.local/git` is unsupported —
-/// use `profile.features.local.git` with the grouped syntax instead).
+/// `key_path` uses `.` as the separator. Component IDs containing `/` are treated
+/// as a single key segment (e.g. `profile.components.local/git` is unsupported —
+/// use `profile.components.local.git` with the grouped syntax instead).
 ///
 /// `raw_value` is parsed as YAML, so `{}` sets an empty mapping, `true` sets a
 /// boolean, and a quoted string sets a string value.
@@ -292,15 +292,15 @@ fn remove_at_path(node: &mut Value, segments: &[&str]) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// Source ID rewriting — `feature import` / `backend import`
+// Source ID rewriting — `component import` / `backend import`
 // ---------------------------------------------------------------------------
 
 /// Rewrite all occurrences of `old_source/<name>` to `new_source/<name>` in the
-/// `profile.features` and `bundles.*.features` sections of a config file.
+/// `profile.components` and `bundles.*.components` sections of a config file.
 ///
 /// Returns `true` if any changes were made.
 /// Returns `false` (without error) if the file does not exist or the key is absent.
-pub fn rewrite_feature_source(
+pub fn rewrite_component_source(
     path: &Path,
     old_source: &str,
     name: &str,
@@ -316,21 +316,21 @@ pub fn rewrite_feature_source(
 
     let mut changed = false;
 
-    // Rewrite profile.features.
+    // Rewrite profile.components.
     {
-        if let Some(features) = navigate_to_mapping_mut(&mut doc, &["profile", "features"]) {
-            if move_feature_in_mapping(features, old_source, name, new_source) {
+        if let Some(features) = navigate_to_mapping_mut(&mut doc, &["profile", "components"]) {
+            if move_component_in_mapping(features, old_source, name, new_source) {
                 changed = true;
             }
         }
     }
 
-    // Rewrite bundles.*.features.
+    // Rewrite bundles.*.components.
     for bundle_name in &bundle_names {
         if let Some(features) =
-            navigate_to_mapping_mut(&mut doc, &["bundles", bundle_name.as_str(), "features"])
+            navigate_to_mapping_mut(&mut doc, &["bundles", bundle_name.as_str(), "components"])
         {
-            if move_feature_in_mapping(features, old_source, name, new_source) {
+            if move_component_in_mapping(features, old_source, name, new_source) {
                 changed = true;
             }
         }
@@ -395,11 +395,11 @@ fn navigate_to_mapping_mut<'a>(
     current.as_mapping_mut()
 }
 
-/// Move `features[old_source][name]` to `features[new_source][name]`.
+/// Move `components[old_source][name]` to `components[new_source][name]`.
 ///
 /// Removes the `old_source` key if it becomes empty after the move.
 /// Returns `true` if the move was performed.
-fn move_feature_in_mapping(
+fn move_component_in_mapping(
     features: &mut serde_yaml::Mapping,
     old_source: &str,
     name: &str,
@@ -408,8 +408,8 @@ fn move_feature_in_mapping(
     let old_src_key = Value::String(old_source.to_string());
     let name_key = Value::String(name.to_string());
 
-    // Extract the feature value from the old source entry.
-    let feature_val = {
+    // Extract the component value from the old source entry.
+    let component_val = {
         let old_src = match features
             .get_mut(&old_src_key)
             .and_then(|v| v.as_mapping_mut())
@@ -445,7 +445,7 @@ fn move_feature_in_mapping(
         .get_mut(&new_src_key)
         .and_then(|v| v.as_mapping_mut())
     {
-        new_src.insert(name_key, feature_val);
+        new_src.insert(name_key, component_val);
     }
     true
 }

@@ -3,7 +3,7 @@
 # Used by: version_install scenario, version_upgrade scenario (first apply).
 
 profile:
-  features:
+  components:
     local:
       dummy-rt:
         version: "20"

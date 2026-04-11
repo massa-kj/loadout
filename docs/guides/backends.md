@@ -334,7 +334,7 @@ See [`specs/api/backend.md`](../specs/api/backend.md) for complete protocol docu
 
 ### ❌ Do NOT read strategy inside a backend
 
-Strategy is resolved by the FeatureCompiler **before** your backend is called.
+Strategy is resolved by the ComponentCompiler **before** your backend is called.
 The resource data you receive via environment variables already reflects the resolved `desired_backend`.
 
 ### ❌ Do NOT write state inside a backend
@@ -376,13 +376,13 @@ echo "installed"                                       # Correct (status.sh only
 
 ### Manual testing
 
-1. Create a test feature that uses your backend:
+1. Create a test component that uses your backend:
 
 ```yaml
-# features/test-mybackend/feature.yaml
+# components/test-mybackend/component.yaml
 spec_version: 1
 mode: declarative
-description: Test feature for mybackend
+description: Test component for mybackend
 dep:
   depends: []
   requires: []
@@ -496,6 +496,6 @@ sources:
 ## See Also
 
 - **[`specs/api/backend.md`](../specs/api/backend.md)** — Authoritative interface contract
-- **[`guides/features.md`](features.md)** — How features declare resource requirements
+- **[`guides/components.md`](components.md)** — How components declare resource requirements
 - **`crates/backend-host/src/lib.rs`** — Backend trait and ScriptBackend implementation (for Rust developers)
 - **`crates/backends-builtin/`** — Builtin backend implementations (Rust examples)

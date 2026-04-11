@@ -18,9 +18,9 @@ pub struct State {
     /// Schema version. Must be [`STATE_VERSION`] (3) for this implementation.
     pub version: u32,
 
-    /// Installed resources grouped by canonical feature ID.
+    /// Installed resources grouped by canonical component ID.
     #[serde(default)]
-    pub features: HashMap<String, FeatureState>,
+    pub components: HashMap<String, ComponentState>,
 }
 
 impl State {
@@ -28,21 +28,21 @@ impl State {
     pub fn empty() -> Self {
         Self {
             version: STATE_VERSION,
-            features: HashMap::new(),
+            components: HashMap::new(),
         }
     }
 }
 
-/// Resources recorded for a single installed feature.
+/// Resources recorded for a single installed component.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FeatureState {
+pub struct ComponentState {
     /// Resources installed for this feature.
     pub resources: Vec<Resource>,
 }
 
 /// A recorded resource entry in state.
 ///
-/// `id` must be unique within a feature's resource list.
+/// `id` must be unique within a component's resource list.
 /// The `(feature_id, resource.id)` pair must be unique across all features.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Resource {
@@ -155,14 +155,14 @@ mod tests {
     fn empty_state() {
         let s = State::empty();
         assert_eq!(s.version, STATE_VERSION);
-        assert!(s.features.is_empty());
+        assert!(s.components.is_empty());
     }
 
     #[test]
     fn round_trip_package() {
         let json = r#"{
             "version": 3,
-            "features": {
+            "components": {
                 "core/git": {
                     "resources": [
                         {
@@ -177,7 +177,7 @@ mod tests {
         }"#;
         let s: State = serde_json::from_str(json).unwrap();
         assert_eq!(s.version, 3);
-        let feat = &s.features["core/git"];
+        let feat = &s.components["core/git"];
         assert_eq!(feat.resources.len(), 1);
         assert_eq!(feat.resources[0].id, "pkg:git");
         match &feat.resources[0].kind {
@@ -194,7 +194,7 @@ mod tests {
     fn round_trip_runtime() {
         let json = r#"{
             "version": 3,
-            "features": {
+            "components": {
                 "core/node": {
                     "resources": [
                         {
@@ -208,7 +208,7 @@ mod tests {
             }
         }"#;
         let s: State = serde_json::from_str(json).unwrap();
-        let feat = &s.features["core/node"];
+        let feat = &s.components["core/node"];
         match &feat.resources[0].kind {
             ResourceKind::Runtime { backend, runtime } => {
                 assert_eq!(backend.as_str(), "core/mise");
@@ -222,7 +222,7 @@ mod tests {
     fn round_trip_fs() {
         let json = r#"{
             "version": 3,
-            "features": {
+            "components": {
                 "core/git": {
                     "resources": [
                         {
@@ -239,7 +239,7 @@ mod tests {
             }
         }"#;
         let s: State = serde_json::from_str(json).unwrap();
-        let feat = &s.features["core/git"];
+        let feat = &s.components["core/git"];
         match &feat.resources[0].kind {
             ResourceKind::Fs { fs } => {
                 assert_eq!(fs.path, "/home/user/.gitconfig");

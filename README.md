@@ -10,7 +10,7 @@ Designed to safely reproduce development environments.
 ## Overview
 
 This project turns environment setup into a deterministic system.
-Features are declared in a profile; the system installs, updates, and removes them safely.
+Components are declared in a profile; the system installs, updates, and removes them safely.
 
 Key goals:
 
@@ -27,7 +27,7 @@ Declare your environment in a single config file:
 ```yaml
 # configs/wsl.yaml
 profile:
-  features:
+  components:
     git: {}
     neovim: {}
     node:
@@ -52,7 +52,7 @@ Apply to your machine:
 ./loadout apply -c wsl
 ```
 
-Re-running apply is safe. Features already in the correct state are skipped.
+Re-running apply is safe. Components already in the correct state are skipped.
 
 ## Design Goals
 
@@ -69,16 +69,16 @@ The system aborts rather than guesses.
 Destructive operations require explicit intent.
 
 **Replaceability**
-Backends (Homebrew, mise, winget, …) and features are interchangeable adapters.
+Backends (Homebrew, mise, winget, …) and components are interchangeable adapters.
 Core does not embed tool-specific logic.
 
 ## Key Concepts
 
-**Profile** — declares which features should be present and at what version.
+**Profile** — declares which components should be present and at what version.
 
 **Policy** — declares which installation strategy to use for package and runtime management.
 
-**Feature** — a self-contained module: `meta.yaml` + `install` + `uninstall` + `files/`.
+**Component** — a self-contained module: `meta.yaml` + `install` + `uninstall` + `files/`.
 
 **Backend** — executes package/runtime operations (brew, mise, scoop, winget, npm, uv).
 
@@ -93,5 +93,5 @@ Design documents are in [`docs/`](docs/README.md).
 | | |
 |---|---|
 | [Architecture](docs/architecture/README.md) | System design principles, execution model, and architectural boundaries |
-| [Guides](docs/guides/README.md) | How to use the system and how to implement features or backends |
+| [Guides](docs/guides/README.md) | How to use the system and how to implement components or backends |
 | [Specifications](docs/specs/README.md) | Formal specifications such as state schema and execution contracts |

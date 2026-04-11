@@ -72,14 +72,14 @@ RUN mkdir -p ~/.local/bin \
     && cp /usr/local/bin-loadout/loadout /usr/local/bin-loadout/loadout-e2e ~/.local/bin/ \
     && chmod +x ~/.local/bin/loadout ~/.local/bin/loadout-e2e
 
-# Install configs, features, and backends.
-# Fixture backends/features (tests/fixtures/) are merged on top — they register
+# Install configs, components, and backends.
+# Fixture backends/components (tests/fixtures/) are merged on top — they register
 # as local/<name> and override or supplement the repo-bundled ones.
 RUN mkdir -p ~/.config/loadout/configs \
-    && cp -r features ~/.config/loadout/ \
+    && cp -r components ~/.config/loadout/ \
     && cp -r backends ~/.config/loadout/ \
     && cp -r tests/fixtures/backends/. ~/.config/loadout/backends/ \
-    && cp -r tests/fixtures/features/. ~/.config/loadout/features/ \
+    && cp -r tests/fixtures/components/. ~/.config/loadout/components/ \
     && cp tests/fixtures/configs/* ~/.config/loadout/configs/
 
 CMD ["/bin/bash"]
@@ -95,14 +95,14 @@ FROM os AS test
 # Pull only the compiled binaries from builder — no Rust toolchain in this image.
 COPY --from=builder /usr/local/bin-loadout/loadout /usr/local/bin-loadout/loadout-e2e /root/.local/bin/
 
-# Install configs, features, and backends.
-# Fixture backends/features (tests/fixtures/) are merged on top — they register
+# Install configs, components, and backends.
+# Fixture backends/components (tests/fixtures/) are merged on top — they register
 # as local/<name> and override or supplement the repo-bundled ones.
 RUN mkdir -p ~/.config/loadout/configs \
-    && cp -r features ~/.config/loadout/ \
+    && cp -r components ~/.config/loadout/ \
     && cp -r backends ~/.config/loadout/ \
     && cp -r tests/fixtures/backends/. ~/.config/loadout/backends/ \
-    && cp -r tests/fixtures/features/. ~/.config/loadout/features/ \
+    && cp -r tests/fixtures/components/. ~/.config/loadout/components/ \
     && cp tests/fixtures/configs/* ~/.config/loadout/configs/
 
 CMD ["/bin/bash"]

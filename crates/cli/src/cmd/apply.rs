@@ -43,22 +43,22 @@ pub fn run(args: ApplyArgs) {
     let result = app::execute(&ctx, execution_plan, &mut |event| {
         use app::Event;
         match event {
-            Event::FeatureStart { id } => {
+            Event::ComponentStart { id } => {
                 if args.verbose {
                     println!("  → {id}");
                 }
             }
-            Event::FeatureDone { id } => {
+            Event::ComponentDone { id } => {
                 println!("  ✓ {id}");
             }
             Event::ResourceFailed {
-                feature_id,
+                component_id,
                 resource_id,
                 error,
             } => {
-                eprintln!("  ✗ [{feature_id}] resource '{resource_id}': {error}");
+                eprintln!("  ✗ [{component_id}] resource '{resource_id}': {error}");
             }
-            Event::FeatureFailed { id, error } => {
+            Event::ComponentFailed { id, error } => {
                 eprintln!("  ✗ {id}: {error}");
             }
             Event::ContributorWarning { backend_id, reason } => {

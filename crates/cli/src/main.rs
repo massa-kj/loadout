@@ -27,7 +27,7 @@ fn main() {
         args::Command::State { command } => cmd::state::run(command),
         args::Command::Context { command } => cmd::context::run(command),
         args::Command::Config { command } => cmd::config::run(command),
-        args::Command::Feature { command } => cmd::feature::run(command),
+        args::Command::Component { command } => cmd::component::run(command),
         args::Command::Backend { command } => cmd::backend::run(command),
         args::Command::Source { command } => cmd::source::run(command),
         args::Command::Doctor(args) => cmd::doctor::run(args),

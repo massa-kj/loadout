@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::context::{AppContext, AppError};
-use crate::pipeline::{build_source_roots, load_sources_optional, to_fi_platform};
+use crate::pipeline::{build_source_roots, load_sources_optional, to_ci_platform};
 
 // ---------------------------------------------------------------------------
 // Feature types
@@ -20,19 +20,19 @@ use crate::pipeline::{build_source_roots, load_sources_optional, to_fi_platform}
 
 /// Summary of a single feature for list output.
 #[derive(Debug, Serialize)]
-pub struct FeatureSummary {
+pub struct ComponentSummary {
     pub id: String,
-    pub mode: model::feature_index::FeatureMode,
+    pub mode: model::component_index::ComponentMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
 
 /// Full detail of a single feature for show output.
 #[derive(Debug, Serialize)]
-pub struct FeatureDetail {
+pub struct ComponentDetail {
     pub id: String,
     #[serde(flatten)]
-    pub meta: model::feature_index::FeatureMeta,
+    pub meta: model::component_index::ComponentMeta,
 }
 
 // ---------------------------------------------------------------------------
@@ -120,28 +120,28 @@ pub struct ConfigDetail {
 // list_features
 // ---------------------------------------------------------------------------
 
-/// List all features visible from the current source roots.
+/// List all components visible from the current source roots.
 ///
-/// If `source_filter` is `Some("local")`, only features whose ID starts with
-/// `"local/"` are returned.  Pass `None` to return all features.
-/// Results are sorted by feature ID.
-pub fn list_features(
+/// If `source_filter` is `Some("local")`, only components whose ID starts with
+/// `"local/"` are returned.  Pass `None` to return all components.
+/// Results are sorted by component ID.
+pub fn list_components(
     ctx: &AppContext,
     source_filter: Option<&str>,
-) -> Result<Vec<FeatureSummary>, AppError> {
+) -> Result<Vec<ComponentSummary>, AppError> {
     let sources = load_sources_optional(ctx)?;
     let roots = build_source_roots(ctx, &sources);
-    let fi_platform = to_fi_platform(&ctx.platform);
-    let index = feature_index::build(&roots, &fi_platform)?;
+    let fi_platform = to_ci_platform(&ctx.platform);
+    let index = component_index::build(&roots, &fi_platform)?;
 
-    let mut summaries: Vec<FeatureSummary> = index
-        .features
+    let mut summaries: Vec<ComponentSummary> = index
+        .components
         .into_iter()
         .filter(|(id, _)| match source_filter {
             Some(filter) => id.starts_with(&format!("{filter}/")),
             None => true,
         })
-        .map(|(id, meta)| FeatureSummary {
+        .map(|(id, meta)| ComponentSummary {
             id,
             mode: meta.mode,
             description: meta.description,
@@ -156,21 +156,21 @@ pub fn list_features(
 // show_feature
 // ---------------------------------------------------------------------------
 
-/// Load and return full detail for the feature with the given canonical ID.
+/// Load and return full detail for the component with the given canonical ID.
 ///
-/// Returns [`AppError::FeatureNotFound`] if the ID is not in the index.
-pub fn show_feature(ctx: &AppContext, id: &str) -> Result<FeatureDetail, AppError> {
+/// Returns [`AppError::ComponentNotFound`] if the ID is not in the index.
+pub fn show_component(ctx: &AppContext, id: &str) -> Result<ComponentDetail, AppError> {
     let sources = load_sources_optional(ctx)?;
     let roots = build_source_roots(ctx, &sources);
-    let fi_platform = to_fi_platform(&ctx.platform);
-    let mut index = feature_index::build(&roots, &fi_platform)?;
+    let fi_platform = to_ci_platform(&ctx.platform);
+    let mut index = component_index::build(&roots, &fi_platform)?;
 
     let meta = index
-        .features
+        .components
         .remove(id)
-        .ok_or_else(|| AppError::FeatureNotFound { id: id.to_string() })?;
+        .ok_or_else(|| AppError::ComponentNotFound { id: id.to_string() })?;
 
-    Ok(FeatureDetail {
+    Ok(ComponentDetail {
         id: id.to_string(),
         meta,
     })
@@ -509,9 +509,9 @@ fn format_allow(allow: &Option<model::sources::AllowSpec>) -> Option<String> {
         None => None,
         Some(model::sources::AllowSpec::All(_)) => Some("*".to_string()),
         Some(model::sources::AllowSpec::Detailed(d)) => {
-            let features = d.features.as_ref().map(|l| match l {
-                model::sources::AllowList::All(_) => "features:*".to_string(),
-                model::sources::AllowList::Names(v) => format!("features:[{}]", v.join(",")),
+            let features = d.components.as_ref().map(|l| match l {
+                model::sources::AllowList::All(_) => "components:*".to_string(),
+                model::sources::AllowList::Names(v) => format!("components:[{}]", v.join(",")),
             });
             let backends = d.backends.as_ref().map(|l| match l {
                 model::sources::AllowList::All(_) => "backends:*".to_string(),

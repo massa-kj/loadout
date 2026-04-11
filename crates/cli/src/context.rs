@@ -10,7 +10,7 @@ use std::process;
 ///
 /// Platform and XDG/AppData dirs are detected automatically.
 /// Set `LOADOUT_ROOT` to redirect the `local` source root during development
-/// (must point to a directory containing `features/` and `backends/`).
+/// (must point to a directory containing `components/` and `backends/`).
 pub fn build_app_context() -> app::AppContext {
     let platform = platform::detect_platform();
     let dirs = platform::resolve_dirs(&platform).unwrap_or_else(|e| {

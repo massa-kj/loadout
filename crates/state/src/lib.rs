@@ -30,7 +30,7 @@ use std::path::Path;
 use thiserror::Error;
 
 pub use model::state::{
-    FeatureState, FsDetails, FsEntryType, FsOp, PackageDetails, Resource, ResourceKind,
+    ComponentState, FsDetails, FsEntryType, FsOp, PackageDetails, Resource, ResourceKind,
     RuntimeDetails, State, STATE_VERSION,
 };
 
@@ -176,19 +176,19 @@ pub fn validate(state: &State) -> Result<(), StateError> {
     // Track fs.path uniqueness across all features.
     let mut seen_fs_paths: HashSet<&str> = HashSet::new();
 
-    for (feature_id, feature_state) in &state.features {
+    for (component_id, component_state) in &state.components {
         // Check for duplicate resource.id within feature.
         let mut seen_ids: HashSet<&str> = HashSet::new();
-        for resource in &feature_state.resources {
+        for resource in &component_state.resources {
             if resource.id.is_empty() {
                 return Err(StateError::InvalidState {
-                    reason: format!("feature '{feature_id}': resource.id must not be empty"),
+                    reason: format!("component '{component_id}': resource.id must not be empty"),
                 });
             }
             if !seen_ids.insert(resource.id.as_str()) {
                 return Err(StateError::InvalidState {
                     reason: format!(
-                        "feature '{feature_id}': duplicate resource id '{}'",
+                        "component '{component_id}': duplicate resource id '{}'",
                         resource.id
                     ),
                 });
@@ -196,7 +196,7 @@ pub fn validate(state: &State) -> Result<(), StateError> {
 
             // Check fs-specific invariants.
             if let ResourceKind::Fs { fs } = &resource.kind {
-                validate_fs_resource(feature_id, &resource.id, fs, &mut seen_fs_paths)?;
+                validate_fs_resource(component_id, &resource.id, fs, &mut seen_fs_paths)?;
             }
         }
     }
@@ -205,7 +205,7 @@ pub fn validate(state: &State) -> Result<(), StateError> {
 }
 
 fn validate_fs_resource<'a>(
-    feature_id: &str,
+    component_id: &str,
     resource_id: &str,
     fs: &'a FsDetails,
     seen_fs_paths: &mut HashSet<&'a str>,
@@ -215,17 +215,17 @@ fn validate_fs_resource<'a>(
     if !p.is_absolute() {
         return Err(StateError::InvalidState {
             reason: format!(
-                "feature '{feature_id}', resource '{resource_id}': fs.path '{}' must be absolute",
+                "component '{component_id}', resource '{resource_id}': fs.path '{}' must be absolute",
                 fs.path
             ),
         });
     }
 
-    // fs.path must not be recorded by multiple features.
+    // fs.path must not be recorded by multiple components.
     if !seen_fs_paths.insert(fs.path.as_str()) {
         return Err(StateError::InvalidState {
             reason: format!(
-                "feature '{feature_id}', resource '{resource_id}': fs.path '{}' is already recorded by another feature",
+                "component '{component_id}', resource '{resource_id}': fs.path '{}' is already recorded by another component",
                 fs.path
             ),
         });
@@ -255,13 +255,13 @@ pub fn migrate_v2_to_v3(raw: &serde_json::Value) -> Result<State, StateError> {
     }
 
     let features_obj = raw
-        .get("features")
+        .get("components")
         .and_then(|v| v.as_object())
         .ok_or_else(|| StateError::Corrupt {
-            reason: "missing or invalid 'features' object".into(),
+            reason: "missing or invalid 'components' object".into(),
         })?;
 
-    let mut migrated_features: HashMap<String, FeatureState> = HashMap::new();
+    let mut migrated_components: HashMap<String, ComponentState> = HashMap::new();
 
     for (key, feature_val) in features_obj {
         let canonical_key = if key.contains('/') {
@@ -270,17 +270,17 @@ pub fn migrate_v2_to_v3(raw: &serde_json::Value) -> Result<State, StateError> {
             format!("core/{key}")
         };
 
-        let feature_state: FeatureState =
+        let component_state: ComponentState =
             serde_json::from_value(feature_val.clone()).map_err(|e| StateError::Corrupt {
-                reason: format!("failed to parse feature '{key}': {e}"),
+                reason: format!("failed to parse component '{key}': {e}"),
             })?;
 
-        migrated_features.insert(canonical_key, feature_state);
+        migrated_components.insert(canonical_key, component_state);
     }
 
     let migrated = State {
         version: STATE_VERSION,
-        features: migrated_features,
+        components: migrated_components,
     };
 
     validate(&migrated)?;
@@ -307,11 +307,11 @@ mod tests {
         CanonicalBackendId::new(s).unwrap()
     }
 
-    fn state_with_package(feature: &str, res_id: &str, pkg: &str) -> State {
+    fn state_with_package(component: &str, res_id: &str, pkg: &str) -> State {
         let mut s = State::empty();
-        s.features.insert(
-            feature.into(),
-            FeatureState {
+        s.components.insert(
+            component.into(),
+            ComponentState {
                 resources: vec![Resource {
                     id: res_id.into(),
                     kind: ResourceKind::Package {
@@ -327,11 +327,11 @@ mod tests {
         s
     }
 
-    fn state_with_fs(feature: &str, res_id: &str, path: &str) -> State {
+    fn state_with_fs(component: &str, res_id: &str, path: &str) -> State {
         let mut s = State::empty();
-        s.features.insert(
-            feature.into(),
-            FeatureState {
+        s.components.insert(
+            component.into(),
+            ComponentState {
                 resources: vec![Resource {
                     id: res_id.into(),
                     kind: ResourceKind::Fs {
@@ -370,9 +370,9 @@ mod tests {
     #[test]
     fn validate_duplicate_resource_id_rejected() {
         let mut s = State::empty();
-        s.features.insert(
+        s.components.insert(
             "core/git".into(),
-            FeatureState {
+            ComponentState {
                 resources: vec![
                     Resource {
                         id: "pkg:git".into(),
@@ -406,9 +406,9 @@ mod tests {
         let path = "/home/user/.gitconfig";
         let mut s = state_with_fs("core/git", "fs:gitconfig", path);
         // Add another feature with the same fs.path.
-        s.features.insert(
+        s.components.insert(
             "core/other".into(),
-            FeatureState {
+            ComponentState {
                 resources: vec![Resource {
                     id: "fs:conflict".into(),
                     kind: ResourceKind::Fs {
@@ -440,14 +440,14 @@ mod tests {
         let path = dir.path().join("state.json");
         let s = load(&path).unwrap();
         assert_eq!(s.version, STATE_VERSION);
-        assert!(s.features.is_empty());
+        assert!(s.components.is_empty());
     }
 
     #[test]
     fn load_valid_v3_ok() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state.json");
-        let json = r#"{"version":3,"features":{}}"#;
+        let json = r#"{"version":3,"components":{}}"#;
         std::fs::write(&path, json).unwrap();
         let s = load(&path).unwrap();
         assert_eq!(s.version, 3);
@@ -457,7 +457,7 @@ mod tests {
     fn load_v2_returns_needs_migration() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state.json");
-        let json = r#"{"version":2,"features":{"git":{"resources":[]}}}"#;
+        let json = r#"{"version":2,"components":{"git":{"resources":[]}}}"#;
         std::fs::write(&path, json).unwrap();
         let err = load(&path).unwrap_err();
         assert!(matches!(err, StateError::NeedsMigration { version: 2 }));
@@ -467,7 +467,7 @@ mod tests {
     fn load_unknown_version_returns_mismatch() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state.json");
-        let json = r#"{"version":99,"features":{}}"#;
+        let json = r#"{"version":99,"components":{}}"#;
         std::fs::write(&path, json).unwrap();
         let err = load(&path).unwrap_err();
         assert!(matches!(err, StateError::VersionMismatch { found: 99 }));
@@ -520,7 +520,7 @@ mod tests {
     fn migrate_bare_key_prefixed_with_core() {
         let raw = serde_json::json!({
             "version": 2,
-            "features": {
+            "components": {
                 "git": { "resources": [] },
                 "core/ruby": { "resources": [] }
             }
@@ -528,15 +528,15 @@ mod tests {
         let migrated = migrate_v2_to_v3(&raw).unwrap();
         assert_eq!(migrated.version, STATE_VERSION);
         assert!(
-            migrated.features.contains_key("core/git"),
+            migrated.components.contains_key("core/git"),
             "bare 'git' must become 'core/git'"
         );
         assert!(
-            migrated.features.contains_key("core/ruby"),
+            migrated.components.contains_key("core/ruby"),
             "'core/ruby' must be preserved"
         );
         assert!(
-            !migrated.features.contains_key("git"),
+            !migrated.components.contains_key("git"),
             "bare key must be removed"
         );
     }
@@ -545,20 +545,20 @@ mod tests {
     fn migrate_v3_is_idempotent() {
         let raw = serde_json::json!({
             "version": 3,
-            "features": {
+            "components": {
                 "core/git": { "resources": [] }
             }
         });
         let migrated = migrate_v2_to_v3(&raw).unwrap();
         assert_eq!(migrated.version, STATE_VERSION);
-        assert!(migrated.features.contains_key("core/git"));
+        assert!(migrated.components.contains_key("core/git"));
     }
 
     #[test]
     fn migrate_preserves_resources() {
         let raw = serde_json::json!({
             "version": 2,
-            "features": {
+            "components": {
                 "git": {
                     "resources": [
                         {
@@ -572,14 +572,14 @@ mod tests {
             }
         });
         let migrated = migrate_v2_to_v3(&raw).unwrap();
-        let feat = migrated.features.get("core/git").unwrap();
+        let feat = migrated.components.get("core/git").unwrap();
         assert_eq!(feat.resources.len(), 1);
         assert_eq!(feat.resources[0].id, "pkg:git");
     }
 
     #[test]
     fn migrate_unknown_version_rejected() {
-        let raw = serde_json::json!({ "version": 1, "features": {} });
+        let raw = serde_json::json!({ "version": 1, "components": {} });
         let err = migrate_v2_to_v3(&raw).unwrap_err();
         assert!(matches!(err, StateError::VersionMismatch { .. }));
     }

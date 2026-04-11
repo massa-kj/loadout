@@ -10,7 +10,7 @@
 use std::path::Path;
 
 use crate::assert::{
-    assert_feature_absent, assert_feature_present, assert_features_empty,
+    assert_component_absent, assert_component_present, assert_components_empty,
     assert_no_packages_in_state, assert_path_exists, assert_paths_removed, assert_state_valid,
     collect_fs_paths, load_state,
 };
@@ -31,8 +31,8 @@ pub fn run(ctx: &Context) -> Result<(), String> {
     let state = load_state(&ctx.state_file)?;
     assert_state_valid(&state)?;
 
-    if state.features.is_empty() {
-        return Err("no features installed — test invalid".to_owned());
+    if state.components.is_empty() {
+        return Err("no components installed — test invalid".to_owned());
     }
 
     let tracked_files = collect_fs_paths(&state);
@@ -47,18 +47,18 @@ pub fn run(ctx: &Context) -> Result<(), String> {
     loadout_apply(ctx, &config_partial)?;
 
     let state = load_state(&ctx.state_file)?;
-    assert_feature_present(&state, "core/bash")?;
-    assert_feature_present(&state, "core/git")?;
+    assert_component_present(&state, "core/bash")?;
+    assert_component_present(&state, "core/git")?;
 
     let unexpected: Vec<&str> = state
-        .features
+        .components
         .keys()
         .map(String::as_str)
         .filter(|k| *k != "core/bash" && *k != "core/git")
         .collect();
     if !unexpected.is_empty() {
         return Err(format!(
-            "unexpected features remain after partial uninstall: {:?}",
+            "unexpected components remain after partial uninstall: {:?}",
             unexpected
         ));
     }
@@ -71,13 +71,13 @@ pub fn run(ctx: &Context) -> Result<(), String> {
 
     let state = load_state(&ctx.state_file)?;
     assert_state_valid(&state)?;
-    assert_features_empty(&state)?;
+    assert_components_empty(&state)?;
     assert_paths_removed(&tracked_files)?;
     assert_path_exists(sentinel)?;
     assert_no_packages_in_state(&state)?;
 
-    // Confirm ripgrep was removed (it is a full-config-only feature)
-    assert_feature_absent(&state, "core/ripgrep")?;
+    // Confirm ripgrep was removed (it is a full-config-only component)
+    assert_component_absent(&state, "core/ripgrep")?;
 
     println!("==> Full uninstall PASSED");
 
@@ -86,7 +86,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
     loadout_apply(ctx, &config_empty)?;
 
     let state = load_state(&ctx.state_file)?;
-    assert_features_empty(&state)?;
+    assert_components_empty(&state)?;
 
     println!("==> Idempotent uninstall PASSED");
     println!("==> Uninstall scenario PASSED");

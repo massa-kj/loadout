@@ -44,15 +44,15 @@ Executor must NOT: decide actions, re-classify, override plan decisions.
 
 Planner operates only on:
 
-1. `desired_resource_graph` — compiled desired resources, grouped by feature (produced by FeatureCompiler)
+1. `desired_resource_graph` — compiled desired resources, grouped by component (produced by ComponentCompiler)
 2. `state` — current authoritative state
-3. `resolved_feature_order` — topologically sorted feature identifiers from resolver
+3. `resolved_feature_order` — topologically sorted component identifiers from resolver
 
-Feature identifiers in `desired_resource_graph`, `state`, and planner output are canonical IDs of the form
+Component identifiers in `desired_resource_graph`, `state`, and planner output are canonical IDs of the form
 `<source_id>/<name>`. Planner does not normalize bare names; normalization happens before planner input construction.
 
 Planner must NOT receive `profile` or `strategy` directly.
-Backend resolution (`desired_backend` per resource) must be completed by FeatureCompiler before planning.
+Backend resolution (`desired_backend` per resource) must be completed by ComponentCompiler before planning.
 
 Planner must NOT depend on current time, environment randomness, or live backend results.
 Planner must NOT call backend observation API.
@@ -66,11 +66,11 @@ Diff → Classification → Decision
 ```
 
 **Diff** — structural comparison of `desired_resource_graph` vs `state`.
-Determines: features added, removed, changed (resource set mismatch, backend mismatch).
+Determines: components added, removed, changed (resource set mismatch, backend mismatch).
 Planner never reads strategy; `desired_backend` is already embedded in `desired_resource_graph`.
 
 **Classification** — converts diff into normalized cases.
-Each feature is classified into exactly one of:
+Each component is classified into exactly one of:
 `create | destroy | replace | replace_backend | strengthen | noop | blocked`
 
 | Class | Condition |
@@ -110,7 +110,7 @@ Table must be deterministic, total (every classification maps to an action), and
 `strengthen` action details must include `add_resources` — the list of resources to install:
 
 ```json
-{ "feature": "core/git", "operation": "strengthen",
+{ "component": "core/git", "operation": "strengthen",
   "details": { "add_resources": [ { "kind": "fs", "id": "fs:gitconfig" } ] } }
 ```
 
@@ -121,19 +121,19 @@ The executor reads `details.add_resources` to determine what to install without 
 ```json
 {
   "actions": [
-    { "feature": "core/git", "operation": "create" },
-    { "feature": "core/node", "operation": "replace", "details": { "from_version": "18", "to_version": "20" } },
-    { "feature": "core/git", "operation": "strengthen", "details": { "add_resources": [ { "kind": "fs", "id": "fs:gitconfig" } ] } }
+    { "component": "core/git", "operation": "create" },
+    { "component": "core/node", "operation": "replace", "details": { "from_version": "18", "to_version": "20" } },
+    { "component": "core/git", "operation": "strengthen", "details": { "add_resources": [ { "kind": "fs", "id": "fs:gitconfig" } ] } }
   ],
-  "noops": [ { "feature": "core/bash" } ],
-  "blocked": [ { "feature": "local/legacy", "reason": "unknown resource kind: registry" } ],
+  "noops": [ { "component": "core/bash" } ],
+  "blocked": [ { "component": "local/legacy", "reason": "unknown resource kind: registry" } ],
   "summary": { "create": 1, "replace": 1, "strengthen": 1, "destroy": 0, "blocked": 1 }
 }
 ```
 
 * `actions` — ordered list of operations to execute
-* `noops` — features already correct; not in `actions`
-* `blocked` — features skipped due to planner-level classification
+* `noops` — components already correct; not in `actions`
+* `blocked` — components skipped due to planner-level classification
 * `summary` — counts per operation type
 
 ## Ordering Rules
@@ -143,7 +143,7 @@ The executor reads `details.add_resources` to determine what to install without 
 3. `create` operations in dependency order
 4. `replace_backend` treated as `replace`
 
-Ordering must be derived from resolver output. Must not rely on feature script order.
+Ordering must be derived from resolver output. Must not rely on component script order.
 Source location must not affect ordering; only canonical dependency edges may do so.
 
 ## Plan Command
@@ -152,8 +152,8 @@ Source location must not affect ordering; only canonical dependency edges may do
 
 ## Apply Interaction
 
-`loadout apply` must: run planner → report blocked features → pass plan to executor → commit state.
-Blocked features are skipped; non-blocked features continue.
+`loadout apply` must: run planner → report blocked components → pass plan to executor → commit state.
+Blocked components are skipped; non-blocked components continue.
 Apply must not re-run classification inside the executor.
 
 ## Determinism Guarantee

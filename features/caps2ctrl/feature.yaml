@@ -1,4 +1,0 @@
-spec_version: 1
-mode: script
-description: Remap CapsLock to Control key (Windows)
-depends: []

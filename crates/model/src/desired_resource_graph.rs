@@ -1,7 +1,7 @@
 //! DesiredResourceGraph data types.
 //!
 //! The DesiredResourceGraph is the structured representation of all resources that should
-//! exist after a successful apply, grouped by feature. It is produced by FeatureCompiler
+//! exist after a successful apply, grouped by component. It is produced by FeatureCompiler
 //! and consumed exclusively by Planner.
 //!
 //! See: `docs/specs/data/desired_resource_graph.md`
@@ -13,7 +13,7 @@ use std::collections::HashMap;
 /// Current schema version for DesiredResourceGraph.
 pub const DESIRED_RESOURCE_GRAPH_SCHEMA_VERSION: u32 = 1;
 
-/// Compiled desired resources grouped by feature, with backends already resolved.
+/// Compiled desired resources grouped by component, with backends already resolved.
 ///
 /// Immutable once produced by FeatureCompiler. Neither Planner nor Executor may modify it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -21,14 +21,14 @@ pub struct DesiredResourceGraph {
     /// Schema version. Must be [`DESIRED_RESOURCE_GRAPH_SCHEMA_VERSION`] (1).
     pub schema_version: u32,
 
-    /// Desired resources keyed by canonical feature ID.
+    /// Desired resources keyed by canonical component ID.
     #[serde(default)]
-    pub features: HashMap<String, FeatureDesiredResources>,
+    pub components: HashMap<String, ComponentDesiredResources>,
 }
 
-/// Desired resources for a single feature.
+/// Desired resources for a single component.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FeatureDesiredResources {
+pub struct ComponentDesiredResources {
     /// Resources that should exist for this feature after apply.
     pub resources: Vec<DesiredResource>,
 }
@@ -127,7 +127,7 @@ mod tests {
     fn round_trip() {
         let json = r#"{
             "schema_version": 1,
-            "features": {
+            "components": {
                 "core/git": {
                     "resources": [
                         {
@@ -161,7 +161,7 @@ mod tests {
         let g: DesiredResourceGraph = serde_json::from_str(json).unwrap();
         assert_eq!(g.schema_version, 1);
 
-        let git = &g.features["core/git"];
+        let git = &g.components["core/git"];
         assert_eq!(git.resources.len(), 2);
         match &git.resources[0].kind {
             DesiredResourceKind::Package {
@@ -187,7 +187,7 @@ mod tests {
             _ => panic!("expected fs"),
         }
 
-        let node = &g.features["core/node"];
+        let node = &g.components["core/node"];
         match &node.resources[0].kind {
             DesiredResourceKind::Runtime {
                 name,

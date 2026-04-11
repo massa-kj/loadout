@@ -31,13 +31,13 @@ Tests must validate behavior, not implementation details.
 ## Integration Tests
 
 Integration tests verify the orchestrator pipeline end-to-end with real file I/O
-but without executing feature scripts.
+but without executing component scripts.
 
 Scenarios to cover:
 * Initial install (create)
 * No-op (noop)
 * Version mismatch (replace)
-* Feature removal (destroy)
+* Component removal (destroy)
 * Dependency ordering
 
 Test location: `tests/`

@@ -30,10 +30,10 @@ To use the CLI:
 1. **[guides/usage.md](./guides/usage.md)** — workflow overview
 2. **[guides/commands.md](./guides/commands.md)** — full command reference
 
-To implement a feature:
-1. **[guides/features.md](./guides/features.md)**
+To implement a component:
+1. **[guides/components.md](./guides/components.md)**
 2. **[specs/data/state.md](./specs/data/state.md)** — state interaction rules
-3. **[specs/algorithms/planner.md](./specs/algorithms/planner.md)** — how your feature appears in the plan
+3. **[specs/algorithms/planner.md](./specs/algorithms/planner.md)** — how your component appears in the plan
 
 To implement a backend:
 1. **[guides/backends.md](./guides/backends.md)**
@@ -55,7 +55,7 @@ docs/
 ├── guides/
 │   ├── usage.md
 │   ├── commands.md
-│   ├── features.md
+│   ├── components.md
 │   └── backends.md
 └── development/
     ├── testing.md

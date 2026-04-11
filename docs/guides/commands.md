@@ -13,7 +13,7 @@ For the big-picture workflow see [usage.md](./usage.md).
 | [State](#state) | Inspect and migrate the state file |
 | [Context](#context) | Set the active config shorthand |
 | [Config](#config) | Manage configs |
-| [Feature](#feature) | Manage features (list, show, edit, new, validate, import) |
+| [Component](#component) | Manage components (list, show, edit, new, validate, import) |
 | [Backend](#backend) | Manage backends (list, show, edit, new, validate, import) |
 | [Source](#source) | Manage sources (add, remove, trust, untrust, update) |
 | [Diagnostics](#diagnostics) | Health-check the loadout environment |
@@ -35,7 +35,7 @@ Use this to preview changes before committing.
 | Flag | Description |
 |---|---|
 | `-c, --config <NAME\|PATH>` | Config to use. Defaults to the active context. |
-| `--verbose` | Show per-feature detail in the plan output. |
+| `--verbose` | Show per-component detail in the plan output. |
 
 **Config resolution:**
 - Bare name (e.g. `linux`) → `$XDG_CONFIG_HOME/loadout/configs/linux.yaml`
@@ -48,17 +48,17 @@ Use this to preview changes before committing.
 loadout apply [-c <NAME|PATH>] [--verbose] [-y]
 ```
 
-Executes the plan: installs, updates, and removes features as needed.
-Atomically commits state after each successful feature.
+Executes the plan: installs, updates, and removes components as needed.
+Atomically commits state after each successful component.
 
 | Flag | Description |
 |---|---|
 | `-c, --config <NAME\|PATH>` | Config to use. Defaults to the active context. |
-| `--verbose` | Show per-feature detail. |
+| `--verbose` | Show per-component detail. |
 | `-y, --yes` | Skip the confirmation prompt. |
 
-Feature-level failures are non-fatal: the run continues and a summary is printed.
-Exit code is non-zero if any feature failed.
+Component-level failures are non-fatal: the run continues and a summary is printed.
+Exit code is non-zero if any component failed.
 
 ### `loadout activate`
 
@@ -96,7 +96,7 @@ Error if `apply` has never been run (no cached env plan).
 loadout state show [--output text|json]
 ```
 
-Prints a summary of the current state: version, number of installed features and
+Prints a summary of the current state: version, number of installed components and
 resources. With `--output json`, outputs the full raw state JSON.
 
 | Flag | Description |
@@ -172,7 +172,7 @@ The active context is marked with `*` in text mode.
 loadout config show [<NAME>] [--output text|json]
 ```
 
-Shows the resolved feature list for a config file.
+Shows the resolved component list for a config file.
 When `<NAME>` is omitted, the active context is used.
 
 | Argument | Description |
@@ -208,18 +208,18 @@ Creates a new config file from the built-in template at
 ```sh
 loadout config init linux
 loadout context set linux
-loadout config edit   # fill in features
+loadout config edit   # fill in components
 ```
 
-### `loadout config feature add`
+### `loadout config component add`
 
 ```
-loadout config feature add <ID> [-c <NAME|PATH>]
+loadout config component add <ID> [-c <NAME|PATH>]
 ```
 
-Adds a feature to `profile.features` in the config file. When `-c` is omitted, the active context is used.
+Adds a component to `profile.components` in the config file. When `-c` is omitted, the active context is used.
 
-`<ID>` is a canonical feature ID or a bare name:
+`<ID>` is a canonical component ID or a bare name:
 
 | Input | Resolved |
 |---|---|
@@ -228,21 +228,21 @@ Adds a feature to `profile.features` in the config file. When `-c` is omitted, t
 | `core/node` | `core/node` |
 
 ```sh
-loadout config feature add git            # adds local/git to the active config
-loadout config feature add core/node -c work
+loadout config component add git            # adds local/git to the active config
+loadout config component add core/node -c work
 ```
 
 > **Note:** Write operations parse and re-emit the YAML. YAML comments in the
 > config file are **not preserved**. Use `config edit` if you need to keep
 > comments.
 
-### `loadout config feature remove`
+### `loadout config component remove`
 
 ```
-loadout config feature remove <ID> [-c <NAME|PATH>]
+loadout config component remove <ID> [-c <NAME|PATH>]
 ```
 
-Removes a feature from `profile.features`. Prints `no change` if the feature is not present. Same `-c` resolution and `<ID>` expansion as `feature add`.
+Removes a component from `profile.components`. Prints `no change` if the component is not present. Same `-c` resolution and `<ID>` expansion as `component add`.
 
 > **Note:** Write operations do not preserve YAML comments. See above.
 
@@ -273,7 +273,7 @@ Sets the value at a dot-separated YAML path. `<VALUE>` is parsed as YAML, so:
 | `"hello"` | string |
 
 ```sh
-loadout config raw set profile.features.local.git '{}'
+loadout config raw set profile.components.local.git '{}'
 loadout config raw set strategy.package.default_backend local/mise
 ```
 
@@ -295,124 +295,124 @@ loadout config raw unset strategy.package.default_backend
 
 > **Note:** Write operations do not preserve YAML comments.
 
-## Feature
+## Component
 
-### `loadout feature list`
+### `loadout component list`
 
 ```
-loadout feature list [--source <ID>] [--output text|json]
+loadout component list [--source <ID>] [--output text|json]
 ```
 
-Lists all available features discovered from all source roots (`local` and any
+Lists all available components discovered from all source roots (`local` and any
 external sources declared in `sources.yaml`).
-Features are grouped by source in text mode.
+Components are grouped by source in text mode.
 
 | Flag | Description |
 |---|---|
 | `--source <ID>` | Filter to one source (e.g. `--source local`). |
-| `--output <FORMAT>` | `text` (default) or `json`. JSON is the full feature index keyed by canonical ID. |
+| `--output <FORMAT>` | `text` (default) or `json`. JSON is the full component index keyed by canonical ID. |
 
-### `loadout feature show`
+### `loadout component show`
 
 ```
-loadout feature show <ID> [--output text|json]
+loadout component show <ID> [--output text|json]
 ```
 
-Shows details for a single feature: mode, description, source directory,
+Shows details for a single component: mode, description, source directory,
 dependencies, and declared resources (declarative mode only).
 
 | Argument | Description |
 |---|---|
-| `<ID>` | Canonical feature ID, e.g. `local/nvim` or `core/git`. |
+| `<ID>` | Canonical component ID, e.g. `local/nvim` or `core/git`. |
 | `--output <FORMAT>` | `text` (default) or `json`. |
 
-### `loadout feature edit`
+### `loadout component edit`
 
 ```
-loadout feature edit <NAME>
+loadout component edit <NAME>
 ```
 
-Opens the `feature.yaml` of a local feature in `$EDITOR`. Only `local` source features are editable.
+Opens the `component.yaml` of a local component in `$EDITOR`. Only `local` source components are editable.
 
 `<NAME>` is a bare name or a `local/`-prefixed ID:
 
 ```sh
-loadout feature edit git         # opens features/git/feature.yaml
-loadout feature edit local/git   # same
+loadout component edit git         # opens components/git/component.yaml
+loadout component edit local/git   # same
 ```
 
-Features from external sources (e.g. `core/node`) cannot be edited this way.
+Components from external sources (e.g. `core/node`) cannot be edited this way.
 
-### `loadout feature new`
+### `loadout component new`
 
 ```
-loadout feature new <NAME> [--template declarative|script]
+loadout component new <NAME> [--template declarative|script]
 ```
 
-Scaffolds a new local feature directory at
-`$XDG_CONFIG_HOME/loadout/features/<NAME>/`.
+Scaffolds a new local component directory at
+`$XDG_CONFIG_HOME/loadout/components/<NAME>/`.
 
 | Flag | Description |
 |---|---|
 | `--template <TEMPLATE>` | `declarative` (default) or `script`. |
 
-**`declarative`** — creates `feature.yaml` with a commented `resources:` skeleton.
+**`declarative`** — creates `component.yaml` with a commented `resources:` skeleton.
 
-**`script`** — creates `feature.yaml` with `mode: script` and stub `install.sh` /
+**`script`** — creates `component.yaml` with `mode: script` and stub `install.sh` /
 `uninstall.sh` scripts (made executable on Unix).
 
 ```sh
-loadout feature new mypkg                       # declarative
-loadout feature new myscript --template script  # script mode
+loadout component new mypkg                       # declarative
+loadout component new myscript --template script  # script mode
 ```
 
 Fails with an error if the directory already exists.
 
-### `loadout feature validate`
+### `loadout component validate`
 
 ```
-loadout feature validate <ID>
+loadout component validate <ID>
 ```
 
-Validates a feature's directory structure and `feature.yaml`. Accepts a canonical
+Validates a component's directory structure and `component.yaml`. Accepts a canonical
 ID or a bare name (resolved to `local/<name>`).
 
 Checks performed:
-1. `feature.yaml` is parseable and `spec_version` / `mode` are valid.
+1. `component.yaml` is parseable and `spec_version` / `mode` are valid.
 2. `install.sh` and `uninstall.sh` exist (script mode only).
-3. Resource IDs are unique within the feature (declarative mode).
-4. Each `depends` entry is present in the full feature index (warning if absent).
+3. Resource IDs are unique within the component (declarative mode).
+4. Each `depends` entry is present in the full component index (warning if absent).
 
 Exit code is non-zero if any **errors** are found. Warnings do not affect the exit code.
 
 ```sh
-loadout feature validate git         # validates local/git
-loadout feature validate local/nvim  # same with explicit source
+loadout component validate git         # validates local/git
+loadout component validate local/nvim  # same with explicit source
 ```
 
-### `loadout feature import`
+### `loadout component import`
 
 ```
-loadout feature import <SOURCE/NAME> [--move-config] [--dry-run]
+loadout component import <SOURCE/NAME> [--move-config] [--dry-run]
 ```
 
-Copies a feature from an external source into the `local` source directory
-(`$XDG_CONFIG_HOME/loadout/features/<NAME>/`).
+Copies a component from an external source into the `local` source directory
+(`$XDG_CONFIG_HOME/loadout/components/<NAME>/`).
 
 `<SOURCE/NAME>` must be a canonical ID pointing to an external source (not `local` or `core`).
 
 | Argument / Flag | Description |
 |---|---|
-| `<SOURCE/NAME>` | Canonical feature ID from an external source (e.g. `community/node`). |
-| `--move-config` | Also rewrite all config files (`profile.features`, `bundles.*.features`) to reference `local/<NAME>` instead of the external source. |
+| `<SOURCE/NAME>` | Canonical component ID from an external source (e.g. `community/node`). |
+| `--move-config` | Also rewrite all config files (`profile.components`, `bundles.*.components`) to reference `local/<NAME>` instead of the external source. |
 | `--dry-run` | Show what would happen without writing any files. |
 
-**Bare depends warning:** If the feature's `dep.depends` contains bare names (entries without a `/`), a warning is printed. Bare depends are same-source relative references that may not resolve correctly after import. Consider converting them to canonical IDs (e.g. `local/helper`) or using `--help` for guidance.
+**Bare depends warning:** If the component's `dep.depends` contains bare names (entries without a `/`), a warning is printed. Bare depends are same-source relative references that may not resolve correctly after import. Consider converting them to canonical IDs (e.g. `local/helper`) or using `--help` for guidance.
 
 ```sh
-loadout feature import community/node              # copy to local; config unchanged
-loadout feature import community/node --move-config  # also rewrite config references
-loadout feature import community/node --dry-run    # preview only
+loadout component import community/node              # copy to local; config unchanged
+loadout component import community/node --move-config  # also rewrite config references
+loadout component import community/node --dry-run    # preview only
 ```
 
 ## Backend
@@ -581,7 +581,7 @@ Registers a new `type: git` external source in `sources.yaml`.
 | `--branch <BRANCH>` | Track the tip of this branch (floating ref). |
 | `--tag <TAG>` | Pin to this tag. |
 | `--commit <COMMIT>` | Pin to this full commit hash. |
-| `--path <PATH>` | Repo-relative subdirectory for features/backends. Defaults to `"."`. |
+| `--path <PATH>` | Repo-relative subdirectory for components/backends. Defaults to `"."`. |
 
 Exactly one of `--branch`, `--tag`, `--commit` may be specified (all optional).
 The repository is **not** cloned automatically; run `loadout source update <ID>` to fetch.
@@ -604,7 +604,7 @@ Registers a new `type: path` external source in `sources.yaml`.
 | `<PATH>` | Filesystem path. Relative paths are resolved from `sources.yaml`'s directory. `~` is expanded. |
 | `--id <ID>` | Source ID. Derived from the directory name if omitted. |
 
-The directory must contain at least one of `features/` or `backends/`.
+The directory must contain at least one of `components/` or `backends/`.
 The path must not resolve to the same real directory as the `local` source root.
 
 ```sh
@@ -621,7 +621,7 @@ loadout source remove <ID> [--force]
 Removes a source entry from `sources.yaml`.
 
 Without `--force`, fails if the source is still referenced in any config file
-(`profile.features`, `bundles`, `strategy`) or in the installed state.
+(`profile.components`, `bundles`, `strategy`) or in the installed state.
 
 With `--force`, removes unconditionally and cleans up the corresponding lock entry.
 
@@ -633,11 +633,11 @@ With `--force`, removes unconditionally and cleans up the corresponding lock ent
 ### `loadout source trust`
 
 ```
-loadout source trust <ID> [--features <CSV|*>] [--backends <CSV|*>]
+loadout source trust <ID> [--components <CSV|*>] [--backends <CSV|*>]
 ```
 
 Adds entries to the `allow` list of a source in `sources.yaml`.
-At least one of `--features` or `--backends` must be specified.
+At least one of `--components` or `--backends` must be specified.
 
 Merges into the existing allow-list; duplicates are removed.
 If `"*"` is already present for a dimension, no change is made.
@@ -645,22 +645,22 @@ If `"*"` is already present for a dimension, no change is made.
 | Argument / Flag | Description |
 |---|---|
 | `<ID>` | Source ID to trust. |
-| `--features <CSV\|*>` | Comma-separated feature names, or `*` to allow all. |
+| `--components <CSV\|*>` | Comma-separated component names, or `*` to allow all. |
 | `--backends <CSV\|*>` | Comma-separated backend names, or `*` to allow all. |
 
 ```sh
-loadout source trust community --features '*'
+loadout source trust community --components '*'
 loadout source trust community --backends brew,mise
 ```
 
 ### `loadout source untrust`
 
 ```
-loadout source untrust <ID> [--features <CSV|*>] [--backends <CSV|*>] [--force]
+loadout source untrust <ID> [--components <CSV|*>] [--backends <CSV|*>] [--force]
 ```
 
 Removes entries from the `allow` list of a source in `sources.yaml`.
-At least one of `--features` or `--backends` must be specified.
+At least one of `--components` or `--backends` must be specified.
 
 Removing `"*"` (wildcard) requires `--force`.
 Attempting to remove specific names when the current allow-list is `"*"` returns an error;
@@ -670,13 +670,13 @@ If the allow-list becomes empty after removal, the source reverts to deny-all (n
 | Argument / Flag | Description |
 |---|---|
 | `<ID>` | Source ID to untrust. |
-| `--features <CSV\|*>` | Comma-separated feature names, or `*` to revoke all. |
+| `--components <CSV\|*>` | Comma-separated component names, or `*` to revoke all. |
 | `--backends <CSV\|*>` | Comma-separated backend names, or `*` to revoke all. |
 | `--force` | Required when revoking a wildcard (`*`). |
 
 ```sh
 loadout source untrust community --backends brew      # remove brew from backends allow-list
-loadout source untrust community --features '*' --force  # revoke all-features wildcard
+loadout source untrust community --components '*' --force  # revoke all-components wildcard
 ```
 
 ### `loadout source update`
@@ -700,7 +700,7 @@ Only `type: git` sources are supported; `type: path` sources return an error.
 - **`--to-commit`:** `git fetch` → `git checkout --detach <COMMIT>` → update lock.
 - **`--relock`:** Skip fetch and checkout entirely; recompute `manifest_hash` from the current working tree and rewrite the lock entry.
 
-The lock file records `resolved_commit` (full 40-character hash), `fetched_at` (UTC RFC 3339), and `manifest_hash` (SHA-256 over `features/**/*.yaml` + `backends/**/*.yaml`).
+The lock file records `resolved_commit` (full 40-character hash), `fetched_at` (UTC RFC 3339), and `manifest_hash` (SHA-256 over `components/**/*.yaml` + `backends/**/*.yaml`).
 
 ```sh
 loadout source update community                          # follow declared ref
@@ -767,8 +767,8 @@ loadout completions fish > ~/.config/fish/completions/loadout.fish
 ```sh
 loadout config init linux
 loadout context set linux
-loadout config feature add git
-loadout config feature add core/node
+loadout config component add git
+loadout config component add core/node
 loadout plan         # preview
 loadout apply        # install
 eval "$(loadout activate)"
@@ -787,37 +787,37 @@ loadout apply -y            # apply without prompt
 ```sh
 loadout doctor                      # overall health check
 loadout state show                  # what is installed
-loadout feature list --source local # what local features are available
+loadout component list --source local # what local components are available
 loadout source list                 # which sources are active
 ```
 
 ### Using JSON output in scripts
 
 ```sh
-# List installed features as JSON
-loadout state show --output json | jq '.features | keys'
+# List installed components as JSON
+loadout state show --output json | jq '.components | keys'
 
-# Get details of a specific feature
-loadout feature show local/nvim --output json | jq '.mode'
+# Get details of a specific component
+loadout component show local/nvim --output json | jq '.mode'
 ```
 
-### Editing configs and features
+### Editing configs and components
 
 ```sh
 # Open the active config with $EDITOR (comments preserved)
 loadout config edit
 
-# Add/remove a feature without opening an editor
-loadout config feature add local/git
-loadout config feature remove local/git -c work
+# Add/remove a component without opening an editor
+loadout config component add local/git
+loadout config component remove local/git -c work
 
 # Low-level YAML access
 loadout config raw show
 loadout config raw set strategy.package.default_backend local/mise
 loadout config raw unset strategy.package.default_backend
 
-# Edit a local feature's feature.yaml directly
-loadout feature edit git
+# Edit a local component's component.yaml directly
+loadout component edit git
 
 # Edit a local backend's backend.yaml directly
 loadout backend edit mise
@@ -832,14 +832,14 @@ loadout source edit
 # Register a community source (not cloned yet)
 loadout source add git https://github.com/example/community-loadout.git --branch main --id community
 
-# Allow specific features/backends from the source
-loadout source trust community --features 'node,python' --backends npm
+# Allow specific components/backends from the source
+loadout source trust community --components 'node,python' --backends npm
 
 # Clone and initialise the repo (writes sources.lock.yaml)
 loadout source update community
 
-# Use the feature in your config
-loadout config feature add community/node
+# Use the component in your config
+loadout config component add community/node
 
 # Keep the source in sync later
 loadout source update community          # follow declared branch
@@ -851,10 +851,10 @@ loadout source update community --relock             # refresh lock hash only
 
 ```sh
 # Preview what importing community/node would do
-loadout feature import community/node --dry-run
+loadout component import community/node --dry-run
 
 # Copy community/node to local and rewrite all config references
-loadout feature import community/node --move-config
+loadout component import community/node --move-config
 
 # Copy community/brew backend to local and rewrite all strategy references
 loadout backend import community/brew --move-strategy

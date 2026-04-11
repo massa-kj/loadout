@@ -36,12 +36,12 @@ fn make_ctx(tmp: &TempDir) -> AppContext {
     }
 }
 
-/// Write a minimal script-mode feature to `{local_root}/features/{name}/`.
+/// Write a minimal script-mode component to `{local_root}/components/{name}/`.
 /// Creates platform-appropriate scripts: .sh on Linux/WSL, .ps1 on Windows.
-fn write_script_feature(root: &Path, name: &str) {
-    let feat_dir = root.join("config").join("features").join(name);
+fn write_script_component(root: &Path, name: &str) {
+    let feat_dir = root.join("config").join("components").join(name);
     write(
-        &feat_dir.join("feature.yaml"),
+        &feat_dir.join("component.yaml"),
         "spec_version: 1\nmode: script\n",
     );
 
@@ -66,27 +66,27 @@ fn write_script_feature(root: &Path, name: &str) {
     }
 }
 
-/// Write a minimal config.yaml referencing the given feature names.
-/// Features must be canonical `source_id/name` form; they are grouped by source_id.
+/// Write a minimal config.yaml referencing the given component names.
+/// Components must be canonical `source_id/name` form; they are grouped by source_id.
 /// No strategy section is written (uses Strategy::default()).
-fn write_config(dir: &Path, filename: &str, features: &[&str]) -> PathBuf {
-    // Group features by source_id.
+fn write_config(dir: &Path, filename: &str, components: &[&str]) -> PathBuf {
+    // Group components by source_id.
     let mut grouped: std::collections::BTreeMap<&str, Vec<&str>> =
         std::collections::BTreeMap::new();
-    for f in features {
+    for f in components {
         let (source, name) = f
             .split_once('/')
-            .expect("feature must be canonical source/name");
+            .expect("component must be canonical source/name");
         grouped.entry(source).or_default().push(name);
     }
-    let mut features_str = String::new();
+    let mut components_str = String::new();
     for (source, names) in &grouped {
-        features_str.push_str(&format!("    {source}:\n"));
+        components_str.push_str(&format!("    {source}:\n"));
         for name in names {
-            features_str.push_str(&format!("      {name}: {{}}\n"));
+            components_str.push_str(&format!("      {name}: {{}}\n"));
         }
     }
-    let content = format!("profile:\n  features:\n{features_str}");
+    let content = format!("profile:\n  components:\n{components_str}");
     let path = dir.join(filename);
     write(&path, &content);
     path
@@ -118,73 +118,73 @@ fn plan_missing_config_returns_error() {
     );
 }
 
-/// Config with unrecognised features: recognised list is empty → plan has no actions.
+/// Config with unrecognised components: recognised list is empty → plan has no actions.
 #[test]
-fn plan_unknown_features_produce_empty_plan() {
+fn plan_unknown_components_produce_empty_plan() {
     let tmp = tempfile::tempdir().unwrap();
     let ctx = make_ctx(&tmp);
-    // Feature referenced in config does not exist in index → desired IDs empty.
+    // Component referenced in config does not exist in index → desired IDs empty.
     let config_path = write_config(tmp.path(), "config.yaml", &["local/nonexistent"]);
 
     // Should succeed: empty desired produces a plan with no actions.
     let p = plan(&ctx, &config_path).unwrap();
     assert!(
         p.actions.is_empty(),
-        "plan should have no actions for unknown features"
+        "plan should have no actions for unknown components"
     );
 }
 
-/// plan() with a valid script feature returns a Plan with a Create action.
+/// plan() with a valid script component returns a Plan with a Create action.
 #[test]
-fn plan_script_feature_returns_create_action() {
+fn plan_script_component_returns_create_action() {
     let tmp = tempfile::tempdir().unwrap();
     let ctx = make_ctx(&tmp);
-    write_script_feature(tmp.path(), "git");
+    write_script_component(tmp.path(), "git");
     let config_path = write_config(tmp.path(), "config.yaml", &["local/git"]);
 
     let p = plan(&ctx, &config_path).unwrap();
     assert_eq!(p.actions.len(), 1);
     let action = &p.actions[0];
-    assert_eq!(action.feature.as_str(), "local/git");
+    assert_eq!(action.component.as_str(), "local/git");
     assert!(matches!(action.operation, model::plan::Operation::Create));
 }
 
-/// apply() installs a script feature and commits state.
+/// apply() installs a script component and commits state.
 #[test]
-fn apply_script_feature_commits_state() {
+fn apply_script_component_commits_state() {
     let tmp = tempfile::tempdir().unwrap();
     let ctx = make_ctx(&tmp);
-    write_script_feature(tmp.path(), "git");
+    write_script_component(tmp.path(), "git");
     let config_path = write_config(tmp.path(), "config.yaml", &["local/git"]);
 
     let (result, events) = collect_apply(&ctx, &config_path);
 
     let report = result.unwrap();
-    assert_eq!(report.executed.len(), 1, "expected one feature executed");
+    assert_eq!(report.executed.len(), 1, "expected one component executed");
     assert!(report.failed.is_empty());
 
     // State file must be committed.
     assert!(ctx.state_path().exists(), "state.json must be written");
 
-    // Events: FeatureStart + FeatureDone.
+    // Events: ComponentStart + ComponentDone.
     let starts = events
         .iter()
-        .filter(|e| matches!(e, Event::FeatureStart { .. }))
+        .filter(|e| matches!(e, Event::ComponentStart { .. }))
         .count();
     let dones = events
         .iter()
-        .filter(|e| matches!(e, Event::FeatureDone { .. }))
+        .filter(|e| matches!(e, Event::ComponentDone { .. }))
         .count();
     assert_eq!(starts, 1);
     assert_eq!(dones, 1);
 }
 
-/// apply() a second time on an already-installed feature emits no actions (noop).
+/// apply() a second time on an already-installed component emits no actions (noop).
 #[test]
-fn apply_already_installed_feature_is_noop() {
+fn apply_already_installed_component_is_noop() {
     let tmp = tempfile::tempdir().unwrap();
     let ctx = make_ctx(&tmp);
-    write_script_feature(tmp.path(), "git");
+    write_script_component(tmp.path(), "git");
     let config_path = write_config(tmp.path(), "config.yaml", &["local/git"]);
 
     // First apply: installs.
@@ -195,17 +195,17 @@ fn apply_already_installed_feature_is_noop() {
     let (r2, events2) = collect_apply(&ctx, &config_path);
     let report2 = r2.unwrap();
 
-    // No actions executed: feature is already in state.
+    // No actions executed: component is already in state.
     assert!(
         report2.executed.is_empty(),
-        "second apply should have no executed features"
+        "second apply should have no executed components"
     );
-    // No events at all (no actions → no FeatureStart/Done).
+    // No events at all (no actions → no ComponentStart/Done).
     let start_count = events2
         .iter()
-        .filter(|e| matches!(e, Event::FeatureStart { .. }))
+        .filter(|e| matches!(e, Event::ComponentStart { .. }))
         .count();
-    assert_eq!(start_count, 0, "no FeatureStart events on noop");
+    assert_eq!(start_count, 0, "no ComponentStart events on noop");
 }
 
 /// apply() missing config propagates ConfigNotFound.
@@ -222,13 +222,13 @@ fn apply_missing_config_returns_error() {
     ));
 }
 
-/// apply() two script features: both install, state has both.
+/// apply() two script components: both install, state has both.
 #[test]
-fn apply_multiple_features_all_installed() {
+fn apply_multiple_components_all_installed() {
     let tmp = tempfile::tempdir().unwrap();
     let ctx = make_ctx(&tmp);
-    write_script_feature(tmp.path(), "git");
-    write_script_feature(tmp.path(), "node");
+    write_script_component(tmp.path(), "git");
+    write_script_component(tmp.path(), "node");
     let config_path = write_config(tmp.path(), "config.yaml", &["local/git", "local/node"]);
 
     let (result, _) = collect_apply(&ctx, &config_path);
@@ -238,13 +238,13 @@ fn apply_multiple_features_all_installed() {
     assert!(report.failed.is_empty());
 }
 
-/// apply() removes a feature that is in state but not in the config.
+/// apply() removes a component that is in state but not in the config.
 #[test]
-fn apply_removes_undesired_feature_from_state() {
+fn apply_removes_undesired_component_from_state() {
     let tmp = tempfile::tempdir().unwrap();
     let ctx = make_ctx(&tmp);
-    write_script_feature(tmp.path(), "git");
-    write_script_feature(tmp.path(), "node");
+    write_script_component(tmp.path(), "git");
+    write_script_component(tmp.path(), "node");
 
     // First apply: install git + node.
     let config_both = write_config(tmp.path(), "both.yaml", &["local/git", "local/node"]);
@@ -262,11 +262,11 @@ fn apply_removes_undesired_feature_from_state() {
     // Reload state from disk and verify.
     let state = state::load(&ctx.state_path()).unwrap();
     assert!(
-        state.features.contains_key("local/git"),
+        state.components.contains_key("local/git"),
         "git must still be in state"
     );
     assert!(
-        !state.features.contains_key("local/node"),
+        !state.components.contains_key("local/node"),
         "node must be removed from state"
     );
 }
@@ -276,7 +276,7 @@ fn apply_removes_undesired_feature_from_state() {
 fn plan_without_strategy_section_uses_default_strategy() {
     let tmp = tempfile::tempdir().unwrap();
     let ctx = make_ctx(&tmp);
-    write_script_feature(tmp.path(), "git");
+    write_script_component(tmp.path(), "git");
     let config_path = write_config(tmp.path(), "config.yaml", &["local/git"]);
 
     // write_config omits the strategy section → Strategy::default() is used.
@@ -284,21 +284,21 @@ fn plan_without_strategy_section_uses_default_strategy() {
     assert_eq!(p.actions.len(), 1);
 }
 
-/// apply() with a script feature whose uninstall fails is non-fatal;
-/// other features in the same run still succeed.
+/// apply() with a script component whose uninstall fails is non-fatal;
+/// other components in the same run still succeed.
 #[test]
 fn apply_failing_uninstall_is_non_fatal() {
     let tmp = tempfile::tempdir().unwrap();
     let ctx = make_ctx(&tmp);
 
-    // Feature with a failing uninstall script.
+    // Component with a failing uninstall script.
     let feat_dir = tmp
         .path()
         .join("config")
-        .join("features")
-        .join("badfeature");
+        .join("components")
+        .join("badcomponent");
     write(
-        &feat_dir.join("feature.yaml"),
+        &feat_dir.join("component.yaml"),
         "spec_version: 1\nmode: script\n",
     );
 
@@ -322,27 +322,31 @@ fn apply_failing_uninstall_is_non_fatal() {
         }
     }
 
-    // A good feature that succeeds.
-    write_script_feature(tmp.path(), "git");
+    // A good component that succeeds.
+    write_script_component(tmp.path(), "git");
 
     // First apply: install both.
-    let config_both = write_config(tmp.path(), "both.yaml", &["local/badfeature", "local/git"]);
+    let config_both = write_config(
+        tmp.path(),
+        "both.yaml",
+        &["local/badcomponent", "local/git"],
+    );
     collect_apply(&ctx, &config_both).0.unwrap();
 
-    // Second apply: only git desired → badfeature must be destroyed (fails), git is noop.
+    // Second apply: only git desired → badcomponent must be destroyed (fails), git is noop.
     let config_git_only = write_config(tmp.path(), "git.yaml", &["local/git"]);
     let (result, events) = collect_apply(&ctx, &config_git_only);
     let report = result.unwrap(); // Must not be a fatal error.
 
-    // badfeature destruction failed → shows up in failed list.
-    assert_eq!(report.failed.len(), 1, "badfeature uninstall should fail");
+    // badcomponent destruction failed → shows up in failed list.
+    assert_eq!(report.failed.len(), 1, "badcomponent uninstall should fail");
     // git was already installed; no new action.
     assert!(report.executed.is_empty(), "git is already installed");
 
-    // A FeatureFailed event is emitted.
+    // A ComponentFailed event is emitted.
     let ff_count = events
         .iter()
-        .filter(|e| matches!(e, Event::FeatureFailed { .. }))
+        .filter(|e| matches!(e, Event::ComponentFailed { .. }))
         .count();
     assert_eq!(ff_count, 1);
 }

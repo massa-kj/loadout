@@ -1,13 +1,13 @@
 //! Dependency resolver for loadout.
 //!
 //! Reads only `dep.*` fields from the Feature Index, builds a dependency DAG,
-//! performs cycle detection, and returns a topologically sorted `ResolvedFeatureOrder`.
+//! performs cycle detection, and returns a topologically sorted `ResolvedComponentOrder`.
 //!
 //! The resolver is a **pure function**: it does not read files, modify state, or call backends.
 //!
 //! See: `docs/specs/algorithms/resolver.md`
 
-use model::{CanonicalFeatureId, FeatureIndex, ResolvedFeatureOrder};
+use model::{CanonicalComponentId, ComponentIndex, ResolvedComponentOrder};
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
@@ -18,7 +18,7 @@ pub enum ResolverError {
     ///
     /// Example: Profile requests `"foo/bar"` but no such feature.yaml exists.
     #[error("feature '{id}' is not present in the Feature Index")]
-    FeatureNotFound { id: String },
+    ComponentNotFound { id: String },
 
     /// An explicit `dep.depends` entry points to a feature not in the desired set.
     ///
@@ -45,12 +45,12 @@ pub enum ResolverError {
     Cycle { cycle: String },
 }
 
-/// Resolve the dependency order for `desired_features` using `feature_index`.
+/// Resolve the dependency order for `desired_components` using `component_index`.
 ///
 /// This is a **pure function**: it does not perform I/O, does not mutate global state,
 /// and is deterministic (same inputs always produce the same output).
 ///
-/// Returns a [`ResolvedFeatureOrder`] (topologically sorted, dependencies before dependents).
+/// Returns a [`ResolvedComponentOrder`] (topologically sorted, dependencies before dependents).
 ///
 /// # Algorithm
 ///
@@ -69,16 +69,16 @@ pub enum ResolverError {
 /// - a required capability has no provider in the desired set
 /// - the dependency graph contains a cycle
 pub fn resolve(
-    feature_index: &FeatureIndex,
-    desired_features: &[CanonicalFeatureId],
-) -> Result<ResolvedFeatureOrder, ResolverError> {
+    component_index: &ComponentIndex,
+    desired_components: &[CanonicalComponentId],
+) -> Result<ResolvedComponentOrder, ResolverError> {
     // Build a set for fast membership checks.
-    let desired_set: HashSet<&str> = desired_features.iter().map(|id| id.as_str()).collect();
+    let desired_set: HashSet<&str> = desired_components.iter().map(|id| id.as_str()).collect();
 
     // Validate all desired features exist in the index.
-    for id in desired_features {
-        if !feature_index.features.contains_key(id.as_str()) {
-            return Err(ResolverError::FeatureNotFound {
+    for id in desired_components {
+        if !component_index.components.contains_key(id.as_str()) {
+            return Err(ResolverError::ComponentNotFound {
                 id: id.as_str().into(),
             });
         }
@@ -86,8 +86,8 @@ pub fn resolve(
 
     // Build a capability → providers map over desired features only.
     let mut capability_providers: HashMap<&str, Vec<&str>> = HashMap::new();
-    for id in desired_features {
-        if let Some(meta) = feature_index.features.get(id.as_str()) {
+    for id in desired_components {
+        if let Some(meta) = component_index.components.get(id.as_str()) {
             for cap in &meta.dep.provides {
                 capability_providers
                     .entry(cap.name.as_str())
@@ -101,8 +101,8 @@ pub fn resolve(
     // Keys are feature id strings; values are sets of dependency id strings.
     let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
 
-    for id in desired_features {
-        let meta = feature_index.features.get(id.as_str()).unwrap(); // validated above
+    for id in desired_components {
+        let meta = component_index.components.get(id.as_str()).unwrap(); // validated above
         let mut deps: Vec<&str> = Vec::new();
 
         // Explicit `dep.depends` entries.
@@ -158,15 +158,15 @@ pub fn resolve(
         Black,
     }
 
-    let mut color: HashMap<&str, Color> = desired_features
+    let mut color: HashMap<&str, Color> = desired_components
         .iter()
         .map(|id| (id.as_str(), Color::White))
         .collect();
 
-    let mut result: Vec<&str> = Vec::with_capacity(desired_features.len());
+    let mut result: Vec<&str> = Vec::with_capacity(desired_components.len());
 
     // Process nodes in a deterministic order (sorted by id string).
-    let mut sorted_ids: Vec<&str> = desired_features.iter().map(|id| id.as_str()).collect();
+    let mut sorted_ids: Vec<&str> = desired_components.iter().map(|id| id.as_str()).collect();
     sorted_ids.sort_unstable();
 
     for start in sorted_ids {
@@ -214,10 +214,10 @@ pub fn resolve(
         }
     }
 
-    // Convert to CanonicalFeatureId. All strings are known-valid at this point.
+    // Convert to CanonicalComponentId. All strings are known-valid at this point.
     let order = result
         .into_iter()
-        .map(|s| CanonicalFeatureId::new(s).expect("resolver output id is always canonical"))
+        .map(|s| CanonicalComponentId::new(s).expect("resolver output id is always canonical"))
         .collect();
 
     Ok(order)
@@ -226,22 +226,24 @@ pub fn resolve(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use model::feature_index::{CapabilityRef, DepSpec, FeatureIndex, FeatureMeta, FeatureMode};
+    use model::component_index::{
+        CapabilityRef, ComponentIndex, ComponentMeta, ComponentMode, DepSpec,
+    };
 
     // Type alias to avoid clippy::type_complexity in the test helper signature.
     // (id, depends, requires, provides)
     type IndexEntry<'a> = (&'a str, &'a [&'a str], &'a [&'a str], &'a [&'a str]);
 
-    fn make_index(entries: &[IndexEntry<'_>]) -> FeatureIndex {
+    fn make_index(entries: &[IndexEntry<'_>]) -> ComponentIndex {
         // entries: (id, depends, requires, provides)
-        let features = entries
+        let components = entries
             .iter()
             .map(|&(id, depends, requires, provides)| {
-                let meta = FeatureMeta {
+                let meta = ComponentMeta {
                     spec_version: 1,
-                    mode: FeatureMode::Script,
+                    mode: ComponentMode::Script,
                     description: None,
-                    source_dir: format!("/features/{id}"),
+                    source_dir: format!("/components/{id}"),
                     dep: DepSpec {
                         depends: depends.iter().map(|s| s.to_string()).collect(),
                         requires: requires
@@ -262,19 +264,19 @@ mod tests {
                 (id.to_string(), meta)
             })
             .collect();
-        FeatureIndex {
+        ComponentIndex {
             schema_version: 1,
-            features,
+            components,
         }
     }
 
-    fn ids(raw: &[&str]) -> Vec<CanonicalFeatureId> {
+    fn ids(raw: &[&str]) -> Vec<CanonicalComponentId> {
         raw.iter()
-            .map(|s| CanonicalFeatureId::new(*s).unwrap())
+            .map(|s| CanonicalComponentId::new(*s).unwrap())
             .collect()
     }
 
-    fn as_strs(order: &ResolvedFeatureOrder) -> Vec<&str> {
+    fn as_strs(order: &ResolvedComponentOrder) -> Vec<&str> {
         order.iter().map(|id| id.as_str()).collect()
     }
 
@@ -382,7 +384,7 @@ mod tests {
         let index = make_index(&[]);
         let desired = ids(&["core/ghost"]);
         let err = resolve(&index, &desired).unwrap_err();
-        assert!(matches!(err, ResolverError::FeatureNotFound { .. }));
+        assert!(matches!(err, ResolverError::ComponentNotFound { .. }));
     }
 
     #[test]

@@ -3,15 +3,15 @@
 ## Purpose
 
 DesiredResourceGraph is the structured representation of all resources that **should** exist
-after a successful apply, grouped by feature.
+after a successful apply, grouped by component.
 
-It is produced by FeatureCompiler and consumed exclusively by Planner.
+It is produced by ComponentCompiler and consumed exclusively by Planner.
 
 ## Document Boundary
 
 **What this document defines (source of truth):**
 - DesiredResourceGraph purpose and pipeline position
-- Backend resolution authority (FeatureCompiler resolves, Planner must not re-resolve)
+- Backend resolution authority (ComponentCompiler resolves, Planner must not re-resolve)
 - Immutability constraint (Planner/Executor must not modify)
 - Compatibility rules (used by Planner for classification)
 - Unknown kind handling (Planner must block)
@@ -29,9 +29,9 @@ It is produced by FeatureCompiler and consumed exclusively by Planner.
 ## Position in Pipeline
 
 ```
-Feature Index + strategy
+Component Index + strategy
       ↓
-  FeatureCompiler
+  ComponentCompiler
       ↓
   DesiredResourceGraph   ← this document
       ↓
@@ -43,7 +43,7 @@ Feature Index + strategy
 ```json
 {
   "schema_version": 1,
-  "features": {
+  "components": {
     "<canonical_feature_id>": {
       "resources": [
         {
@@ -60,11 +60,11 @@ Feature Index + strategy
 
 `schema_version` must be `1` for this specification.
 
-Feature keys are canonical IDs of the form `<source_id>/<name>` (e.g. `core/git`).
+Component keys are canonical IDs of the form `<source_id>/<name>` (e.g. `core/git`).
 
 ## Resource ID
 
-`id` is a stable, human-readable identifier unique within a feature's resource list.
+`id` is a stable, human-readable identifier unique within a component's resource list.
 Format: `<kind>:<name>` (e.g. `package:git`, `fs:gitconfig`, `runtime:node`).
 
 Resource IDs are used by the planner for diff and by the executor for state recording.
@@ -88,7 +88,7 @@ For detailed field definitions and types, see `crates/model/src/desired_resource
 ```
 
 **Meaning:**
-- `desired_backend` is resolved by FeatureCompiler using strategy (source of truth)
+- `desired_backend` is resolved by ComponentCompiler using strategy (source of truth)
 - Planner uses this value for backend-mismatch detection
 
 ### runtime
@@ -105,7 +105,7 @@ For detailed field definitions and types, see `crates/model/src/desired_resource
 
 **Meaning:**
 - `version` is always required (unlike packages)
-- `desired_backend` is resolved by FeatureCompiler
+- `desired_backend` is resolved by ComponentCompiler
 
 ### fs
 
@@ -127,18 +127,18 @@ For detailed field definitions and types, see `crates/model/src/desired_resource
 
 ## Backend Resolution
 
-`desired_backend` is resolved by FeatureCompiler using strategy before producing this graph.
+`desired_backend` is resolved by ComponentCompiler using strategy before producing this graph.
 The Planner must NOT re-resolve backends. The value in `desired_backend` is authoritative.
 
 ## Immutability
 
-DesiredResourceGraph is immutable once produced by FeatureCompiler.
+DesiredResourceGraph is immutable once produced by ComponentCompiler.
 Neither Planner nor Executor may modify it.
 
 ## Unknown Resource Kinds
 
 If a resource `kind` is not in the supported set (`package`, `runtime`, `fs`),
-the Planner must classify the owning feature as `blocked`.
+the Planner must classify the owning component as `blocked`.
 
 ## Compatibility Rules (used by Planner)
 
@@ -155,7 +155,7 @@ Any field difference in the above set implies incompatibility → `replace`.
 ```json
 {
   "schema_version": 1,
-  "features": {
+  "components": {
     "core/git": {
       "resources": [
         {

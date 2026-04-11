@@ -3,7 +3,7 @@
 # Used by: lifecycle (expand phase), idempotent (full profile variant).
 
 profile:
-  features:
+  components:
     local:
       dummy-pkg: {}
       dummy-fs: {}

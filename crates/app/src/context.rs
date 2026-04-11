@@ -5,7 +5,7 @@ use std::path::PathBuf;
 /// All pipeline-level errors.
 ///
 /// These are returned as `Err` only for fatal, run-aborting conditions.
-/// Feature-level failures during `apply()` are reported via [`executor::Event::FeatureFailed`]
+/// Component-level failures during `apply()` are reported via [`executor::Event::ComponentFailed`]
 /// and collected in [`executor::ExecutorReport::failed`], not surfaced as `AppError`.
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
@@ -17,9 +17,9 @@ pub enum AppError {
     #[error("config error: {0}")]
     Config(#[from] config::ConfigError),
 
-    /// Feature index construction failed (e.g. unreadable feature.yaml).
-    #[error("feature index error: {0}")]
-    FeatureIndex(#[from] feature_index::FeatureIndexError),
+    /// Component index construction failed (e.g. unreadable component.yaml)).
+    #[error("component index error: {0}")]
+    ComponentIndex(#[from] component_index::ComponentIndexError),
 
     /// Dependency resolution failed (missing dependency or cycle).
     #[error("resolver error: {0}")]
@@ -41,9 +41,9 @@ pub enum AppError {
     #[error("executor error: {0}")]
     Executor(#[from] executor::ExecutorError),
 
-    /// Feature not found in the index.
-    #[error("feature '{id}' not found")]
-    FeatureNotFound { id: String },
+    /// Component not found in the index.
+    #[error("component '{id}' not found")]
+    ComponentNotFound { id: String },
 
     /// Backend not found in any source root.
     #[error("backend '{id}' not found")]
@@ -147,7 +147,7 @@ pub struct AppContext {
     /// Resolved XDG / AppData base directories.
     pub dirs: platform::Dirs,
 
-    /// Base directory for the `local` source (features/ and backends/).
+    /// Base directory for the `local` source (components/ and backends/).
     ///
     /// Defaults to `dirs.config_home`. Can be overridden via the `LOADOUT_ROOT`
     /// environment variable for development use only.

@@ -1,8 +1,10 @@
 //! Version install scenario — version is recorded in state after install.
 //!
-//! Uses dummy backends and features; no network access required.
+//! Uses dummy backends and components; no network access required.
 
-use crate::assert::{assert_feature_present, assert_state_valid, get_runtime_version, load_state};
+use crate::assert::{
+    assert_component_present, assert_state_valid, get_runtime_version, load_state,
+};
 use crate::context::Context;
 use crate::runner::loadout_apply;
 
@@ -26,7 +28,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
     assert_state_valid(&state)?;
 
     println!("==> Verifying dummy-rt is installed");
-    assert_feature_present(&state, "local/dummy-rt")?;
+    assert_component_present(&state, "local/dummy-rt")?;
 
     println!("==> Verifying runtime version recorded in state");
     let version = get_runtime_version(&state, "local/dummy-rt")?;

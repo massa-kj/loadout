@@ -21,7 +21,7 @@ pub fn print_plan(plan: &model::Plan, verbose: bool) {
                 Operation::ReplaceBackend => "replace-backend",
                 Operation::Strengthen => "strengthen",
             };
-            println!("  [{op_label}] {}", action.feature.as_str());
+            println!("  [{op_label}] {}", action.component.as_str());
         }
         println!();
     }
@@ -29,7 +29,7 @@ pub fn print_plan(plan: &model::Plan, verbose: bool) {
     if !plan.blocked.is_empty() {
         println!("Blocked:");
         for entry in &plan.blocked {
-            println!("  [blocked] {}: {}", entry.feature.as_str(), entry.reason);
+            println!("  [blocked] {}: {}", entry.component.as_str(), entry.reason);
         }
         println!();
     }
@@ -37,7 +37,7 @@ pub fn print_plan(plan: &model::Plan, verbose: bool) {
     if verbose && !plan.noops.is_empty() {
         println!("No-op (already up to date):");
         for entry in &plan.noops {
-            println!("  [noop] {}", entry.feature.as_str());
+            println!("  [noop] {}", entry.component.as_str());
         }
         println!();
     }

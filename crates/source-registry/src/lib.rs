@@ -15,8 +15,8 @@
 //!
 //! **Features:**
 //! - `core/<name>` → embedded in binary; `feature_dir` returns `UnknownSource`
-//! - `local/<name>` → `{config_home}/features/<name>`
-//! - `<ext>/<name>` → `{data_home}/sources/<ext>/features/<name>`
+//! - `local/<name>` → `{config_home}/components/<name>`
+//! - `<ext>/<name>` → `{data_home}/sources/<ext>/components/<name>`
 //!
 //! **Backends:**
 //! - `core/<name>` → embedded in binary; `backend_dir` returns `UnknownSource`
@@ -44,7 +44,7 @@
 use std::path::{Path, PathBuf};
 
 use model::{
-    id::{CanonicalBackendId, CanonicalFeatureId},
+    id::{CanonicalBackendId, CanonicalComponentId},
     sources::{AllowList, AllowSpec, SourceEntry, SourceType, SourcesSpec},
 };
 use thiserror::Error;
@@ -58,18 +58,18 @@ pub enum RegistryError {
 
     /// The allow-list for an external source has no `allow` field — source is deny-all.
     #[error(
-        "feature '{feature_id}' is not allowed by source '{source_id}': \
+        "component '{component_id}' is not allowed by source '{source_id}': \
          source has no allow-list (deny-all)"
     )]
-    FeatureDeniedNoAllowList {
-        feature_id: String,
+    ComponentDeniedNoAllowList {
+        component_id: String,
         source_id: String,
     },
 
     /// The allow-list for an external source does not permit this feature.
-    #[error("feature '{feature_id}' is not in the allow-list of source '{source_id}'")]
-    FeatureNotAllowed {
-        feature_id: String,
+    #[error("component '{component_id}' is not in the allow-list of source '{source_id}'")]
+    ComponentNotAllowed {
+        component_id: String,
         source_id: String,
     },
 
@@ -97,9 +97,9 @@ pub enum RegistryError {
 pub struct SourceRegistry {
     /// External sources declared in `sources.yaml`. `core` and `local` are not listed here.
     sources: Vec<SourceEntry>,
-    /// Absolute path to the local config home (contains `features/` and `backends/`).
+    /// Absolute path to the local config home (contains `components/` and `backends/`).
     config_home: PathBuf,
-    /// Absolute path to the data home (contains `sources/<id>/features/` and `sources/<id>/backends/`).
+    /// Absolute path to the data home (contains `sources/<id>/components/` and `sources/<id>/backends/`).
     data_home: PathBuf,
 }
 
@@ -122,9 +122,9 @@ impl SourceRegistry {
     /// Resolve the filesystem directory for a canonical feature ID.
     ///
     /// Does NOT check whether the directory exists on disk.
-    /// Does NOT enforce the allow-list — call [`check_feature_allowed`](Self::check_feature_allowed) separately.
-    pub fn feature_dir(&self, id: &CanonicalFeatureId) -> Result<PathBuf, RegistryError> {
-        self.resolve_dir(id.source(), id.name(), ResourceKind::Feature)
+    /// Does NOT enforce the allow-list — call [`check_component_allowed`](Self::check_component_allowed) separately.
+    pub fn component_dir(&self, id: &CanonicalComponentId) -> Result<PathBuf, RegistryError> {
+        self.resolve_dir(id.source(), id.name(), ResourceKind::Component)
     }
 
     /// Resolve the filesystem directory for a canonical backend ID.
@@ -139,14 +139,14 @@ impl SourceRegistry {
     ///
     /// - `core` and `local` sources are always allowed.
     /// - External sources without an `allow` field are deny-all.
-    /// - Returns `Ok(())` if allowed, `Err(RegistryError::Feature*)` otherwise.
-    pub fn check_feature_allowed(&self, id: &CanonicalFeatureId) -> Result<(), RegistryError> {
+    /// - Returns `Ok(())` if allowed, `Err(RegistryError::Component*)` otherwise.
+    pub fn check_component_allowed(&self, id: &CanonicalComponentId) -> Result<(), RegistryError> {
         let source_id = id.source();
         if is_implicit(source_id) {
             return Ok(());
         }
         let entry = self.find_source(source_id)?;
-        check_allowed_feature(entry, id)
+        check_allowed_component(entry, id)
     }
 
     /// Check whether a canonical backend ID is permitted by the source's allow-list.
@@ -216,32 +216,32 @@ fn is_implicit(source_id: &str) -> bool {
 }
 
 enum ResourceKind {
-    Feature,
+    Component,
     Backend,
 }
 
 impl ResourceKind {
     fn dir_segment(&self) -> &'static str {
         match self {
-            ResourceKind::Feature => "features",
+            ResourceKind::Component => "components",
             ResourceKind::Backend => "backends",
         }
     }
 }
 
-fn check_allowed_feature(
+fn check_allowed_component(
     entry: &SourceEntry,
-    id: &CanonicalFeatureId,
+    id: &CanonicalComponentId,
 ) -> Result<(), RegistryError> {
     match &entry.allow {
-        None => Err(RegistryError::FeatureDeniedNoAllowList {
-            feature_id: id.as_str().to_string(),
+        None => Err(RegistryError::ComponentDeniedNoAllowList {
+            component_id: id.as_str().to_string(),
             source_id: entry.id.clone(),
         }),
         Some(AllowSpec::All(_)) => Ok(()),
-        Some(AllowSpec::Detailed(detail)) => match &detail.features {
-            None => Err(RegistryError::FeatureNotAllowed {
-                feature_id: id.as_str().to_string(),
+        Some(AllowSpec::Detailed(detail)) => match &detail.components {
+            None => Err(RegistryError::ComponentNotAllowed {
+                component_id: id.as_str().to_string(),
                 source_id: entry.id.clone(),
             }),
             Some(AllowList::All(_)) => Ok(()),
@@ -249,8 +249,8 @@ fn check_allowed_feature(
                 if names.iter().any(|n| n == id.name()) {
                     Ok(())
                 } else {
-                    Err(RegistryError::FeatureNotAllowed {
-                        feature_id: id.as_str().to_string(),
+                    Err(RegistryError::ComponentNotAllowed {
+                        component_id: id.as_str().to_string(),
                         source_id: entry.id.clone(),
                     })
                 }
@@ -304,8 +304,8 @@ mod tests {
         PathBuf::from("/data")
     }
 
-    fn feature(s: &str) -> CanonicalFeatureId {
-        CanonicalFeatureId::new(s).unwrap()
+    fn component(s: &str) -> CanonicalComponentId {
+        CanonicalComponentId::new(s).unwrap()
     }
 
     fn backend(s: &str) -> CanonicalBackendId {
@@ -338,31 +338,34 @@ mod tests {
     // ── feature_dir ───────────────────────────────────────────────────────────
 
     #[test]
-    fn feature_dir_core_returns_unknown_source() {
+    fn component_dir_core_returns_unknown_source() {
         // core is embedded; it has no filesystem path in the registry.
         let r = empty_registry();
-        let err = r.feature_dir(&feature("core/git")).unwrap_err();
+        let err = r.component_dir(&component("core/git")).unwrap_err();
         assert!(matches!(err, RegistryError::UnknownSource { .. }));
     }
 
     #[test]
-    fn feature_dir_local() {
+    fn component_dir_local() {
         let r = empty_registry();
-        let dir = r.feature_dir(&feature("local/myvim")).unwrap();
-        assert_eq!(dir, PathBuf::from("/cfg/features/myvim"));
+        let dir = r.component_dir(&component("local/myvim")).unwrap();
+        assert_eq!(dir, PathBuf::from("/cfg/components/myvim"));
     }
 
     #[test]
-    fn feature_dir_external() {
+    fn component_dir_external() {
         let r = registry_with(spec_with(vec![source_entry("community", None)]));
-        let dir = r.feature_dir(&feature("community/node")).unwrap();
-        assert_eq!(dir, PathBuf::from("/data/sources/community/features/node"));
+        let dir = r.component_dir(&component("community/node")).unwrap();
+        assert_eq!(
+            dir,
+            PathBuf::from("/data/sources/community/components/node")
+        );
     }
 
     #[test]
-    fn feature_dir_unknown_source_errors() {
+    fn component_dir_unknown_source_errors() {
         let r = empty_registry();
-        let err = r.feature_dir(&feature("unknown/node")).unwrap_err();
+        let err = r.component_dir(&component("unknown/node")).unwrap_err();
         assert!(matches!(err, RegistryError::UnknownSource { .. }));
     }
 
@@ -390,18 +393,18 @@ mod tests {
         assert_eq!(dir, PathBuf::from("/data/sources/tools/backends/npm"));
     }
 
-    // ── check_feature_allowed ─────────────────────────────────────────────────
+    // ── check_component_allowed ─────────────────────────────────────────────────
 
     #[test]
     fn core_feature_always_allowed() {
         let r = empty_registry();
-        r.check_feature_allowed(&feature("core/git")).unwrap();
+        r.check_component_allowed(&component("core/git")).unwrap();
     }
 
     #[test]
     fn local_feature_always_allowed() {
         let r = empty_registry();
-        r.check_feature_allowed(&feature("local/myfeature"))
+        r.check_component_allowed(&component("local/mycomponent"))
             .unwrap();
     }
 
@@ -409,75 +412,81 @@ mod tests {
     fn external_no_allow_is_deny_all() {
         let r = registry_with(spec_with(vec![source_entry("community", None)]));
         let err = r
-            .check_feature_allowed(&feature("community/node"))
+            .check_component_allowed(&component("community/node"))
             .unwrap_err();
         assert!(matches!(
             err,
-            RegistryError::FeatureDeniedNoAllowList { .. }
+            RegistryError::ComponentDeniedNoAllowList { .. }
         ));
     }
 
     #[test]
-    fn external_allow_star_permits_all_features() {
+    fn external_allow_star_permits_all_components() {
         let r = registry_with(spec_with(vec![source_entry(
             "community",
             Some(AllowSpec::All(WildcardAll)),
         )]));
-        r.check_feature_allowed(&feature("community/node")).unwrap();
-        r.check_feature_allowed(&feature("community/python"))
+        r.check_component_allowed(&component("community/node"))
+            .unwrap();
+        r.check_component_allowed(&component("community/python"))
             .unwrap();
     }
 
     #[test]
-    fn external_allow_detailed_features_star_permits_all() {
+    fn external_allow_detailed_components_star_permits_all() {
         let r = registry_with(spec_with(vec![source_entry(
             "tools",
             Some(AllowSpec::Detailed(DetailedAllow {
-                features: Some(AllowList::All(WildcardAll)),
+                components: Some(AllowList::All(WildcardAll)),
                 backends: None,
             })),
         )]));
-        r.check_feature_allowed(&feature("tools/node")).unwrap();
+        r.check_component_allowed(&component("tools/node")).unwrap();
     }
 
     #[test]
-    fn external_allow_detailed_features_list_permits_listed() {
+    fn external_allow_detailed_components_list_permits_listed() {
         let r = registry_with(spec_with(vec![source_entry(
             "tools",
             Some(AllowSpec::Detailed(DetailedAllow {
-                features: Some(AllowList::Names(vec!["node".into(), "python".into()])),
+                components: Some(AllowList::Names(vec!["node".into(), "python".into()])),
                 backends: None,
             })),
         )]));
-        r.check_feature_allowed(&feature("tools/node")).unwrap();
-        r.check_feature_allowed(&feature("tools/python")).unwrap();
+        r.check_component_allowed(&component("tools/node")).unwrap();
+        r.check_component_allowed(&component("tools/python"))
+            .unwrap();
     }
 
     #[test]
-    fn external_allow_detailed_features_list_rejects_unlisted() {
+    fn external_allow_detailed_components_list_rejects_unlisted() {
         let r = registry_with(spec_with(vec![source_entry(
             "tools",
             Some(AllowSpec::Detailed(DetailedAllow {
-                features: Some(AllowList::Names(vec!["node".into()])),
+                components: Some(AllowList::Names(vec!["node".into()])),
                 backends: None,
             })),
         )]));
-        let err = r.check_feature_allowed(&feature("tools/ruby")).unwrap_err();
-        assert!(matches!(err, RegistryError::FeatureNotAllowed { .. }));
+        let err = r
+            .check_component_allowed(&component("tools/ruby"))
+            .unwrap_err();
+        assert!(matches!(err, RegistryError::ComponentNotAllowed { .. }));
     }
 
     #[test]
-    fn external_allow_detailed_no_features_key_denies_feature() {
-        // `allow: { backends: ... }` with no `features:` key — features are denied.
+    fn external_allow_detailed_no_components_key_denies_component() {
+        // `allow: { backends: ... }` with no `components:` key — components are denied.
         let r = registry_with(spec_with(vec![source_entry(
             "tools",
             Some(AllowSpec::Detailed(DetailedAllow {
-                features: None,
+                components: None,
                 backends: Some(AllowList::All(WildcardAll)),
             })),
         )]));
-        let err = r.check_feature_allowed(&feature("tools/node")).unwrap_err();
-        assert!(matches!(err, RegistryError::FeatureNotAllowed { .. }));
+        let err = r
+            .check_component_allowed(&component("tools/node"))
+            .unwrap_err();
+        assert!(matches!(err, RegistryError::ComponentNotAllowed { .. }));
     }
 
     // ── check_backend_allowed ─────────────────────────────────────────────────
@@ -520,7 +529,7 @@ mod tests {
         let r = registry_with(spec_with(vec![source_entry(
             "tools",
             Some(AllowSpec::Detailed(DetailedAllow {
-                features: None,
+                components: None,
                 backends: Some(AllowList::Names(vec!["npm".into(), "uv".into()])),
             })),
         )]));
@@ -533,7 +542,7 @@ mod tests {
         let r = registry_with(spec_with(vec![source_entry(
             "tools",
             Some(AllowSpec::Detailed(DetailedAllow {
-                features: None,
+                components: None,
                 backends: Some(AllowList::Names(vec!["npm".into()])),
             })),
         )]));
@@ -546,7 +555,7 @@ mod tests {
         let r = registry_with(spec_with(vec![source_entry(
             "tools",
             Some(AllowSpec::Detailed(DetailedAllow {
-                features: Some(AllowList::All(WildcardAll)),
+                components: Some(AllowList::All(WildcardAll)),
                 backends: None,
             })),
         )]));
@@ -575,10 +584,10 @@ mod tests {
     }
 
     #[test]
-    fn feature_dir_type_path() {
+    fn component_dir_type_path() {
         let r = registry_with(spec_with(vec![path_source_entry("mylab", "/home/u/mylab")]));
-        let dir = r.feature_dir(&feature("mylab/mytool")).unwrap();
-        assert_eq!(dir, PathBuf::from("/home/u/mylab/features/mytool"));
+        let dir = r.component_dir(&component("mylab/mytool")).unwrap();
+        assert_eq!(dir, PathBuf::from("/home/u/mylab/components/mytool"));
     }
 
     #[test]
@@ -600,7 +609,7 @@ mod tests {
             allow: None,
         };
         let r = registry_with(spec_with(vec![entry]));
-        let err = r.feature_dir(&feature("mylab/mytool")).unwrap_err();
+        let err = r.component_dir(&component("mylab/mytool")).unwrap_err();
         assert!(matches!(err, RegistryError::UnknownSource { .. }));
     }
 }

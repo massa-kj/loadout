@@ -80,14 +80,14 @@ if ($Scenario) {
     $SetupConfigCmd = @"
 Write-Host 'Setting up loadout config...' -ForegroundColor Cyan;
 `$LoadoutRoot = Join-Path `$env:APPDATA 'loadout';
-`$FeaturesDir = Join-Path `$LoadoutRoot 'features';
+`$ComponentsDir = Join-Path `$LoadoutRoot 'components';
 `$BackendsDir = Join-Path `$LoadoutRoot 'backends';
 `$ConfigsDir  = Join-Path `$LoadoutRoot 'configs';
-New-Item -ItemType Directory -Force -Path `$FeaturesDir, `$BackendsDir, `$ConfigsDir | Out-Null;
-Copy-Item 'features\*'                   `$FeaturesDir -Recurse -Force;
+New-Item -ItemType Directory -Force -Path `$ComponentsDir, `$BackendsDir, `$ConfigsDir | Out-Null;
+Copy-Item 'components\*'                   `$ComponentsDir -Recurse -Force;
 Copy-Item 'backends\*'                   `$BackendsDir -Recurse -Force;
 Copy-Item 'tests\fixtures\backends\*'   `$BackendsDir -Recurse -Force;
-Copy-Item 'tests\fixtures\features\*'   `$FeaturesDir -Recurse -Force;
+Copy-Item 'tests\fixtures\components\*'   `$ComponentsDir -Recurse -Force;
 Copy-Item 'tests\fixtures\configs\*'    `$ConfigsDir  -Force;
 `$env:XDG_CONFIG_HOME = `$env:APPDATA;
 `$env:XDG_STATE_HOME  = `$env:APPDATA;

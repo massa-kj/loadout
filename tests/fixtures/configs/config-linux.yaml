@@ -1,5 +1,5 @@
 profile:
-  features:
+  components:
     local:
       brew: {}
       # cli-tools: {}

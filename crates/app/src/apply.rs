@@ -13,8 +13,8 @@ use crate::pipeline::{run_pipeline, PipelineOutput};
 pub struct ExecutionPlan {
     pub plan: model::plan::Plan,
     pub graph: model::desired_resource_graph::DesiredResourceGraph,
-    pub index: model::FeatureIndex,
-    pub order: model::ResolvedFeatureOrder,
+    pub index: model::ComponentIndex,
+    pub order: model::ResolvedComponentOrder,
     pub registry: backend_host::BackendRegistry,
     pub state: state::State,
 }
@@ -53,10 +53,10 @@ pub fn prepare_execution(ctx: &AppContext, config_path: &Path) -> Result<Executi
 /// Execute a prepared plan.
 ///
 /// Takes ownership of `ExecutionPlan` and performs all side-effecting operations:
-/// - Calls feature-host (script mode) or backend-host (declarative mode)
-/// - Commits state after each successful feature
+/// - Calls component-host (script mode) or backend-host (declarative mode)
+/// - Commits state after each successful component
 ///
-/// Feature-level failures are non-fatal and reported via `on_event` +
+/// Component-level failures are non-fatal and reported via `on_event` +
 /// `ExecutorReport::failed`.
 ///
 /// Returns `Err` only for fatal conditions (state commit failure, invariant violation).
@@ -90,7 +90,7 @@ pub fn execute(
     Ok(report)
 }
 
-/// Execute the plan: install, update, and remove features as needed.
+/// Execute the plan: install, update, and remove components as needed.
 ///
 /// This is a convenience wrapper around `prepare_execution()` + `execute()`.
 /// For use cases that require user confirmation or plan inspection, use
@@ -99,7 +99,7 @@ pub fn execute(
 /// `config_path` must point to a unified `config.yaml` containing both the
 /// `profile` and (optionally) the `strategy` section.
 ///
-/// Feature-level failures do not abort the run; they are reported via `on_event`
+/// Component-level failures do not abort the run; they are reported via `on_event`
 /// and collected in [`executor::ExecutorReport::failed`].
 ///
 /// Returns `Err` only for fatal conditions (state commit failure, invariant

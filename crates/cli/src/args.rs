@@ -61,10 +61,10 @@ pub enum Command {
         command: ConfigCommand,
     },
 
-    /// Read and list available features
-    Feature {
+    /// Read and list available components
+    Component {
         #[command(subcommand)]
-        command: FeatureCommand,
+        command: ComponentCommand,
     },
 
     /// Read and list available backends
@@ -129,7 +129,7 @@ pub struct ApplyArgs {
     #[command(flatten)]
     pub config: ConfigArgs,
 
-    /// Show per-feature detail
+    /// Show per-component detail
     #[arg(long)]
     pub verbose: bool,
 
@@ -143,7 +143,7 @@ pub struct PlanArgs {
     #[command(flatten)]
     pub config: ConfigArgs,
 
-    /// Show per-feature detail
+    /// Show per-component detail
     #[arg(long)]
     pub verbose: bool,
 }
@@ -235,10 +235,10 @@ pub enum ConfigCommand {
     /// Create a new config file from the built-in template
     Init(ConfigInitArgs),
 
-    /// Manage features declared in a config file
-    Feature {
+    /// Manage components declared in a config file
+    Component {
         #[command(subcommand)]
-        command: ConfigFeatureCommand,
+        command: ConfigComponentCommand,
     },
 
     /// Low-level YAML access (escape hatch; prefer typed commands)
@@ -257,17 +257,17 @@ pub struct ConfigInitArgs {
 // ── config feature ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Subcommand)]
-pub enum ConfigFeatureCommand {
-    /// Add a feature to the config file
-    Add(ConfigFeatureAddArgs),
+pub enum ConfigComponentCommand {
+    /// Add a component to the config file
+    Add(ConfigComponentAddArgs),
 
-    /// Remove a feature from the config file
-    Remove(ConfigFeatureRemoveArgs),
+    /// Remove a component from the config file
+    Remove(ConfigComponentRemoveArgs),
 }
 
 #[derive(Debug, clap::Args)]
-pub struct ConfigFeatureAddArgs {
-    /// Feature ID (`source/name`) or bare name (resolves to `local/<name>`)
+pub struct ConfigComponentAddArgs {
+    /// Component ID (`source/name`) or bare name (resolves to `local/<name>`)
     pub id: String,
 
     /// Config name or path. Defaults to the active context.
@@ -276,8 +276,8 @@ pub struct ConfigFeatureAddArgs {
 }
 
 #[derive(Debug, clap::Args)]
-pub struct ConfigFeatureRemoveArgs {
-    /// Feature ID (`source/name`) or bare name (resolves to `local/<name>`)
+pub struct ConfigComponentRemoveArgs {
+    /// Component ID (`source/name`) or bare name (resolves to `local/<name>`)
     pub id: String,
 
     /// Config name or path. Defaults to the active context.
@@ -307,7 +307,7 @@ pub struct ConfigRawShowArgs {
 
 #[derive(Debug, clap::Args)]
 pub struct ConfigRawSetArgs {
-    /// Dot-separated YAML path (e.g. `profile.features.local.git`)
+    /// Dot-separated YAML path (e.g. `profile.components.local.git`)
     pub path: String,
 
     /// YAML value to set (e.g. `{}`, `true`, `v1`)
@@ -337,64 +337,64 @@ pub struct ConfigShowArgs {
     pub output: OutputArgs,
 }
 
-// ── feature ──────────────────────────────────────────────────────────────────
+// ── component ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Subcommand)]
-pub enum FeatureCommand {
-    /// List all available features
-    List(FeatureListArgs),
+pub enum ComponentCommand {
+    /// List all available components
+    List(ComponentListArgs),
 
-    /// Show details for a specific feature
-    Show(FeatureShowArgs),
+    /// Show details for a specific component
+    Show(ComponentShowArgs),
 
-    /// Open a local feature's `feature.yaml` in $EDITOR
-    Edit(FeatureEditArgs),
+    /// Open a local component's `component.yaml` in $EDITOR
+    Edit(ComponentEditArgs),
 
-    /// Scaffold a new local feature directory from a template
-    New(FeatureNewArgs),
+    /// Scaffold a new local component directory from a template
+    New(ComponentNewArgs),
 
-    /// Validate a feature's `feature.yaml` and directory structure
-    Validate(FeatureValidateArgs),
+    /// Validate a component's `component.yaml` and directory structure
+    Validate(ComponentValidateArgs),
 
-    /// Copy a feature from an external source into the local source directory
-    Import(FeatureImportArgs),
+    /// Copy a component from an external source into the local source directory
+    Import(ComponentImportArgs),
 }
 
 #[derive(Debug, clap::Args)]
-pub struct FeatureEditArgs {
-    /// Feature name or canonical ID. Bare name resolves to `local/<name>`.
+pub struct ComponentEditArgs {
+    /// Component name or canonical ID. Bare name resolves to `local/<name>`.
     pub name: String,
 }
 
 #[derive(Debug, clap::Args)]
-pub struct FeatureNewArgs {
-    /// Feature name (e.g. `myfeature` → creates `features/myfeature/`)
+pub struct ComponentNewArgs {
+    /// Component name (e.g. `mycomponent` → creates `components/mycomponent/`)
     pub name: String,
 
     /// Template to use: `declarative` (default) or `script`
     #[arg(long, value_name = "TEMPLATE", default_value = "declarative")]
-    pub template: FeatureTemplate,
+    pub template: ComponentTemplate,
 }
 
-/// Template choice for `feature new`.
+/// Template choice for `component new`.
 #[derive(Debug, Clone, Default, clap::ValueEnum)]
-pub enum FeatureTemplate {
-    /// Declarative feature: `feature.yaml` with a `resources:` skeleton
+pub enum ComponentTemplate {
+    /// Declarative component: `component.yaml` with a `resources:` skeleton
     #[default]
     Declarative,
-    /// Script feature: `feature.yaml` + stub `install.sh` / `uninstall.sh`
+    /// Script component: `component.yaml` + stub `install.sh` / `uninstall.sh`
     Script,
 }
 
 #[derive(Debug, clap::Args)]
-pub struct FeatureValidateArgs {
-    /// Feature canonical ID (e.g. `local/git`) or bare name (resolves to `local/<name>`)
+pub struct ComponentValidateArgs {
+    /// Component canonical ID (e.g. `local/git`) or bare name (resolves to `local/<name>`)
     pub id: String,
 }
 
 #[derive(Debug, clap::Args)]
-pub struct FeatureImportArgs {
-    /// Canonical feature ID to import (e.g. `community/node`)
+pub struct ComponentImportArgs {
+    /// Canonical component ID to import (e.g. `community/node`)
     pub id: String,
 
     /// Also rewrite all config files to reference `local/<name>` instead of the source
@@ -407,7 +407,7 @@ pub struct FeatureImportArgs {
 }
 
 #[derive(Debug, clap::Args)]
-pub struct FeatureListArgs {
+pub struct ComponentListArgs {
     /// Filter by source ID (e.g. `local`, `core`)
     #[arg(long, value_name = "SOURCE")]
     pub source: Option<String>,
@@ -417,8 +417,8 @@ pub struct FeatureListArgs {
 }
 
 #[derive(Debug, clap::Args)]
-pub struct FeatureShowArgs {
-    /// Canonical feature ID (e.g. `core/git` or `local/nvim`)
+pub struct ComponentShowArgs {
+    /// Canonical component ID (e.g. `core/git` or `local/nvim`)
     pub id: String,
 
     #[command(flatten)]
@@ -607,9 +607,9 @@ pub struct SourceTrustArgs {
     /// Source ID to trust
     pub id: String,
 
-    /// Feature names to allow, comma-separated, or `*` for all
+    /// Component names to allow, comma-separated, or `*` for all
     #[arg(long, value_name = "NAMES|*")]
-    pub features: Option<String>,
+    pub components: Option<String>,
 
     /// Backend names to allow, comma-separated, or `*` for all
     #[arg(long, value_name = "NAMES|*")]
@@ -621,9 +621,9 @@ pub struct SourceUntrustArgs {
     /// Source ID to untrust
     pub id: String,
 
-    /// Feature names to revoke, comma-separated, or `*` for all
+    /// Component names to revoke, comma-separated, or `*` for all
     #[arg(long, value_name = "NAMES|*")]
-    pub features: Option<String>,
+    pub components: Option<String>,
 
     /// Backend names to revoke, comma-separated, or `*` for all
     #[arg(long, value_name = "NAMES|*")]

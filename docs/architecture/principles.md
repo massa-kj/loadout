@@ -24,7 +24,7 @@ The system must never infer ownership from filesystem inspection.
 If it is not in state, it does not exist from the system's perspective.
 
 **Replaceability**
-Backends are adapters. Features are implementation units.
+Backends are adapters. Components are implementation units.
 Both must be replaceable without modifying core.
 Core must remain tool-agnostic and platform-insulated.
 
@@ -42,7 +42,7 @@ An explicit error is always safer than a silent assumption.
 
 **Determinism vs flexibility**
 The decision table is static and total.
-Dynamic or conditional decisions belong in feature scripts, not in core.
+Dynamic or conditional decisions belong in component scripts, not in core.
 
 ## Non-Goals
 

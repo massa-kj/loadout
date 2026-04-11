@@ -1,6 +1,6 @@
 //! Sources specification data type.
 //!
-//! Sources declare where features and backends are discovered (git repos or local paths),
+//! Sources declare where components and backends are discovered (git repos or local paths),
 //! and define the allow-list for plugin admission control.
 //!
 //! See: `docs/specs/data/sources.md`
@@ -108,7 +108,7 @@ pub struct SourceLockEntry {
     pub resolved_commit: String,
     /// UTC timestamp of the last successful fetch, in RFC3339 format.
     pub fetched_at: String,
-    /// SHA-256 hash of the source's loadout manifests (`feature.yaml`, `backend.yaml` files).
+    /// SHA-256 hash of the source's loadout manifests (`component.yaml``, `backend.yaml` files).
     /// Computed over manifest files within this source only, not the entire repository.
     pub manifest_hash: String,
 }
@@ -117,9 +117,9 @@ pub struct SourceLockEntry {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum AllowSpec {
-    /// `allow: "*"` — allow all features and backends.
+    /// `allow: "*"` — allow all components and backends.
     All(WildcardAll),
-    /// `allow: { features: ..., backends: ... }` — fine-grained allow-list.
+    /// `allow: { components: ..., backends: ... }` — fine-grained allow-list.
     Detailed(DetailedAllow),
 }
 
@@ -148,9 +148,9 @@ impl From<WildcardAll> for String {
 /// Fine-grained allow-list by resource kind.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct DetailedAllow {
-    /// Feature names allowed from this source, or `"*"` for all.
+    /// Component names allowed from this source, or `"*"` for all.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub features: Option<AllowList>,
+    pub components: Option<AllowList>,
 
     /// Backend names allowed from this source, or `"*"` for all.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -236,14 +236,14 @@ mod tests {
                     "id": "tools",
                     "type": "git",
                     "url": "https://example.com",
-                    "allow": { "features": "*", "backends": ["npm", "uv"] }
+                    "allow": { "components": "*", "backends": ["npm", "uv"] }
                 }
             ]
         }"#;
         let s: SourcesSpec = serde_json::from_str(json).unwrap();
         match &s.sources[0].allow {
             Some(AllowSpec::Detailed(d)) => {
-                assert!(matches!(d.features, Some(AllowList::All(_))));
+                assert!(matches!(d.components, Some(AllowList::All(_))));
                 match &d.backends {
                     Some(AllowList::Names(names)) => assert_eq!(names, &["npm", "uv"]),
                     _ => panic!("expected names"),

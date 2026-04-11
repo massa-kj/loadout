@@ -3,7 +3,7 @@
 # Used by: minimal, lifecycle (base phase), idempotent, uninstall scenarios.
 
 profile:
-  features:
+  components:
     local:
       dummy-pkg: {}
       dummy-fs: {}

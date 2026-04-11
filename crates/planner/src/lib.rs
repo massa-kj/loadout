@@ -4,7 +4,7 @@
 //! It does not execute install/uninstall, modify state, call backends, or inspect the filesystem.
 //!
 //! Pipeline position:
-//!   DesiredResourceGraph + State + ResolvedFeatureOrder → Planner → Plan
+//!   DesiredResourceGraph + State + ResolvedComponentOrder → Planner → Plan
 //!
 //! See: `docs/specs/algorithms/planner.md`
 
@@ -14,7 +14,7 @@ use model::{
         ActionDetails, BlockedEntry, NoopEntry, Operation, Plan, PlanAction, PlanSummary,
         ReplaceDetails, ResourceRef, StrengthenDetails,
     },
-    CanonicalFeatureId, DesiredResourceGraph, ResolvedFeatureOrder, State,
+    CanonicalComponentId, DesiredResourceGraph, ResolvedComponentOrder, State,
 };
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
@@ -22,12 +22,12 @@ use thiserror::Error;
 /// Errors produced by the planner.
 #[derive(Debug, Error, PartialEq)]
 pub enum PlannerError {
-    /// A feature appears in `resolved_feature_order` but not in the DesiredResourceGraph.
+    /// A component appears in `resolved_component_order` but not in the DesiredResourceGraph.
     ///
     /// This is always a programming error caused by a mismatch between resolver and compiler output.
     /// Should be unreachable in normal operation if the pipeline is correctly sequenced.
     #[error("feature '{id}' is in the resolved order but not in the DesiredResourceGraph")]
-    FeatureOrderMismatch { id: String },
+    ComponentOrderMismatch { id: String },
 }
 
 /// Feature-level classification produced by the diff phase.
@@ -55,8 +55,8 @@ enum Classification {
 ///
 /// # Parameters
 /// - `desired`: compiled desired resources (FeatureCompiler output, includes resolved backends)
-/// - `state`: current authoritative state (features installed, resources recorded)
-/// - `resolved_order`: topologically sorted feature IDs (resolver output, defines install order)
+/// - `state`: current authoritative state (components installed, resources recorded)
+/// - `resolved_order`: topologically sorted component IDs (resolver output, defines install order)
 ///
 /// # Returns
 ///
@@ -67,26 +67,26 @@ enum Classification {
 /// # Errors
 ///
 /// Returns [`PlannerError`] only on programming-level invariant violations
-/// (e.g. order/graph mismatch). Blocked features are recorded in the plan, not returned as errors.
+/// (e.g. order/graph mismatch). Blocked components are recorded in the plan, not returned as errors.
 pub fn plan(
     desired: &DesiredResourceGraph,
     state: &State,
-    resolved_order: &ResolvedFeatureOrder,
+    resolved_order: &ResolvedComponentOrder,
 ) -> Result<Plan, PlannerError> {
-    // Collect all feature IDs referenced across both inputs.
-    let desired_ids: HashSet<&str> = desired.features.keys().map(String::as_str).collect();
-    let state_ids: HashSet<&str> = state.features.keys().map(String::as_str).collect();
+    // Collect all component IDs referenced across both inputs.
+    let desired_ids: HashSet<&str> = desired.components.keys().map(String::as_str).collect();
+    let state_ids: HashSet<&str> = state.components.keys().map(String::as_str).collect();
 
-    // Validate: every feature in resolved_order must be in desired.
+    // Validate: every component in resolved_order must be in desired.
     for id in resolved_order {
         if !desired_ids.contains(id.as_str()) {
-            return Err(PlannerError::FeatureOrderMismatch {
+            return Err(PlannerError::ComponentOrderMismatch {
                 id: id.as_str().into(),
             });
         }
     }
 
-    // Build ordered list of all features to consider.
+    // Build ordered list of all components to consider.
     // Features in desired but not in resolved_order (shouldn't happen in normal use)
     // are appended at the end in sorted order to remain deterministic.
     let ordered_desired: Vec<&str> = {
@@ -101,7 +101,7 @@ pub fn plan(
     // Features in state but not in desired → destroy (reverse order of install).
     let destroy_ids: Vec<&str> = {
         let mut v: Vec<&str> = state_ids.difference(&desired_ids).copied().collect();
-        // Reverse topological order for destroy: reverse of resolved_order for known features,
+        // Reverse topological order for destroy: reverse of resolved_order for known components,
         // then alphabetical for unknown. Use a position map from resolved_order.
         let pos: HashMap<&str, usize> = resolved_order
             .iter()
@@ -123,48 +123,48 @@ pub fn plan(
     let mut blocked: Vec<BlockedEntry> = Vec::new();
     let mut summary = PlanSummary::default();
 
-    // Destroy: features present in state but not in desired (reverse order).
+    // Destroy: components present in state but not in desired (reverse order).
     for &id in &destroy_ids {
-        let feature = CanonicalFeatureId::new(id).unwrap_or_else(|_| {
+        let component = CanonicalComponentId::new(id).unwrap_or_else(|_| {
             // State may contain legacy bare keys after a migration bug; treat as non-canonical.
-            // CanonicalFeatureId::new only fails for non-canonical strings; we still need to
+            // CanonicalComponentId::new only fails for non-canonical strings; we still need to
             // represent the destroy. Use a best-effort reconstruction.
-            panic!("state contains non-canonical feature id: {id}")
+            panic!("state contains non-canonical component id: {id}")
         });
         actions.push(PlanAction {
-            feature,
+            component,
             operation: Operation::Destroy,
             details: None,
         });
         summary.destroy += 1;
     }
 
-    // Create/noop/replace/strengthen: features in desired (in resolved install order).
+    // Create/noop/replace/strengthen: components in desired (in resolved install order).
     for &id in &ordered_desired {
-        let desired_feat = desired.features.get(id).unwrap(); // validated above or present
+        let desired_comp = desired.components.get(id).unwrap(); // validated above or present
 
         let classification = if !state_ids.contains(id) {
             // Feature not in state → create.
             Classification::Create
         } else {
             // Feature in both → diff resources.
-            classify_existing(id, desired_feat, state)
+            classify_existing(id, desired_comp, state)
         };
 
-        let feature =
-            CanonicalFeatureId::new(id).expect("desired_resource_graph keys are canonical ids");
+        let component =
+            CanonicalComponentId::new(id).expect("desired_resource_graph keys are canonical ids");
 
         match classification {
             Classification::Create => {
                 actions.push(PlanAction {
-                    feature,
+                    component,
                     operation: Operation::Create,
                     details: None,
                 });
                 summary.create += 1;
             }
             Classification::Noop => {
-                noops.push(NoopEntry { feature });
+                noops.push(NoopEntry { component });
             }
             Classification::Replace {
                 from_version,
@@ -175,7 +175,7 @@ pub fn plan(
                     to_version,
                 }));
                 actions.push(PlanAction {
-                    feature,
+                    component,
                     operation: Operation::Replace,
                     details,
                 });
@@ -183,7 +183,7 @@ pub fn plan(
             }
             Classification::ReplaceBackend => {
                 actions.push(PlanAction {
-                    feature,
+                    component,
                     operation: Operation::ReplaceBackend,
                     details: None,
                 });
@@ -198,14 +198,14 @@ pub fn plan(
                     add_resources,
                 }));
                 actions.push(PlanAction {
-                    feature,
+                    component,
                     operation: Operation::Strengthen,
                     details,
                 });
                 summary.strengthen += 1;
             }
             Classification::Blocked { reason } => {
-                blocked.push(BlockedEntry { feature, reason });
+                blocked.push(BlockedEntry { component, reason });
                 summary.blocked += 1;
             }
         }
@@ -219,28 +219,28 @@ pub fn plan(
     })
 }
 
-/// Classify a feature that exists in both desired and state.
+/// Classify a component that exists in both desired and state.
 fn classify_existing(
-    feature_id: &str,
-    desired_feat: &model::desired_resource_graph::FeatureDesiredResources,
+    component_id: &str,
+    desired_comp: &model::desired_resource_graph::ComponentDesiredResources,
     state: &State,
 ) -> Classification {
-    let state_feat = state.features.get(feature_id).unwrap();
+    let state_comp = state.components.get(component_id).unwrap();
 
     // Build lookup maps by resource id.
-    let desired_map: HashMap<&str, &model::desired_resource_graph::DesiredResource> = desired_feat
+    let desired_map: HashMap<&str, &model::desired_resource_graph::DesiredResource> = desired_comp
         .resources
         .iter()
         .map(|r| (r.id.as_str(), r))
         .collect();
-    let state_map: HashMap<&str, &model::state::Resource> = state_feat
+    let state_map: HashMap<&str, &model::state::Resource> = state_comp
         .resources
         .iter()
         .map(|r| (r.id.as_str(), r))
         .collect();
 
     // Check for unknown resource kinds in desired → blocked.
-    for res in &desired_feat.resources {
+    for res in &desired_comp.resources {
         if is_unknown_kind(&res.kind) {
             return Classification::Blocked {
                 reason: format!("unknown resource kind in desired: {}", kind_str(&res.kind)),
@@ -438,12 +438,12 @@ mod tests {
     use super::*;
     use model::{
         desired_resource_graph::{
-            DesiredResource, DesiredResourceGraph, DesiredResourceKind, FeatureDesiredResources,
+            ComponentDesiredResources, DesiredResource, DesiredResourceGraph, DesiredResourceKind,
             FsEntryType, FsOp,
         },
         plan::Operation,
         state::{
-            FeatureState, FsDetails, FsEntryType as SFsEntryType, FsOp as SFsOp, PackageDetails,
+            ComponentState, FsDetails, FsEntryType as SFsEntryType, FsOp as SFsOp, PackageDetails,
             Resource, ResourceKind, RuntimeDetails, State,
         },
         CanonicalBackendId,
@@ -453,23 +453,23 @@ mod tests {
         CanonicalBackendId::new(s).unwrap()
     }
 
-    fn fid(s: &str) -> CanonicalFeatureId {
-        CanonicalFeatureId::new(s).unwrap()
+    fn cid(s: &str) -> CanonicalComponentId {
+        CanonicalComponentId::new(s).unwrap()
     }
 
     fn empty_desired(ids: &[&str]) -> DesiredResourceGraph {
-        let features = ids
+        let components = ids
             .iter()
             .map(|&id| {
                 (
                     id.to_string(),
-                    FeatureDesiredResources { resources: vec![] },
+                    ComponentDesiredResources { resources: vec![] },
                 )
             })
             .collect();
         DesiredResourceGraph {
             schema_version: 1,
-            features,
+            components,
         }
     }
 
@@ -479,9 +479,9 @@ mod tests {
         pkg: &str,
         be: &str,
     ) -> DesiredResourceGraph {
-        g.features
+        g.components
             .entry(feat.to_string())
-            .or_insert(FeatureDesiredResources { resources: vec![] })
+            .or_insert(ComponentDesiredResources { resources: vec![] })
             .resources
             .push(DesiredResource {
                 id: format!("package:{pkg}"),
@@ -500,9 +500,9 @@ mod tests {
         ver: &str,
         be: &str,
     ) -> DesiredResourceGraph {
-        g.features
+        g.components
             .entry(feat.to_string())
-            .or_insert(FeatureDesiredResources { resources: vec![] })
+            .or_insert(ComponentDesiredResources { resources: vec![] })
             .resources
             .push(DesiredResource {
                 id: format!("runtime:{rt}"),
@@ -517,9 +517,9 @@ mod tests {
 
     fn state_with_package(feat: &str, pkg: &str, be: &str) -> State {
         let mut s = State::empty();
-        s.features.insert(
+        s.components.insert(
             feat.to_string(),
-            FeatureState {
+            ComponentState {
                 resources: vec![Resource {
                     id: format!("package:{pkg}"),
                     kind: ResourceKind::Package {
@@ -537,9 +537,9 @@ mod tests {
 
     fn state_with_runtime(feat: &str, rt: &str, ver: &str, be: &str) -> State {
         let mut s = State::empty();
-        s.features.insert(
+        s.components.insert(
             feat.to_string(),
-            FeatureState {
+            ComponentState {
                 resources: vec![Resource {
                     id: format!("runtime:{rt}"),
                     kind: ResourceKind::Runtime {
@@ -561,7 +561,7 @@ mod tests {
     fn create_when_not_in_state() {
         let desired = with_package(empty_desired(&["core/git"]), "core/git", "git", "core/brew");
         let state = State::empty();
-        let order = vec![fid("core/git")];
+        let order = vec![cid("core/git")];
         let p = plan(&desired, &state, &order).unwrap();
         assert_eq!(p.actions.len(), 1);
         assert_eq!(p.actions[0].operation, Operation::Create);
@@ -574,11 +574,11 @@ mod tests {
     fn noop_when_identical() {
         let desired = with_package(empty_desired(&["core/git"]), "core/git", "git", "core/brew");
         let state = state_with_package("core/git", "git", "core/brew");
-        let order = vec![fid("core/git")];
+        let order = vec![cid("core/git")];
         let p = plan(&desired, &state, &order).unwrap();
         assert!(p.actions.is_empty());
         assert_eq!(p.noops.len(), 1);
-        assert_eq!(p.noops[0].feature.as_str(), "core/git");
+        assert_eq!(p.noops[0].component.as_str(), "core/git");
     }
 
     // --- destroy ---
@@ -587,7 +587,7 @@ mod tests {
     fn destroy_when_not_in_desired() {
         let desired = empty_desired(&[]); // nothing desired
         let state = state_with_package("core/old", "old-tool", "core/brew");
-        let order: ResolvedFeatureOrder = vec![];
+        let order: ResolvedComponentOrder = vec![];
         let p = plan(&desired, &state, &order).unwrap();
         assert_eq!(p.actions.len(), 1);
         assert_eq!(p.actions[0].operation, Operation::Destroy);
@@ -606,7 +606,7 @@ mod tests {
             "core/mise",
         );
         let state = state_with_runtime("core/node", "node", "18", "core/mise");
-        let order = vec![fid("core/node")];
+        let order = vec![cid("core/node")];
         let p = plan(&desired, &state, &order).unwrap();
         assert_eq!(p.actions.len(), 1);
         assert_eq!(p.actions[0].operation, Operation::Replace);
@@ -626,7 +626,7 @@ mod tests {
     fn replace_backend_mismatch() {
         let desired = with_package(empty_desired(&["core/git"]), "core/git", "git", "core/apt");
         let state = state_with_package("core/git", "git", "core/brew");
-        let order = vec![fid("core/git")];
+        let order = vec![cid("core/git")];
         let p = plan(&desired, &state, &order).unwrap();
         assert_eq!(p.actions[0].operation, Operation::ReplaceBackend);
     }
@@ -639,7 +639,7 @@ mod tests {
         let mut desired =
             with_package(empty_desired(&["core/git"]), "core/git", "git", "core/brew");
         desired
-            .features
+            .components
             .get_mut("core/git")
             .unwrap()
             .resources
@@ -653,7 +653,7 @@ mod tests {
                 },
             });
         let state = state_with_package("core/git", "git", "core/brew");
-        let order = vec![fid("core/git")];
+        let order = vec![cid("core/git")];
         let p = plan(&desired, &state, &order).unwrap();
         assert_eq!(p.actions[0].operation, Operation::Strengthen);
         match &p.actions[0].details {
@@ -672,7 +672,7 @@ mod tests {
     fn replace_on_fs_path_change() {
         let mut desired = empty_desired(&["core/git"]);
         desired
-            .features
+            .components
             .get_mut("core/git")
             .unwrap()
             .resources
@@ -686,9 +686,9 @@ mod tests {
                 },
             });
         let mut state = State::empty();
-        state.features.insert(
+        state.components.insert(
             "core/git".to_string(),
-            FeatureState {
+            ComponentState {
                 resources: vec![Resource {
                     id: "fs:gitconfig".to_string(),
                     kind: ResourceKind::Fs {
@@ -701,7 +701,7 @@ mod tests {
                 }],
             },
         );
-        let order = vec![fid("core/git")];
+        let order = vec![cid("core/git")];
         let p = plan(&desired, &state, &order).unwrap();
         assert_eq!(p.actions[0].operation, Operation::Replace);
     }
@@ -717,7 +717,7 @@ mod tests {
             "core/brew",
         );
         let state = state_with_package("core/old", "old-tool", "core/brew");
-        let order = vec![fid("core/new")];
+        let order = vec![cid("core/new")];
         let p = plan(&desired, &state, &order).unwrap();
         // Destroy comes first in actions list.
         assert_eq!(p.actions[0].operation, Operation::Destroy);
@@ -739,11 +739,11 @@ mod tests {
 
         let state = state_with_package("core/old", "old", "core/brew");
         // Also add "core/keep" to state as-is.
-        let _ = state.features.clone(); // just for clarity; state_with_package creates fresh state
+        let _ = state.components.clone(); // just for clarity; state_with_package creates fresh state
         let mut state2 = state_with_package("core/old", "old", "core/brew");
-        state2.features.insert(
+        state2.components.insert(
             "core/keep".to_string(),
-            FeatureState {
+            ComponentState {
                 resources: vec![Resource {
                     id: "package:keep".to_string(),
                     kind: ResourceKind::Package {
@@ -757,7 +757,7 @@ mod tests {
             },
         );
 
-        let order = vec![fid("core/new"), fid("core/keep")];
+        let order = vec![cid("core/new"), cid("core/keep")];
         let p = plan(&desired, &state2, &order).unwrap();
         assert_eq!(p.summary.create, 1);
         assert_eq!(p.summary.destroy, 1);

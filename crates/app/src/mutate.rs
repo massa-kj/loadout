@@ -27,37 +27,37 @@ pub fn config_init(ctx: &AppContext, name: &str) -> Result<PathBuf, AppError> {
 }
 
 // ---------------------------------------------------------------------------
-// Config feature mutations
+// Config component mutations
 // ---------------------------------------------------------------------------
 
-/// Add a feature to a config file's `profile.features` section.
+/// Add a component to a config file's `profile.components` section.
 ///
-/// `feature_id` may be canonical (`source/name`) or a bare name (resolved to
+/// `component_id` may be canonical (`source/name`) or a bare name (resolved to
 /// `local/<name>`). If `name_or_path` is `None`, the active context is used.
 /// Returns the path of the modified config file.
-pub fn config_feature_add(
+pub fn config_component_add(
     ctx: &AppContext,
     name_or_path: Option<&str>,
-    feature_id: &str,
+    component_id: &str,
 ) -> Result<PathBuf, AppError> {
     let path = resolve_config_required(ctx, name_or_path)?;
-    let (source, name) = split_feature_id(feature_id);
-    config::add_feature(&path, &source, &name)?;
+    let (source, name) = split_component_id(component_id);
+    config::add_component(&path, &source, &name)?;
     Ok(path)
 }
 
-/// Remove a feature from a config file's `profile.features` section.
+/// Remove a component from a config file's `profile.components` section.
 ///
-/// Returns `(path, found)` — `found` is `false` if the feature was not present
+/// Returns `(path, found)` — `found` is `false` if the component was not present
 /// and no change was made.
-pub fn config_feature_remove(
+pub fn config_component_remove(
     ctx: &AppContext,
     name_or_path: Option<&str>,
-    feature_id: &str,
+    component_id: &str,
 ) -> Result<(PathBuf, bool), AppError> {
     let path = resolve_config_required(ctx, name_or_path)?;
-    let (source, name) = split_feature_id(feature_id);
-    let found = config::remove_feature(&path, &source, &name)?;
+    let (source, name) = split_component_id(component_id);
+    let found = config::remove_component(&path, &source, &name)?;
     Ok((path, found))
 }
 
@@ -115,17 +115,17 @@ fn resolve_config_required(
     Ok(ctx.resolve_config_path(&val))
 }
 
-/// Split a feature ID into `(source, name)`.
+/// Split a component ID into `(source, name)`.
 ///
 /// - `core/git` → `("core", "git")`
 /// - `git`      → `("local", "git")` (bare name = local source)
-fn split_feature_id(feature_id: &str) -> (String, String) {
-    match feature_id.find('/') {
+fn split_component_id(component_id: &str) -> (String, String) {
+    match component_id.find('/') {
         Some(pos) => (
-            feature_id[..pos].to_string(),
-            feature_id[pos + 1..].to_string(),
+            component_id[..pos].to_string(),
+            component_id[pos + 1..].to_string(),
         ),
-        None => ("local".to_string(), feature_id.to_string()),
+        None => ("local".to_string(), component_id.to_string()),
     }
 }
 
@@ -215,11 +215,11 @@ pub fn source_add_path(
         .into());
     }
 
-    // Require at least one of features/ or backends/ to exist.
-    if !resolved.join("features").exists() && !resolved.join("backends").exists() {
+    // Require at least one of components/ or backends/ to exist.
+    if !resolved.join("components").exists() && !resolved.join("backends").exists() {
         return Err(config::ConfigError::InvalidSources {
             reason: format!(
-                "neither features/ nor backends/ found under: {}",
+                "neither components/ nor backends/ found under: {}",
                 resolved.display()
             ),
         }
@@ -341,13 +341,13 @@ pub fn source_remove(ctx: &AppContext, id: &str, force: bool) -> Result<PathBuf,
 
 /// Grant allow-list entries for an external source.
 ///
-/// Merges `features` and `backends` into the source's existing `allow` field.
-/// At least one of `features` or `backends` must be `Some`.
+/// Merges `components` and `backends` into the source's existing `allow` field.
+/// At least one of `components` or `backends` must be `Some``.
 /// Returns the path of the modified `sources.yaml`.
 pub fn source_trust(
     ctx: &AppContext,
     id: &str,
-    features: Option<config::AllowList>,
+    components: Option<config::AllowList>,
     backends: Option<config::AllowList>,
 ) -> Result<PathBuf, AppError> {
     let mut spec = load_sources_spec_optional(ctx)?;
@@ -360,7 +360,7 @@ pub fn source_trust(
 
     // AllowSpec::All already grants everything; no change needed.
     if !matches!(entry.allow, Some(config::AllowSpec::All(_))) {
-        merge_allow(&mut entry.allow, features, backends);
+        merge_allow(&mut entry.allow, components, backends);
     }
 
     let sources_path = ctx.sources_path();
@@ -370,19 +370,19 @@ pub fn source_trust(
 
 /// Revoke allow-list entries for an external source.
 ///
-/// Passing `AllowList::All("*")` as features or backends requires `force = true`.
+/// Passing `AllowList::All("*")` as components or backends requires `force = true`.
 /// If both dimensions become empty after removal, the `allow` field is omitted
 /// (deny-all state).
 /// Returns the path of the modified `sources.yaml`.
 pub fn source_untrust(
     ctx: &AppContext,
     id: &str,
-    features: Option<config::AllowList>,
+    components: Option<config::AllowList>,
     backends: Option<config::AllowList>,
     force: bool,
 ) -> Result<PathBuf, AppError> {
     // Reject wildcard removal without --force.
-    let wildcard_in = matches!(features, Some(config::AllowList::All(_)))
+    let wildcard_in = matches!(components, Some(config::AllowList::All(_)))
         || matches!(backends, Some(config::AllowList::All(_)));
     if wildcard_in && !force {
         return Err(AppError::UntrustWildcardRequiresForce { id: id.to_string() });
@@ -400,12 +400,12 @@ pub fn source_untrust(
     // A wildcard grants everything; narrowing it by name is not supported.
     // The user must revoke the wildcard first (--force), then re-trust specific entries.
     if !force {
-        if matches!(features, Some(config::AllowList::Names(_)))
-            && is_effective_wildcard_for_features(&entry.allow)
+        if matches!(components, Some(config::AllowList::Names(_)))
+            && is_effective_wildcard_for_components(&entry.allow)
         {
             return Err(AppError::UntrustNamesFromWildcard {
                 id: id.to_string(),
-                dimension: "features",
+                dimension: "components",
             });
         }
         if matches!(backends, Some(config::AllowList::Names(_)))
@@ -418,7 +418,7 @@ pub fn source_untrust(
         }
     }
 
-    apply_untrust(&mut entry.allow, features, backends, force);
+    apply_untrust(&mut entry.allow, components, backends, force);
 
     let sources_path = ctx.sources_path();
     config::save_sources(&sources_path, &spec)?;
@@ -483,17 +483,17 @@ fn find_source_references(ctx: &AppContext, source_id: &str) -> Vec<String> {
     let prefix = format!("{source_id}/");
     let mut found = Vec::new();
 
-    // Check state: any installed feature whose ID begins with `<id>/`.
+    // Check state: any installed component whose ID begins with `<id>/`.
     if let Ok(st) = state::load(&ctx.state_path()) {
-        for key in st.features.keys() {
+        for key in st.components.keys() {
             if key.starts_with(&prefix) {
-                found.push(format!("state: feature '{key}' is installed"));
+                found.push(format!("state: component '{key}' is installed"));
                 break;
             }
         }
     }
 
-    // Check all config YAML files: profile features and strategy backend references.
+    // Check all config YAML files: profile components and strategy backend references.
     let configs_dir = ctx.dirs.config_home.join("configs");
     if configs_dir.exists() {
         if let Ok(dir_entries) = std::fs::read_dir(&configs_dir) {
@@ -513,10 +513,10 @@ fn find_source_references(ctx: &AppContext, source_id: &str) -> Vec<String> {
                     .and_then(|n| n.to_str())
                     .unwrap_or("unknown");
 
-                for fid in profile.features.keys() {
+                for fid in profile.components.keys() {
                     if fid.starts_with(&prefix) {
                         found.push(format!(
-                            "config '{config_name}': feature '{fid}' is declared"
+                            "config '{config_name}': component '{fid}' is declared"
                         ));
                         break;
                     }
@@ -551,14 +551,14 @@ fn collect_strategy_backends(strategy: &config::Strategy) -> Vec<String> {
     result
 }
 
-/// Returns `true` if the features dimension of the allow-list is effectively a wildcard (`"*"`).
+/// Returns `true` if the components dimension of the allow-list is effectively a wildcard (`"*"`).
 ///
-/// Both `AllowSpec::All` (top-level `"*"`) and a `Detailed` entry with `features: "*"` count.
-fn is_effective_wildcard_for_features(allow: &Option<config::AllowSpec>) -> bool {
+/// Both `AllowSpec::All` (top-level `"*"`) and a `Detailed` entry with `components: "*"` count.
+fn is_effective_wildcard_for_components(allow: &Option<config::AllowSpec>) -> bool {
     match allow {
         Some(config::AllowSpec::All(_)) => true,
         Some(config::AllowSpec::Detailed(d)) => {
-            matches!(d.features, Some(config::AllowList::All(_)))
+            matches!(d.components, Some(config::AllowList::All(_)))
         }
         None => false,
     }
@@ -575,10 +575,10 @@ fn is_effective_wildcard_for_backends(allow: &Option<config::AllowSpec>) -> bool
     }
 }
 
-/// Merge `features` and `backends` AllowLists into an existing AllowSpec.
+/// Merge `components` and `backends` AllowLists into an existing AllowSpec.
 fn merge_allow(
     allow: &mut Option<config::AllowSpec>,
-    features: Option<config::AllowList>,
+    components: Option<config::AllowList>,
     backends: Option<config::AllowList>,
 ) {
     // AllowSpec::All already grants everything; caller should guard against this.
@@ -587,7 +587,7 @@ fn merge_allow(
         Some(config::AllowSpec::Detailed(d)) => d,
         None => {
             *allow = Some(config::AllowSpec::Detailed(config::DetailedAllow {
-                features: None,
+                components: None,
                 backends: None,
             }));
             match allow {
@@ -597,8 +597,8 @@ fn merge_allow(
         }
     };
 
-    if let Some(new_features) = features {
-        merge_allow_list(&mut detail.features, new_features);
+    if let Some(new_components) = components {
+        merge_allow_list(&mut detail.components, new_components);
     }
     if let Some(new_backends) = backends {
         merge_allow_list(&mut detail.backends, new_backends);
@@ -631,12 +631,12 @@ fn merge_allow_list(existing: &mut Option<config::AllowList>, new: config::Allow
     }
 }
 
-/// Remove `features` and `backends` entries from an existing AllowSpec.
+/// Remove `components` and `backends` entries from an existing AllowSpec.
 ///
 /// After removal, if both dimensions are empty the allow field is set to `None` (deny-all).
 fn apply_untrust(
     allow: &mut Option<config::AllowSpec>,
-    features: Option<config::AllowList>,
+    components: Option<config::AllowList>,
     backends: Option<config::AllowList>,
     force: bool,
 ) {
@@ -648,14 +648,14 @@ fn apply_untrust(
         Some(config::AllowSpec::All(_)) => (),
         None => (), // already deny-all
         Some(config::AllowSpec::Detailed(d)) => {
-            if let Some(f) = features {
-                remove_from_allow_list(&mut d.features, f, force);
+            if let Some(f) = components {
+                remove_from_allow_list(&mut d.components, f, force);
             }
             if let Some(b) = backends {
                 remove_from_allow_list(&mut d.backends, b, force);
             }
             // Revert to deny-all when both dimensions are cleared.
-            if d.features.is_none() && d.backends.is_none() {
+            if d.components.is_none() && d.backends.is_none() {
                 *allow = None;
             }
         }
@@ -767,7 +767,7 @@ pub fn source_update(
     // Resolve the current HEAD to a full commit hash.
     let resolved_commit = git_rev_parse(id, "HEAD", &repo_dir)?;
 
-    // Compute manifest_hash over features/**/*.yaml and backends/**/*.yaml.
+    // Compute manifest_hash over components/**/*.yaml and backends/**/*.yaml.
     let manifest_hash = compute_manifest_hash(id, &repo_dir, entry)?;
 
     // Update the lock file.
@@ -839,7 +839,7 @@ fn git_rev_parse(
 }
 
 /// Compute a `sha256:<hex>` manifest hash over all `*.yaml` files found under
-/// `features/` and `backends/` within the source's subtree (as declared by
+/// `components/` and `backends/` within the source's subtree (as declared by
 /// `entry.path`). Files are sorted by relative path for determinism.
 fn compute_manifest_hash(
     source_id: &str,
@@ -857,7 +857,7 @@ fn compute_manifest_hash(
     let root = repo_dir.join(subtree);
 
     let mut paths: Vec<std::path::PathBuf> = Vec::new();
-    for subdir in ["features", "backends"] {
+    for subdir in ["components", "backends"] {
         let dir = root.join(subdir);
         if !dir.exists() {
             continue;
@@ -1074,7 +1074,7 @@ fn secs_to_rfc3339(secs: u64) -> String {
 // Import result
 // ---------------------------------------------------------------------------
 
-/// Summary returned by `feature_import` and `backend_import`.
+/// Summary returned by `component_import` and `backend_import`.
 pub struct ImportReport {
     /// Source directory that was (or would be) copied from.
     pub source_dir: PathBuf,
@@ -1082,20 +1082,20 @@ pub struct ImportReport {
     pub dest_dir: PathBuf,
     /// Config files that were (or would be) rewritten.
     pub config_files_updated: Vec<PathBuf>,
-    /// Bare depends found in the imported feature (warnings only).
+    /// Bare depends found in the imported component (warnings only).
     pub bare_depends_warnings: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
-// feature import
+// component import
 // ---------------------------------------------------------------------------
 
-/// Copy a feature from an external source into the `local` source directory.
+/// Copy a component from an external source into the `local` source directory.
 ///
-/// - `canonical_id` must be `<source_id>/<feature_name>` (external source only).
+/// - `canonical_id` must be `<source_id>/<component_name>` (external source only).
 /// - `move_config`: also rewrite all config files to reference `local/<name>`.
 /// - `dry_run`: compute what would happen but do not write any files.
-pub fn feature_import(
+pub fn component_import(
     ctx: &AppContext,
     canonical_id: &str,
     move_config: bool,
@@ -1130,14 +1130,14 @@ pub fn feature_import(
             id: source_id.to_string(),
         })?;
 
-    let source_dir = resolve_external_feature_dir(ctx, entry, name);
+    let source_dir = resolve_external_component_dir(ctx, entry, name);
     if !source_dir.exists() {
-        return Err(AppError::FeatureNotFound {
+        return Err(AppError::ComponentNotFound {
             id: canonical_id.to_string(),
         });
     }
 
-    let dest_dir = ctx.local_root.join("features").join(name);
+    let dest_dir = ctx.local_root.join("components").join(name);
     if dest_dir.exists() {
         return Err(AppError::ImportDestinationExists {
             path: dest_dir.clone(),
@@ -1149,7 +1149,7 @@ pub fn feature_import(
 
     if dry_run {
         let config_files_updated = if move_config {
-            find_configs_with_feature(ctx, source_id, name)
+            find_configs_with_component(ctx, source_id, name)
         } else {
             vec![]
         };
@@ -1161,14 +1161,14 @@ pub fn feature_import(
         });
     }
 
-    // Copy the feature directory to local.
+    // Copy the component directory to local.
     copy_dir_recursive(&source_dir, &dest_dir)?;
 
     // Optionally rewrite config references.
     let mut config_files_updated = vec![];
     if move_config {
         for cfg_path in list_config_files(ctx) {
-            if config::rewrite_feature_source(&cfg_path, source_id, name, "local")? {
+            if config::rewrite_component_source(&cfg_path, source_id, name, "local")? {
                 config_files_updated.push(cfg_path);
             }
         }
@@ -1291,8 +1291,8 @@ fn split_canonical_id(canonical_id: &str) -> Result<(&str, &str), AppError> {
     Ok((source_id, name))
 }
 
-/// Resolve the filesystem directory for a feature in an external source.
-fn resolve_external_feature_dir(
+/// Resolve the filesystem directory for a component in an external source.
+fn resolve_external_component_dir(
     ctx: &AppContext,
     entry: &config::SourceEntry,
     name: &str,
@@ -1303,11 +1303,11 @@ fn resolve_external_feature_dir(
             .data_home
             .join("sources")
             .join(&entry.id)
-            .join("features")
+            .join("components")
             .join(name),
         config::SourceType::Path => {
             let base = entry.path.as_deref().unwrap_or("");
-            std::path::Path::new(base).join("features").join(name)
+            std::path::Path::new(base).join("components").join(name)
         }
     }
 }
@@ -1381,10 +1381,10 @@ fn list_config_files(ctx: &AppContext) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Find config files that are likely to reference `source_id/name` in features sections.
+/// Find config files that are likely to reference `source_id/name` in components sections.
 ///
 /// Used for `--dry-run` output. Uses a fast text search heuristic.
-fn find_configs_with_feature(ctx: &AppContext, source_id: &str, name: &str) -> Vec<PathBuf> {
+fn find_configs_with_component(ctx: &AppContext, source_id: &str, name: &str) -> Vec<PathBuf> {
     list_config_files(ctx)
         .into_iter()
         .filter(|p| {
@@ -1410,28 +1410,28 @@ fn find_configs_with_backend(ctx: &AppContext, source_id: &str, name: &str) -> V
         .collect()
 }
 
-/// Read `feature.yaml` and return any bare depends (depends entries without a `/` prefix).
+/// Read `component.yaml` and return any bare depends (depends entries without a `/` prefix).
 ///
 /// Returns an empty vec if the file is absent or cannot be parsed.
-fn read_bare_depends(feature_dir: &std::path::Path) -> Vec<String> {
-    let feature_yaml = feature_dir.join("feature.yaml");
-    let Ok(content) = std::fs::read_to_string(&feature_yaml) else {
+fn read_bare_depends(component_dir: &std::path::Path) -> Vec<String> {
+    let component_yaml_path = component_dir.join("component.yaml");
+    let Ok(content) = std::fs::read_to_string(&component_yaml_path) else {
         return vec![];
     };
 
-    // Minimal serde parse to extract dep.depends without pulling in the full feature schema.
+    // Minimal serde parse to extract dep.depends without pulling in the full component schema.
     #[derive(serde::Deserialize, Default)]
     struct DepSection {
         #[serde(default)]
         depends: Vec<String>,
     }
     #[derive(serde::Deserialize, Default)]
-    struct MinimalFeature {
+    struct MinimalComponent {
         #[serde(default)]
         dep: Option<DepSection>,
     }
 
-    let Ok(f): Result<MinimalFeature, _> = serde_yaml::from_str(&content) else {
+    let Ok(f): Result<MinimalComponent, _> = serde_yaml::from_str(&content) else {
         return vec![];
     };
     f.dep
@@ -1540,7 +1540,7 @@ mod tests {
     #[test]
     fn untrust_both_dimensions_yields_deny_all() {
         let mut allow = Some(config::AllowSpec::Detailed(config::DetailedAllow {
-            features: Some(names(&["node"])),
+            components: Some(names(&["node"])),
             backends: Some(names(&["mise"])),
         }));
         apply_untrust(
@@ -1586,8 +1586,8 @@ mod tests {
     fn source_add_path_equal_to_local_root_rejected() {
         let tmpdir = tempfile::tempdir().unwrap();
         let ctx = fake_ctx(&tmpdir);
-        // Create features/ so the structural check passes; the local-root check comes next.
-        std::fs::create_dir_all(ctx.local_root.join("features")).unwrap();
+        // Create components/ so the structural check passes; the local-root check comes next.
+        std::fs::create_dir_all(ctx.local_root.join("components")).unwrap();
         let err = source_add_path(&ctx, ctx.local_root.to_str().unwrap(), None);
         assert!(
             matches!(err, Err(AppError::PathSourceIsLocalRoot { .. })),
@@ -1600,8 +1600,8 @@ mod tests {
     fn source_add_path_symlink_to_local_root_rejected() {
         let tmpdir = tempfile::tempdir().unwrap();
         let ctx = fake_ctx(&tmpdir);
-        // Create features/ under local_root.
-        std::fs::create_dir_all(ctx.local_root.join("features")).unwrap();
+        // Create components/ under local_root.
+        std::fs::create_dir_all(ctx.local_root.join("components")).unwrap();
         // Create a symlink pointing at local_root.
         let link = tmpdir.path().join("alias");
         std::os::unix::fs::symlink(&ctx.local_root, &link).unwrap();
@@ -1617,9 +1617,9 @@ mod tests {
     fn source_add_path_duplicate_real_path_rejected() {
         let tmpdir = tempfile::tempdir().unwrap();
         let ctx = fake_ctx(&tmpdir);
-        // Create external repo with features/.
+        // Create external repo with components/.
         let repo = tmpdir.path().join("external");
-        std::fs::create_dir_all(repo.join("features")).unwrap();
+        std::fs::create_dir_all(repo.join("components")).unwrap();
         // Register the first time.
         source_add_path(&ctx, repo.to_str().unwrap(), Some("repo")).unwrap();
         // Attempt to register the same real directory again under a symlink.
@@ -1637,8 +1637,8 @@ mod tests {
     fn source_add_path_symlink_to_local_root_rejected_windows() {
         let tmpdir = tempfile::tempdir().unwrap();
         let ctx = fake_ctx(&tmpdir);
-        // Create features/ under local_root.
-        std::fs::create_dir_all(ctx.local_root.join("features")).unwrap();
+        // Create components/ under local_root.
+        std::fs::create_dir_all(ctx.local_root.join("components")).unwrap();
         // Create a directory symlink pointing at local_root.
         let link = tmpdir.path().join("alias");
         match std::os::windows::fs::symlink_dir(&ctx.local_root, &link) {
@@ -1658,9 +1658,9 @@ mod tests {
     fn source_add_path_duplicate_real_path_rejected_windows() {
         let tmpdir = tempfile::tempdir().unwrap();
         let ctx = fake_ctx(&tmpdir);
-        // Create external repo with features/.
+        // Create external repo with components/.
         let repo = tmpdir.path().join("external");
-        std::fs::create_dir_all(repo.join("features")).unwrap();
+        std::fs::create_dir_all(repo.join("components")).unwrap();
         // Register the first time.
         source_add_path(&ctx, repo.to_str().unwrap(), Some("repo")).unwrap();
         // Attempt to register the same real directory again under a symlink.
@@ -1681,9 +1681,9 @@ mod tests {
     fn source_add_path_duplicate_dotdot_path_rejected() {
         let tmpdir = tempfile::tempdir().unwrap();
         let ctx = fake_ctx(&tmpdir);
-        // Create external repo with features/.
+        // Create external repo with components/.
         let repo = tmpdir.path().join("external");
-        std::fs::create_dir_all(repo.join("features")).unwrap();
+        std::fs::create_dir_all(repo.join("components")).unwrap();
         // Register the first time.
         source_add_path(&ctx, repo.to_str().unwrap(), Some("repo")).unwrap();
         // Build a path that resolves to the same directory via `..`.
@@ -1759,7 +1759,7 @@ mod tests {
     }
 
     #[test]
-    fn source_trust_adds_features() {
+    fn source_trust_adds_components() {
         let tmpdir = tempfile::tempdir().unwrap();
         let ctx = fake_ctx(&tmpdir);
         source_add_git(
@@ -1775,7 +1775,7 @@ mod tests {
         let entry = spec.sources.iter().find(|e| e.id == "myrepo").unwrap();
         assert!(matches!(
             &entry.allow,
-            Some(config::AllowSpec::Detailed(d)) if matches!(&d.features, Some(config::AllowList::Names(v)) if v.contains(&"node".to_string()))
+            Some(config::AllowSpec::Detailed(d)) if matches!(&d.components, Some(config::AllowList::Names(v)) if v.contains(&"node".to_string()))
         ));
     }
 
@@ -1799,7 +1799,7 @@ mod tests {
     }
 
     #[test]
-    fn source_untrust_names_from_detailed_wildcard_features_rejected() {
+    fn source_untrust_names_from_detailed_wildcard_components_rejected() {
         let tmpdir = tempfile::tempdir().unwrap();
         let ctx = fake_ctx(&tmpdir);
         source_add_git(
@@ -1810,16 +1810,16 @@ mod tests {
             None,
         )
         .unwrap();
-        // Trust with wildcard on features dimension.
+        // Trust with wildcard on components dimension.
         source_trust(&ctx, "myrepo", Some(all()), None).unwrap();
         // Attempting to untrust specific names should be rejected.
         let err = source_untrust(&ctx, "myrepo", Some(names(&["node"])), None, false);
         assert!(
             matches!(
                 err,
-                Err(AppError::UntrustNamesFromWildcard { dimension, .. }) if dimension == "features"
+                Err(AppError::UntrustNamesFromWildcard { dimension, .. }) if dimension == "components"
             ),
-            "expected UntrustNamesFromWildcard for features, got {err:?}"
+            "expected UntrustNamesFromWildcard for components, got {err:?}"
         );
     }
 
@@ -1873,7 +1873,7 @@ mod tests {
             matches!(
                 &entry.allow,
                 Some(config::AllowSpec::Detailed(d))
-                    if matches!(d.features, Some(config::AllowList::All(_)))
+                    if matches!(d.components, Some(config::AllowList::All(_)))
             ),
             "wildcard should still be present after force-remove of a name: {:?}",
             entry.allow

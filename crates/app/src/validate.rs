@@ -1,17 +1,17 @@
-// Validation use cases: check feature/backend directories for correctness.
+// Validation use cases: check component/backend directories for correctness.
 //
 // Each validate function:
 //   1. Loads the target via the normal read path (catches YAML/schema errors).
 //   2. Runs supplementary checks not covered by the index builder:
-//      - Script file presence (script mode features / required backend scripts)
-//      - Resource ID uniqueness within a single feature
-//      - Depends entries resolved against the full feature index
+//      - Script file presence (script mode components / required backend scripts)
+//      - Resource ID uniqueness within a single component
+//      - Depends entries resolved against the full component index
 
 use std::collections::HashSet;
 use std::path::PathBuf;
 
 use crate::context::{AppContext, AppError};
-use crate::pipeline::{build_source_roots, load_sources_optional, to_fi_platform};
+use crate::pipeline::{build_source_roots, load_sources_optional, to_ci_platform};
 
 // ── Output types ─────────────────────────────────────────────────────────────
 
@@ -22,7 +22,7 @@ pub enum IssueLevel {
     Warning,
 }
 
-/// A single validation issue found during feature or backend validation.
+/// A single validation issue found during component or backend validation.
 #[derive(Debug)]
 pub struct ValidationIssue {
     pub level: IssueLevel,
@@ -45,7 +45,7 @@ impl ValidationIssue {
     }
 }
 
-/// Aggregated result of validating a single feature or backend.
+/// Aggregated result of validating a single component or backend.
 pub struct ValidationReport {
     pub id: String,
     /// Directory containing the validated plugin.
@@ -60,33 +60,33 @@ impl ValidationReport {
     }
 }
 
-// ── feature validate ─────────────────────────────────────────────────────────
+// ── component validate ─────────────────────────────────────────────────────────
 
-/// Validate a feature identified by canonical ID (or bare name = `local/<name>`).
+/// Validate a component identified by canonical ID (or bare name = `local/<name>`).
 ///
 /// Checks performed:
-/// 1. YAML parseable + `spec_version` / `mode` valid (via `feature_index::build`).
+/// 1. YAML parseable + `spec_version` / `mode` valid (via `component_index::build`).
 /// 2. `install.sh` and `uninstall.sh` exist (script mode only).
-/// 3. Resource IDs are unique within the feature (declarative mode).
-/// 4. Each `depends` entry is present in the full feature index.
-pub fn feature_validate(ctx: &AppContext, id: &str) -> Result<ValidationReport, AppError> {
+/// 3. Resource IDs are unique within the component (declarative mode).
+/// 4. Each `depends` entry is present in the full component index.
+pub fn component_validate(ctx: &AppContext, id: &str) -> Result<ValidationReport, AppError> {
     let sources = load_sources_optional(ctx)?;
     let roots = build_source_roots(ctx, &sources);
-    let fi_platform = to_fi_platform(&ctx.platform);
+    let fi_platform = to_ci_platform(&ctx.platform);
 
     // Build full index — validates YAML, spec_version, mode, depends format.
-    let mut index = feature_index::build(&roots, &fi_platform)?;
+    let mut index = component_index::build(&roots, &fi_platform)?;
 
     let meta = index
-        .features
+        .components
         .remove(id)
-        .ok_or_else(|| AppError::FeatureNotFound { id: id.to_string() })?;
+        .ok_or_else(|| AppError::ComponentNotFound { id: id.to_string() })?;
 
     let dir = PathBuf::from(&meta.source_dir);
     let mut issues: Vec<ValidationIssue> = Vec::new();
 
     // ── Check 2: script files ────────────────────────────────────────────────
-    if matches!(meta.mode, model::feature_index::FeatureMode::Script) {
+    if matches!(meta.mode, model::component_index::ComponentMode::Script) {
         let install = dir.join("install.sh");
         let uninstall = dir.join("uninstall.sh");
         if !install.is_file() {
@@ -116,9 +116,9 @@ pub fn feature_validate(ctx: &AppContext, id: &str) -> Result<ValidationReport, 
 
     // ── Check 4: depends entries exist in the index ──────────────────────────
     for dep_id in &meta.dep.depends {
-        if !index.features.contains_key(dep_id.as_str()) {
+        if !index.components.contains_key(dep_id.as_str()) {
             issues.push(ValidationIssue::warning(format!(
-                "depends on '{}' which was not found in the feature index \
+                "depends on '{}' which was not found in the component index \
                  (may come from a source not yet cloned)",
                 dep_id
             )));

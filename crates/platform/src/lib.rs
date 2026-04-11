@@ -23,7 +23,7 @@ pub enum Platform {
 }
 
 impl Platform {
-    /// Lowercase string representation used in file name suffixes (e.g. `feature.linux.yaml`).
+    /// Lowercase string representation used in file name suffixes (e.g. `component.linux.yaml`).
     pub fn as_str(&self) -> &'static str {
         match self {
             Platform::Linux => "linux",

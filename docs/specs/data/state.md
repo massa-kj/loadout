@@ -58,7 +58,7 @@ Path customization must happen through platform-specific base directory variable
 ```json
 {
   "version": 3,
-  "features": {
+  "components": {
     "<canonical_id>": {
       "resources": [ <resource_entry>, ... ]
     }
@@ -66,9 +66,9 @@ Path customization must happen through platform-specific base directory variable
 }
 ```
 
-`version` must be `3`. `features` must be an object.
+`version` must be `3`. `components` must be an object.
 
-Feature keys are **canonical IDs** in the format `<source_id>/<name>`, e.g. `core/git`.
+Component keys are **canonical IDs** in the format `<source_id>/<name>`, e.g. `core/git`.
 All bare names (legacy v2 state) must be prefixed with `core/` when migrating to v3.
 
 ### Resource kinds
@@ -124,31 +124,31 @@ For detailed field definitions and types, see `crates/model/src/state.rs` (rustd
 **Meaning:**
 - No `backend` field (fs operations are backend-independent)
 - `path` must be absolute
-- `logical_id` must be stable within a feature (used for diff matching)
+- `logical_id` must be stable within a component (used for diff matching)
 
 ## Identity Rules
 
-Within a single feature: `resource.id` must be unique.
-Across features: the pair `(feature_id, resource.id)` must be unique.
-The same `fs.path` must NOT be recorded by multiple features.
+Within a single component: `resource.id` must be unique.
+Across components: the pair `(feature_id, resource.id)` must be unique.
+The same `fs.path` must NOT be recorded by multiple components.
 
 ## Invariants
 
 Core must validate all invariants before execution. If any fails, execution must abort.
 
 1. `version` must be `3`.
-2. `features` must be an object.
-3. Each feature entry must contain a `resources` array.
+2. `components` must be an object.
+3. Each component entry must contain a `resources` array.
 4. Each resource must have a valid `kind` and matching kind payload.
-5. Within a feature: no duplicate `resource.id`.
-6. Across all features: no duplicate `fs.path`.
+5. Within a component: no duplicate `resource.id`.
+6. Across all components: no duplicate `fs.path`.
 7. All `fs.path` values must be absolute.
 8. State must reflect only successfully completed operations.
 
 ## State Transition Rules
 
 1. State must be initialized before any execution.
-2. State must be updated only after a successful feature-level operation.
+2. State must be updated only after a successful component-level operation.
 3. State must not be partially written.
 4. If execution fails, state must remain unchanged.
 5. Uninstall must operate strictly on recorded resources.
@@ -165,7 +165,7 @@ Core must validate all invariants before execution. If any fails, execution must
 5. Remove temp file on success
 
 Direct in-place edits are forbidden.
-Commit unit is a single feature operation (install or uninstall of one feature).
+Commit unit is a single component operation (install or uninstall of one component).
 
 ## Safety Rules
 
@@ -193,8 +193,8 @@ or fails invariant checks: execution must abort. Automatic repair must NOT be pe
 ## Unknown Kind Handling
 
 Load mode: tolerate unknown `kind` values (preserve raw JSON, enforce structural validity).
-Execute mode: reject execution of any feature containing an unknown `kind`.
-Other features are not blocked unless they depend on the blocked feature.
+Execute mode: reject execution of any component containing an unknown `kind`.
+Other components are not blocked unless they depend on the blocked component.
 
 ## Compatibility and Migration
 
@@ -204,13 +204,13 @@ v1 state may be read for migration. Executing with v1 state requires an explicit
 
 ### v2 State
 
-v2 state used bare feature names as keys (e.g., `"git"`). v2 state cannot be executed directly in Phase 3+;
+v2 state used bare component names as keys (e.g., `"git"`). v2 state cannot be executed directly in Phase 3+;
 the `loadout migrate` command must be run first to upgrade to v3.
 
 ### v2 → v3 Migration
 
 **Transformation:**
-  1. For each feature key in `features` object:
+  1. For each component key in `components` object:
      - If the key contains `/` (already canonical), keep it unchanged.
      - Otherwise (bare name), prefix with `core/` to form canonical ID.
   2. Increment `version` from `2` to `3`.
@@ -222,7 +222,7 @@ the `loadout migrate` command must be run first to upgrade to v3.
 // v2 state
 {
   "version": 2,
-  "features": {
+  "components": {
     "git": { "resources": [...] },
     "core/ruby": { "resources": [...] }
   }
@@ -231,7 +231,7 @@ the `loadout migrate` command must be run first to upgrade to v3.
 // v3 state after migration
 {
   "version": 3,
-  "features": {
+  "components": {
     "core/git": { "resources": [...] },
     "core/ruby": { "resources": [...] }
   }
@@ -249,7 +249,7 @@ Profile YAML may optionally be updated with canonical IDs via `--profiles` flag.
 ## Prohibited Content
 
 State must NOT contain: profile content, strategy content, dependency graphs,
-runtime environment variables, or arbitrary plugin-defined keys at feature level.
+runtime environment variables, or arbitrary plugin-defined keys at component level.
 
 Plugins must not write arbitrary extensions into state directly.
 Extension requires adding a new kind and updating core validation.

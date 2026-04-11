@@ -5,7 +5,7 @@ use std::process;
 use serde::Serialize;
 
 use crate::args::{
-    ConfigCommand, ConfigFeatureAddArgs, ConfigFeatureCommand, ConfigFeatureRemoveArgs,
+    ConfigCommand, ConfigComponentAddArgs, ConfigComponentCommand, ConfigComponentRemoveArgs,
     ConfigInitArgs, ConfigRawCommand, ConfigRawSetArgs, ConfigRawShowArgs, ConfigRawUnsetArgs,
     ConfigShowArgs, OutputArgs, OutputFormat,
 };
@@ -17,9 +17,9 @@ pub fn run(cmd: ConfigCommand) {
         ConfigCommand::List(args) => list(args),
         ConfigCommand::Edit => edit(),
         ConfigCommand::Init(args) => init(args),
-        ConfigCommand::Feature { command } => match command {
-            ConfigFeatureCommand::Add(args) => feature_add(args),
-            ConfigFeatureCommand::Remove(args) => feature_remove(args),
+        ConfigCommand::Component { command } => match command {
+            ConfigComponentCommand::Add(args) => component_add(args),
+            ConfigComponentCommand::Remove(args) => component_remove(args),
         },
         ConfigCommand::Raw { command } => match command {
             ConfigRawCommand::Show(args) => raw_show(args),
@@ -60,11 +60,11 @@ fn list(args: OutputArgs) {
 struct ConfigShowOutput {
     name: String,
     path: String,
-    features: Vec<FeatureEntry>,
+    components: Vec<ComponentEntry>,
 }
 
 #[derive(Serialize)]
-struct FeatureEntry {
+struct ComponentEntry {
     id: String,
     version: Option<String>,
 }
@@ -91,20 +91,20 @@ fn show(args: ConfigShowArgs) {
 
     match args.output.output {
         OutputFormat::Json => {
-            let mut features: Vec<FeatureEntry> = detail
+            let mut components: Vec<ComponentEntry> = detail
                 .profile
-                .features
+                .components
                 .iter()
-                .map(|(id, cfg)| FeatureEntry {
+                .map(|(id, cfg)| ComponentEntry {
                     id: id.clone(),
                     version: cfg.version.clone(),
                 })
                 .collect();
-            features.sort_by(|a, b| a.id.cmp(&b.id));
+            components.sort_by(|a, b| a.id.cmp(&b.id));
             let out = ConfigShowOutput {
                 name: detail.name.clone(),
                 path: detail.path.display().to_string(),
-                features,
+                components,
             };
             let json = serde_json::to_string_pretty(&out).unwrap_or_else(|e| {
                 eprintln!("error: {e}");
@@ -115,13 +115,13 @@ fn show(args: ConfigShowArgs) {
         OutputFormat::Text => {
             println!("name:  {}", detail.name);
             println!("path:  {}", detail.path.display());
-            println!("features ({}):", detail.profile.features.len());
+            println!("components ({}):", detail.profile.components.len());
 
-            let mut features: Vec<(&String, &config::ProfileFeatureConfig)> =
-                detail.profile.features.iter().collect();
-            features.sort_by_key(|(id, _)| id.as_str());
+            let mut components: Vec<(&String, &config::ProfileComponentConfig)> =
+                detail.profile.components.iter().collect();
+            components.sort_by_key(|(id, _)| id.as_str());
 
-            for (id, cfg) in &features {
+            for (id, cfg) in &components {
                 if let Some(ver) = &cfg.version {
                     println!("  {id}  (version: {ver})");
                 } else {
@@ -167,21 +167,21 @@ fn init(args: ConfigInitArgs) {
     );
 }
 
-// ── feature add / remove ─────────────────────────────────────────────────────
+// ── component add / remove ─────────────────────────────────────────────
 
-fn feature_add(args: ConfigFeatureAddArgs) {
+fn component_add(args: ConfigComponentAddArgs) {
     let ctx = build_app_context();
     let path =
-        app::config_feature_add(&ctx, args.config.as_deref(), &args.id).unwrap_or_else(|e| {
+        app::config_component_add(&ctx, args.config.as_deref(), &args.id).unwrap_or_else(|e| {
             eprintln!("error: {e}");
             process::exit(1);
         });
     println!("Added '{}' to {}.", args.id, path.display());
 }
 
-fn feature_remove(args: ConfigFeatureRemoveArgs) {
+fn component_remove(args: ConfigComponentRemoveArgs) {
     let ctx = build_app_context();
-    let (path, found) = app::config_feature_remove(&ctx, args.config.as_deref(), &args.id)
+    let (path, found) = app::config_component_remove(&ctx, args.config.as_deref(), &args.id)
         .unwrap_or_else(|e| {
             eprintln!("error: {e}");
             process::exit(1);

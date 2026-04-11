@@ -65,9 +65,9 @@ dependencies = [
  "backend-host",
  "backends-builtin",
  "compiler",
+ "component-index",
  "config",
  "executor",
- "feature-index",
  "model",
  "planner",
  "platform",
@@ -180,6 +180,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "component-host"
+version = "0.1.0"
+dependencies = [
+ "model",
+ "platform",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "component-index"
+version = "0.1.0"
+dependencies = [
+ "io",
+ "model",
+ "serde",
+ "serde_yaml",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "config"
 version = "0.1.0"
 dependencies = [
@@ -213,7 +235,7 @@ name = "executor"
 version = "0.1.0"
 dependencies = [
  "backend-host",
- "feature-host",
+ "component-host",
  "model",
  "platform",
  "state",
@@ -226,28 +248,6 @@ name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
-
-[[package]]
-name = "feature-host"
-version = "0.1.0"
-dependencies = [
- "model",
- "platform",
- "tempfile",
- "thiserror",
-]
-
-[[package]]
-name = "feature-index"
-version = "0.1.0"
-dependencies = [
- "io",
- "model",
- "serde",
- "serde_yaml",
- "tempfile",
- "thiserror",
-]
 
 [[package]]
 name = "foldhash"

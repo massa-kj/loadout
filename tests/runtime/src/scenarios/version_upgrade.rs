@@ -1,6 +1,6 @@
 //! Version upgrade scenario — version mismatch triggers reinstall and state is updated.
 //!
-//! Uses dummy backends and features; no network access required.
+//! Uses dummy backends and components; no network access required.
 
 use crate::assert::{assert_state_valid, get_runtime_version, load_state};
 use crate::context::Context;

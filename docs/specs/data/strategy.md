@@ -17,7 +17,7 @@ When the `strategy:` section is absent, `Strategy::default()` is used (no backen
 ```yaml
 # configs/linux.yaml
 profile:
-  features:
+  components:
     ...
 
 strategy:      # optional section
@@ -55,7 +55,7 @@ See `specs/data/profile.md` for config resolution rules.
 
 Strategy determines which backend is used for each resource installation.
 
-Backend identifiers accept the same two forms as feature identifiers:
+Backend identifiers accept the same two forms as component identifiers:
 
 * bare backend name, e.g. `brew`
 * canonical backend ID, e.g. `core/brew`, `local/custompkg`
@@ -72,7 +72,7 @@ Resolution applies per resource kind:
 ## Override Rules
 
 Override keys for `package` are exact package names as passed to the backend install command.
-Override keys for `runtime` are runtime names (e.g. `node`, `python`), not feature names.
+Override keys for `runtime` are runtime names (e.g. `node`, `python`), not component names.
 
 If an override exists for a resource, it takes precedence over `default_backend`.
 If no override exists, `default_backend` is used.

@@ -3,7 +3,7 @@
 ## Layer Overview
 
 ```
-platforms  →  configs  →  loadout  →  app  →  core  →  features
+platforms  →  configs  →  loadout  →  app  →  core  →  components
                                          ↓
                                        state
 ```
@@ -19,13 +19,13 @@ Bootstrap the minimum runtime environment required to execute loadout.
 
 Responsibilities: detect OS, set environment variables, install minimal dependencies (git, jq, yq).
 
-Must NOT: interpret profiles, install features, modify state, resolve dependencies.
+Must NOT: interpret profiles, install components, modify state, resolve dependencies.
 
 ### configs
 
 Declare desired environment composition and implementation strategy.
 
-Responsibilities: list enabled features, provide optional configuration values (e.g. version),
+Responsibilities: list enabled components, provide optional configuration values (e.g. version),
 optionally specify backend selection and backup strategy.
 
 Must NOT: contain logic, OS branching, commands, or install details.
@@ -49,10 +49,10 @@ The env plan cache is an **ephemeral artifact** — not part of authoritative st
 **Read-only queries:**
 
 The app layer also exposes read-only use cases that do not involve the planner or executor.
-These build a lightweight pipeline (load config → discover sources/features/backends → query)
+These build a lightweight pipeline (load config → discover sources/components/backends → query)
 and return typed results to the caller without modifying state.
 
-Query operations: feature index queries, backend discovery queries, source registry queries,
+Query operations: component index queries, backend discovery queries, source registry queries,
 config file queries, and state inspection.
 
 Must NOT: perform package management directly, re-classify after planner has decided.
@@ -69,16 +69,16 @@ Provide infrastructure primitives.
 
 Includes: resolver, planner, executor, state, backend_registry, source_registry, env, fs, logger, runner.
 
-Must NOT: contain feature-specific logic, contain backend-specific logic,
+Must NOT: contain component-specific logic, contain backend-specific logic,
 let plugins read strategy or write state directly.
 
-### features
+### components
 
-Implement environment units. One feature = one responsibility.
+Implement environment units. One component = one responsibility.
 
 Responsibilities: install tool, place configuration files, register resources via state API.
 
-Must NOT: resolve dependencies, modify other features, access state directly.
+Must NOT: resolve dependencies, modify other components, access state directly.
 
 ### backends
 
@@ -106,7 +106,7 @@ Orchestrator (app)
     ↓
 Load Configuration
   ├─ Config          (config.yaml — profile section + strategy section)
-  ├─   Profile        (desired features, versions — decoded from config.profile)
+  ├─   Profile        (desired components, versions — decoded from config.profile)
   ├─   Strategy       (backend selection, backup strategy — decoded from config.strategy
   │                    or Strategy::default() when section is absent)
   ├─ Sources         (sources.yaml — plugin locations, admission control)
@@ -115,17 +115,17 @@ Load Configuration
 SourceRegistry
   (source clone, path resolution, allow rules)
     ↓
-Feature Discovery
-  (scan features/ directories in each source)
+Component Discovery
+  (scan components/ directories in each source)
     ↓
-FeatureIndexBuilder
-  (parse feature.yaml, validate schema)
-    ↓ FeatureIndex (normalized feature metadata)
+ComponentIndexBuilder
+  (parse component.yaml, validate schema)
+    ↓ ComponentIndex (normalized component metadata)
 Resolver
   (dependency resolution, topological sort using dep fields only)
-    ↓ ResolvedFeatureOrder (ordered list of feature IDs)
-FeatureCompiler
-  ├─ resource expansion (from feature specs)
+    ↓ ResolvedFeatureOrder (ordered list of component IDs)
+ComponentCompiler
+  ├─ resource expansion (from component specs)
   └─ backend resolution (using Strategy + platform defaults)
     ↓ DesiredResourceGraph (resources with desired_backend embedded)
 Planner
@@ -135,7 +135,7 @@ Executor
   inputs:
     ├─ Plan                   (what to do)
     ├─ DesiredResourceGraph   (execution payload for declarative resources)
-    ├─ FeatureIndex           (mode/script metadata lookup)
+    ├─ ComponentIndex           (mode/script metadata lookup)
     └─ BackendRegistry        (backend dispatch)
   operations:
     ├─ Declarative Execution  (install/remove via backends)
@@ -149,11 +149,11 @@ State Commit
 ### Key Invariants
 
 - **Planner is pure**: Same inputs always produce the same Plan.
-- **Executor is impure**: Calls feature scripts and backend plugins, commits state atomically.
+- **Executor is impure**: Calls component scripts and backend plugins, commits state atomically.
 - **State is both input and output**: Input = current reality, Output = recorded effects.
 - **Source registry**: Influences lookup and admission only; must not introduce hidden fallback or side effects.
-- **Resolver**: Reads only `dep` fields from Feature Index; must not read `resources` fields.
-- **FeatureCompiler**: Applies strategy to resolve `desired_backend` for each resource; the result is embedded in DesiredResourceGraph.
+- **Resolver**: Reads only `dep` fields from Component Index; must not read `resources` fields.
+- **ComponentCompiler**: Applies strategy to resolve `desired_backend` for each resource; the result is embedded in DesiredResourceGraph.
 
 ### Phase Characteristics
 
@@ -161,22 +161,22 @@ State Commit
 |---|---|---|---|
 | Load | Impure (I/O) | Filesystem | Profile, Strategy, Sources, State |
 | SourceRegistry | Pure (lookup) | Sources | Source paths, allow-lists |
-| FeatureIndexBuilder | Impure (I/O) | Source paths, feature.yaml | FeatureIndex |
-| Resolver | Pure | Profile.features, FeatureIndex.dep | ResolvedFeatureOrder |
-| FeatureCompiler | Pure | ResolvedFeatureOrder, FeatureIndex, Strategy | DesiredResourceGraph |
+| ComponentIndexBuilder | Impure (I/O) | Source paths, component.yaml | ComponentIndex |
+| Resolver | Pure | Profile.components, ComponentIndex.dep | ResolvedFeatureOrder |
+| ComponentCompiler | Pure | ResolvedFeatureOrder, ComponentIndex, Strategy | DesiredResourceGraph |
 | Planner | Pure | DesiredResourceGraph, State, ResolvedFeatureOrder | Plan |
-| Executor | Impure (side effects) | Plan, DesiredResourceGraph, FeatureIndex, BackendRegistry | Effects |
+| Executor | Impure (side effects) | Plan, DesiredResourceGraph, ComponentIndex, BackendRegistry | Effects |
 | State Commit | Impure (I/O) | Execution results | state.json, env_plan.json (cache) |
 | Activate | Impure (I/O) | env_plan.json (cache), shell kind | Shell activation script (stdout) |
 
 ### Data Structure Roles
 
-- **Profile**: User's desired environment (feature list, versions, enable/disable) — the `profile:` section of a config file
+- **Profile**: User's desired environment (component list, versions, enable/disable) — the `profile:` section of a config file
 - **Strategy**: User's implementation strategy (backend selection, backup strategy) — the optional `strategy:` section of a config file; absent → `Strategy::default()`
 - **Sources**: Plugin locations and security allow-lists
 - **State**: Single authority for installed resources (backend, version, fs paths)
-- **FeatureIndex**: Normalized feature metadata (depends, capabilities, resources)
-- **ResolvedFeatureOrder**: Topologically sorted feature IDs (dependency-resolved)
+- **ComponentIndex**: Normalized component metadata (depends, capabilities, resources)
+- **ResolvedFeatureOrder**: Topologically sorted component IDs (dependency-resolved)
 - **DesiredResourceGraph**: Expanded resources with resolved backends
 - **Plan**: Authoritative instruction set (create/destroy/replace/noop/blocked)
 - **BackendRegistry**: Dispatcher mapping `CanonicalBackendId` → `Backend` trait implementation
@@ -196,14 +196,14 @@ loadout/
 │   ├── model/                 # Core data types (State, Profile, Plan, etc.)
 │   ├── planner/               # Planner (pure function: desired+state → plan)
 │   ├── resolver/              # Dependency resolver (pure function)
-│   ├── compiler/              # FeatureCompiler (strategy → desired_resource_graph)
+│   ├── compiler/              # ComponentCompiler (strategy → desired_resource_graph)
 │   ├── executor/              # Executor (impure: plan → effects → state commit)
 │   ├── state/                 # State persistence and atomic commit
 │   ├── config/                # Profile/strategy loading and normalization
 │   ├── backend-host/          # Backend trait and ScriptBackend
 │   ├── backends-builtin/      # Builtin backends (brew, apt, mise, npm, etc.)
-│   ├── feature-host/          # Feature script execution
-│   ├── feature-index/         # Feature Index Builder
+│   ├── component-host/          # Component script execution
+│   ├── component-index/         # Component Index Builder
 │   ├── source-registry/       # Source discovery and registration
 │   ├── platform/              # Platform detection
 │   └── io/                    # Filesystem utilities
@@ -211,9 +211,9 @@ loadout/
 │   ├── linux/
 │   ├── windows/
 │   └── wsl/
-├── features/                  # Self-contained feature modules
-│   ├── <feature>/
-│   │   ├── feature.yaml       # Metadata (dep, mode, spec)
+├── components/                  # Self-contained component modules
+│   ├── <component>/
+│   │   ├── component.yaml       # Metadata (dep, mode, spec)
 │   │   ├── install.sh         # Script mode (optional)
 │   │   ├── uninstall.sh       # Script mode (optional)
 │   │   └── files/             # Declarative mode (optional)
@@ -236,9 +236,9 @@ loadout/
 - `crates/backend-host/` must not depend on `crates/state/` (plugin isolation)
 - `crates/model/` is dependency-free data structures (no I/O, no side effects)
 
-**Feature independence:**
-- Each `features/<feature>/` directory is self-contained (no cross-feature imports)
-- Features declare dependencies via `dep.depends` / `dep.requires` in `feature.yaml`
+**Component independence:**
+- Each `components/<component>/` directory is self-contained (no cross-component imports)
+- Components declare dependencies via `dep.depends` / `dep.requires` in `component.yaml`
 
 **State authority:**
 - Only `crates/state/` may read/write authoritative `state.json`
@@ -247,13 +247,13 @@ loadout/
 **Plugin isolation:**
 - Backend plugins (script directories in `backends/`) receive resource data via environment variables (primary) and optionally JSON stdin. `env_pre.sh`/`env_post.sh` return env deltas as JSON stdout.
 - Builtin Rust backends (`crates/backends-builtin/`) implement `Backend` trait directly; currently an empty extension point.
-- Feature scripts (`install.sh`/`uninstall.sh`) receive environment variables only
+- Component scripts (`install.sh`/`uninstall.sh`) receive environment variables only
 
 **Authoritative runtime paths for profiles, policies, state, and sources live under XDG/AppData locations, not under the repository root.**
 
 ## Layer Violation Examples
 
-* A feature script reading `state.json` directly → state authority violation
+* A component script reading `state.json` directly → state authority violation
 * A backend reading strategy to select its own strategy → plugin isolation violation
 * The planner calling a backend to check if a package is installed → purity violation
 * A profile containing `if linux` branching → declaration layer violation

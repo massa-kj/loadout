@@ -32,24 +32,24 @@ fn show_state(args: StateShowArgs) {
 }
 
 fn print_state_text(st: &state::State) {
-    let feature_count = st.features.len();
-    let resource_count: usize = st.features.values().map(|f| f.resources.len()).sum();
+    let component_count = st.components.len();
+    let resource_count: usize = st.components.values().map(|f| f.resources.len()).sum();
 
     println!("version:   {}", st.version);
-    println!("features:  {feature_count}");
+    println!("components:  {component_count}");
     println!("resources: {resource_count}");
 
-    if feature_count == 0 {
-        println!("\n(no features installed)");
+    if component_count == 0 {
+        println!("\n(no components installed)");
         return;
     }
 
     println!();
-    let mut features: Vec<(&String, &state::FeatureState)> = st.features.iter().collect();
-    features.sort_by_key(|(id, _)| id.as_str());
+    let mut components: Vec<(&String, &state::ComponentState)> = st.components.iter().collect();
+    components.sort_by_key(|(id, _)| id.as_str());
 
-    for (id, feature) in &features {
-        let n = feature.resources.len();
+    for (id, component) in &components {
+        let n = component.resources.len();
         println!(
             "  {id:<40}  {} resource{}",
             n,
@@ -88,10 +88,10 @@ fn migrate(args: MigrateArgs) {
             println!("Migrating state v2 → v3 ...");
             match state::migrate_v2_to_v3(&raw) {
                 Ok(migrated) => {
-                    let feature_count = migrated.features.len();
+                    let component_count = migrated.components.len();
                     if args.dry_run {
                         println!(
-                            "[dry-run] Would migrate {feature_count} feature(s). \
+                            "[dry-run] Would migrate {component_count} component(s). \
                              No changes written."
                         );
                     } else {
@@ -99,7 +99,7 @@ fn migrate(args: MigrateArgs) {
                             eprintln!("error: failed to commit migrated state: {e}");
                             process::exit(1);
                         }
-                        println!("Migration complete. {feature_count} feature(s) migrated.");
+                        println!("Migration complete. {component_count} component(s) migrated.");
                     }
                 }
                 Err(e) => {

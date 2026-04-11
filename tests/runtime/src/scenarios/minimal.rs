@@ -3,7 +3,7 @@
 //! Mirrors `tests/e2e/linux/docker/scenarios/minimal.sh`.
 
 use crate::assert::{
-    assert_all_fs_paths_absolute, assert_features_present, assert_no_duplicate_fs_paths,
+    assert_all_fs_paths_absolute, assert_components_present, assert_no_duplicate_fs_paths,
     assert_no_duplicate_resource_ids, assert_state_version, load_state,
 };
 use crate::context::Context;
@@ -32,7 +32,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
     assert_state_version(&state)?;
 
     println!("==> Checking features object exists");
-    assert_features_present(&state)?;
+    assert_components_present(&state)?;
 
     println!("==> Checking no duplicate resource ids per feature");
     assert_no_duplicate_resource_ids(&state)?;

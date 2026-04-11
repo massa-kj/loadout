@@ -1,6 +1,6 @@
-//! Version mixed scenario — versioned and unversioned features coexist correctly.
+//! Version mixed scenario — versioned and unversioned components coexist correctly.
 //!
-//! Uses dummy backends and features; no network access required.
+//! Uses dummy backends and components; no network access required.
 //! config-version-mixed.yaml has:
 //!   - local/dummy-pkg  (no version — must have no Runtime resource)
 //!   - local/dummy-rt   (version: "20" — must have a Runtime resource)

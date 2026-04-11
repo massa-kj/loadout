@@ -42,23 +42,23 @@ pub fn assert_state_version(state: &State) -> Result<(), String> {
     Ok(())
 }
 
-/// Assert that the `features` map is present (non-absent; may be empty).
-pub fn assert_features_present(state: &State) -> Result<(), String> {
-    // `features` is always present after deserialisation (defaults to `{}`),
+/// Assert that the `components` map is present (non-absent; may be empty).
+pub fn assert_components_present(state: &State) -> Result<(), String> {
+    // `components` is always present after deserialisation (defaults to `{}`),
     // so this is a structural sanity-check rather than a content check.
-    let _ = &state.features;
+    let _ = &state.components;
     Ok(())
 }
 
-/// Assert that every feature's resource list contains no duplicate `id` values.
+/// Assert that every component's resource list contains no duplicate `id` values.
 pub fn assert_no_duplicate_resource_ids(state: &State) -> Result<(), String> {
-    for (feature_id, feature_state) in &state.features {
+    for (component_id, component_state) in &state.components {
         let mut seen: HashSet<&str> = HashSet::new();
-        for resource in &feature_state.resources {
+        for resource in &component_state.resources {
             if !seen.insert(resource.id.as_str()) {
                 return Err(format!(
-                    "duplicate resource id '{}' in feature '{}'",
-                    resource.id, feature_id
+                    "duplicate resource id '{}' in component '{}'",
+                    resource.id, component_id
                 ));
             }
         }
@@ -66,16 +66,16 @@ pub fn assert_no_duplicate_resource_ids(state: &State) -> Result<(), String> {
     Ok(())
 }
 
-/// Assert that no `fs` resource path appears more than once across all features.
+/// Assert that no `fs` resource path appears more than once across all components.
 pub fn assert_no_duplicate_fs_paths(state: &State) -> Result<(), String> {
     let mut seen: HashMap<&str, &str> = HashMap::new();
-    for (feature_id, feature_state) in &state.features {
-        for resource in &feature_state.resources {
+    for (component_id, component_state) in &state.components {
+        for resource in &component_state.resources {
             if let ResourceKind::Fs { fs } = &resource.kind {
-                if let Some(prev_feature) = seen.insert(fs.path.as_str(), feature_id.as_str()) {
+                if let Some(prev_component) = seen.insert(fs.path.as_str(), component_id.as_str()) {
                     return Err(format!(
                         "fs path '{}' is tracked by both '{}' and '{}'",
-                        fs.path, prev_feature, feature_id
+                        fs.path, prev_component, component_id
                     ));
                 }
             }
@@ -86,13 +86,13 @@ pub fn assert_no_duplicate_fs_paths(state: &State) -> Result<(), String> {
 
 /// Assert that every `fs` resource path is absolute.
 pub fn assert_all_fs_paths_absolute(state: &State) -> Result<(), String> {
-    for (feature_id, feature_state) in &state.features {
-        for resource in &feature_state.resources {
+    for (component_id, component_state) in &state.components {
+        for resource in &component_state.resources {
             if let ResourceKind::Fs { fs } = &resource.kind {
                 if !Path::new(&fs.path).is_absolute() {
                     return Err(format!(
-                        "non-absolute fs path '{}' in feature '{}'",
-                        fs.path, feature_id
+                        "non-absolute fs path '{}' in component '{}'",
+                        fs.path, component_id
                     ));
                 }
             }
@@ -103,12 +103,12 @@ pub fn assert_all_fs_paths_absolute(state: &State) -> Result<(), String> {
 
 /// Run all standard structural assertions in one call.
 ///
-/// Combines [`assert_state_version`], [`assert_features_present`],
+/// Combines [`assert_state_version`], [`assert_components_present`],
 /// [`assert_no_duplicate_resource_ids`], [`assert_no_duplicate_fs_paths`], and
 /// [`assert_all_fs_paths_absolute`].
 pub fn assert_state_valid(state: &State) -> Result<(), String> {
     assert_state_version(state)?;
-    assert_features_present(state)?;
+    assert_components_present(state)?;
     assert_no_duplicate_resource_ids(state)?;
     assert_no_duplicate_fs_paths(state)?;
     assert_all_fs_paths_absolute(state)?;
@@ -116,34 +116,37 @@ pub fn assert_state_valid(state: &State) -> Result<(), String> {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Feature-level assertions
+// Component-level assertions
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Assert that `feature_id` is present in the state.
-pub fn assert_feature_present(state: &State, feature_id: &str) -> Result<(), String> {
-    if !state.features.contains_key(feature_id) {
-        return Err(format!("feature '{}' is missing from state", feature_id));
-    }
-    Ok(())
-}
-
-/// Assert that `feature_id` is absent from the state.
-pub fn assert_feature_absent(state: &State, feature_id: &str) -> Result<(), String> {
-    if state.features.contains_key(feature_id) {
+/// Assert that `component_id` is present in the state.
+pub fn assert_component_present(state: &State, component_id: &str) -> Result<(), String> {
+    if !state.components.contains_key(component_id) {
         return Err(format!(
-            "feature '{}' should be absent but is still in state",
-            feature_id
+            "component '{}' is missing from state",
+            component_id
         ));
     }
     Ok(())
 }
 
-/// Assert that the features map contains exactly zero entries.
-pub fn assert_features_empty(state: &State) -> Result<(), String> {
-    if !state.features.is_empty() {
-        let keys: Vec<&str> = state.features.keys().map(String::as_str).collect();
+/// Assert that `component_id` is absent from the state.
+pub fn assert_component_absent(state: &State, component_id: &str) -> Result<(), String> {
+    if state.components.contains_key(component_id) {
         return Err(format!(
-            "expected features to be empty but found: {:?}",
+            "component '{}' should be absent but is still in state",
+            component_id
+        ));
+    }
+    Ok(())
+}
+
+/// Assert that the components map contains exactly zero entries.
+pub fn assert_components_empty(state: &State) -> Result<(), String> {
+    if !state.components.is_empty() {
+        let keys: Vec<&str> = state.components.keys().map(String::as_str).collect();
+        return Err(format!(
+            "expected components to be empty but found: {:?}",
             keys
         ));
     }
@@ -154,16 +157,16 @@ pub fn assert_features_empty(state: &State) -> Result<(), String> {
 // Resource-level assertions
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Return the recorded runtime version for `feature_id`, if any.
+/// Return the recorded runtime version for `component_id`, if any.
 ///
-/// Fails if the feature is missing or if no runtime resource is recorded.
-pub fn get_runtime_version<'a>(state: &'a State, feature_id: &str) -> Result<&'a str, String> {
-    let feature = state
-        .features
-        .get(feature_id)
-        .ok_or_else(|| format!("feature '{}' not found in state", feature_id))?;
+/// Fails if the component is missing or if no runtime resource is recorded.
+pub fn get_runtime_version<'a>(state: &'a State, component_id: &str) -> Result<&'a str, String> {
+    let component = state
+        .components
+        .get(component_id)
+        .ok_or_else(|| format!("component '{}' not found in state", component_id))?;
 
-    feature
+    component
         .resources
         .iter()
         .find_map(|r| {
@@ -173,38 +176,43 @@ pub fn get_runtime_version<'a>(state: &'a State, feature_id: &str) -> Result<&'a
                 None
             }
         })
-        .ok_or_else(|| format!("no runtime resource recorded for feature '{}'", feature_id))
+        .ok_or_else(|| {
+            format!(
+                "no runtime resource recorded for component '{}'",
+                component_id
+            )
+        })
 }
 
-/// Assert that `feature_id` has no runtime resource recorded.
-pub fn assert_no_runtime(state: &State, feature_id: &str) -> Result<(), String> {
-    let feature = state
-        .features
-        .get(feature_id)
-        .ok_or_else(|| format!("feature '{}' not found in state", feature_id))?;
+/// Assert that `component_id` has no runtime resource recorded.
+pub fn assert_no_runtime(state: &State, component_id: &str) -> Result<(), String> {
+    let component = state
+        .components
+        .get(component_id)
+        .ok_or_else(|| format!("component '{}' not found in state", component_id))?;
 
-    let has_runtime = feature
+    let has_runtime = component
         .resources
         .iter()
         .any(|r| matches!(&r.kind, ResourceKind::Runtime { .. }));
 
     if has_runtime {
         return Err(format!(
-            "feature '{}' should have no runtime recorded but does",
-            feature_id
+            "component '{}' should have no runtime recorded but does",
+            component_id
         ));
     }
     Ok(())
 }
 
-/// Assert that no package resources remain in state (all features combined).
+/// Assert that no package resources remain in state (all components combined).
 pub fn assert_no_packages_in_state(state: &State) -> Result<(), String> {
-    for (feature_id, feature_state) in &state.features {
-        for resource in &feature_state.resources {
+    for (component_id, component_state) in &state.components {
+        for resource in &component_state.resources {
             if let ResourceKind::Package { package, .. } = &resource.kind {
                 return Err(format!(
-                    "package '{}' still in state under feature '{}'",
-                    package.name, feature_id
+                    "package '{}' still in state under component '{}'",
+                    package.name, component_id
                 ));
             }
         }
@@ -269,7 +277,7 @@ pub fn assert_path_exists(path: &Path) -> Result<(), String> {
 /// Collect all `fs` paths recorded in state.
 pub fn collect_fs_paths(state: &State) -> Vec<String> {
     state
-        .features
+        .components
         .values()
         .flat_map(|fs| &fs.resources)
         .filter_map(|r| {

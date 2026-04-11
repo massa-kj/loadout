@@ -10,8 +10,8 @@ pub(crate) struct PipelineOutput {
     pub(crate) profile: config::Profile,
     #[allow(dead_code)]
     pub(crate) strategy: config::Strategy,
-    pub(crate) index: model::FeatureIndex,
-    pub(crate) order: model::ResolvedFeatureOrder,
+    pub(crate) index: model::ComponentIndex,
+    pub(crate) order: model::ResolvedComponentOrder,
     pub(crate) graph: model::desired_resource_graph::DesiredResourceGraph,
     pub(crate) state: state::State,
 }
@@ -22,10 +22,10 @@ pub(crate) struct PipelineOutput {
 ///   1. Validate config file exists.
 ///   2. Load config → `Profile` + `Strategy` via `config::load_config`.
 ///   3. Load sources (optional) → `SourcesSpec`.
-///   4. Build `FeatureIndex` from source roots.
-///   5. Map profile features to `CanonicalFeatureId`s (skip unknown).
+///   4. Build `ComponentIndex` from source roots.
+///   5. Map profile components to `CanonicalComponentId`s (skip unknown).
 ///   6. Resolve dependency order.
-///   7. Compile: `FeatureIndex + Strategy + order` → `DesiredResourceGraph`.
+///   7. Compile: `ComponentIndex + Strategy + order` → `DesiredResourceGraph`.
 ///   8. Load (or initialise) state.
 pub(crate) fn run_pipeline(
     ctx: &AppContext,
@@ -45,12 +45,12 @@ pub(crate) fn run_pipeline(
     // Step 3: load sources if present; default to empty (core + local only).
     let sources = load_sources_optional(ctx)?;
 
-    // Step 4: build feature index from all source roots.
+    // Step 4: build component index from all source roots.
     let source_roots = build_source_roots(ctx, &sources);
-    let fi_platform = to_fi_platform(&ctx.platform);
-    let index = feature_index::build(&source_roots, &fi_platform)?;
+    let fi_platform = to_ci_platform(&ctx.platform);
+    let index = component_index::build(&source_roots, &fi_platform)?;
 
-    // Step 5: convert profile keys to CanonicalFeatureIds; skip those absent from index.
+    // Step 5: convert profile keys to CanonicalComponentIds; skip those absent from index.
     // An empty desired list is valid: it means "uninstall everything in state".
     let desired_ids = profile_to_desired_ids(&profile, &index);
 
@@ -73,50 +73,50 @@ pub(crate) fn run_pipeline(
     })
 }
 
-/// Map `platform::Platform` → `feature_index::Platform`.
-pub(crate) fn to_fi_platform(p: &platform::Platform) -> feature_index::Platform {
+/// Map `platform::Platform` → `component_index::Platform`.
+pub(crate) fn to_ci_platform(p: &platform::Platform) -> component_index::Platform {
     match p {
-        platform::Platform::Linux => feature_index::Platform::Linux,
-        platform::Platform::Windows => feature_index::Platform::Windows,
-        platform::Platform::Wsl => feature_index::Platform::Wsl,
+        platform::Platform::Linux => component_index::Platform::Linux,
+        platform::Platform::Windows => component_index::Platform::Windows,
+        platform::Platform::Wsl => component_index::Platform::Wsl,
     }
 }
 
-/// Build the list of feature source roots for the feature-index scanner.
+/// Build the list of component source roots for the component-index scanner.
 ///
 /// Implicit sources:
-/// - `local` → `{local_root}/features/`
+/// - `local` → `{local_root}/components/`
 ///
 /// (The `core` source is embedded in the binary; no filesystem path applies.)
 ///
 /// External sources (from `sources.yaml`):
-/// - `{id}` → `{data_home}/sources/{id}/features/`
+/// - `{id}` → `{data_home}/sources/{id}/components/`
 pub(crate) fn build_source_roots(
     ctx: &AppContext,
     sources: &config::SourcesSpec,
-) -> Vec<feature_index::SourceRoot> {
-    let mut roots = vec![feature_index::SourceRoot {
+) -> Vec<component_index::SourceRoot> {
+    let mut roots = vec![component_index::SourceRoot {
         source_id: "local".into(),
-        features_dir: ctx.local_root.join("features"),
+        components_dir: ctx.local_root.join("components"),
     }];
 
     for entry in &sources.sources {
-        let features_dir = match entry.source_type {
+        let components_dir = match entry.source_type {
             config::SourceType::Git => ctx
                 .dirs
                 .data_home
                 .join("sources")
                 .join(&entry.id)
-                .join("features"),
+                .join("components"),
             config::SourceType::Path => {
                 // path is pre-resolved to absolute by config::load_sources.
                 let Some(ref p) = entry.path else { continue };
-                std::path::Path::new(p).join("features")
+                std::path::Path::new(p).join("components")
             }
         };
-        roots.push(feature_index::SourceRoot {
+        roots.push(component_index::SourceRoot {
             source_id: entry.id.clone(),
-            features_dir,
+            components_dir,
         });
     }
 
@@ -139,21 +139,21 @@ pub(crate) fn load_sources_optional(ctx: &AppContext) -> Result<config::SourcesS
     }
 }
 
-/// Map profile feature keys (already normalised by `config::load_profile`) to
-/// `CanonicalFeatureId`s, keeping only those present in the feature index.
+/// Map profile component keys (already normalised by `config::load_profile`) to
+/// `CanonicalComponentId`s, keeping only those present in the component index.
 ///
-/// Features absent from the index may belong to a source that has not been
+/// Components absent from the index may belong to a source that has not been
 /// cloned yet; they are silently skipped rather than returning an error,
 /// so that a machine with a partial set of sources can still make progress.
 pub(crate) fn profile_to_desired_ids(
     profile: &config::Profile,
-    index: &model::FeatureIndex,
-) -> Vec<model::CanonicalFeatureId> {
-    let mut ids: Vec<model::CanonicalFeatureId> = profile
-        .features
+    index: &model::ComponentIndex,
+) -> Vec<model::CanonicalComponentId> {
+    let mut ids: Vec<model::CanonicalComponentId> = profile
+        .components
         .keys()
-        .filter(|k| index.features.contains_key(k.as_str()))
-        .filter_map(|k| model::CanonicalFeatureId::new(k).ok())
+        .filter(|k| index.components.contains_key(k.as_str()))
+        .filter_map(|k| model::CanonicalComponentId::new(k).ok())
         .collect();
 
     // Sort for deterministic order (profile is a HashMap, iteration order varies).

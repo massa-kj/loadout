@@ -9,17 +9,17 @@ what invariants must hold. They do not explain rationale or implementation detai
 
 **Data specs** — Schemas, semantics, and invariants for persistent data formats.
 
-* `data/profile.md` — Profile schema and feature declaration semantics
+* `data/profile.md` — Profile schema and component declaration semantics
 * `data/strategy.md` — Strategy schema and backend resolution rules
 * `data/state.md` — State schema, invariants, and commit rules
 * `data/sources.md` — Source registry schema and allow-list rules
-* `data/feature_index.md` — Feature Index schema (dep fields + spec; input to Resolver and FeatureCompiler)
-* `data/desired_resource_graph.md` — DesiredResourceGraph schema (FeatureCompiler output; input to Planner)
+* `data/component_index.md` — Component Index schema (dep fields + spec; input to Resolver and ComponentCompiler)
+* `data/desired_resource_graph.md` — DesiredResourceGraph schema (ComponentCompiler output; input to Planner)
 
 **API specs** — Interface contracts for pluggable components.
 
 * `api/backend.md` — Backend plugin interface (JSON stdin/stdout protocol)
-* `api/feature-host.md` — Feature script interface (environment variable protocol)
+* `api/component-host.md` — Component script interface (environment variable protocol)
 
 **Algorithm specs** — Input/output contracts for pure computation modules.
 

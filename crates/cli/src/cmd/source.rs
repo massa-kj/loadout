@@ -92,7 +92,7 @@ const SOURCES_TEMPLATE: &str = "\
 # loadout sources
 #
 # Declare external plugin sources here.
-# Each source provides features and/or backends.
+# Each source provides components and/or backends.
 #
 # type: git — clone a git repository as a source
 # type: path — use a local directory as a source
@@ -105,14 +105,14 @@ const SOURCES_TEMPLATE: &str = "\
 #     ref:
 #       branch: main
 #     allow:
-#       features: \"*\"
+#       components: \"*\"
 #       backends: \"*\"
 #
 #   - id: mylab
 #     type: path
 #     path: ../loadout-mylab
 #     allow:
-#       features: \"*\"
+#       components: \"*\"
 
 sources: []
 ";
@@ -205,15 +205,15 @@ fn remove(args: SourceRemoveArgs) {
 fn trust(args: SourceTrustArgs) {
     let ctx = build_app_context();
 
-    if args.features.is_none() && args.backends.is_none() {
-        eprintln!("error: at least one of --features or --backends must be specified");
+    if args.components.is_none() && args.backends.is_none() {
+        eprintln!("error: at least one of --components or --backends must be specified");
         process::exit(1);
     }
 
-    let features = args.features.as_deref().map(parse_allow_list);
+    let components = args.components.as_deref().map(parse_allow_list);
     let backends = args.backends.as_deref().map(parse_allow_list);
 
-    let path = app::source_trust(&ctx, &args.id, features, backends).unwrap_or_else(|e| {
+    let path = app::source_trust(&ctx, &args.id, components, backends).unwrap_or_else(|e| {
         eprintln!("error: {e}");
         process::exit(1);
     });
@@ -226,16 +226,16 @@ fn trust(args: SourceTrustArgs) {
 fn untrust(args: SourceUntrustArgs) {
     let ctx = build_app_context();
 
-    if args.features.is_none() && args.backends.is_none() {
-        eprintln!("error: at least one of --features or --backends must be specified");
+    if args.components.is_none() && args.backends.is_none() {
+        eprintln!("error: at least one of --components or --backends must be specified");
         process::exit(1);
     }
 
-    let features = args.features.as_deref().map(parse_allow_list);
+    let components = args.components.as_deref().map(parse_allow_list);
     let backends = args.backends.as_deref().map(parse_allow_list);
 
-    let path =
-        app::source_untrust(&ctx, &args.id, features, backends, args.force).unwrap_or_else(|e| {
+    let path = app::source_untrust(&ctx, &args.id, components, backends, args.force)
+        .unwrap_or_else(|e| {
             eprintln!("error: {e}");
             process::exit(1);
         });
@@ -266,7 +266,7 @@ fn update(args: SourceUpdateArgs) {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-/// Parse a `--features` / `--backends` string into an `AllowList`.
+/// Parse a `--components` / `--backends` string into an `AllowList`.
 ///
 /// `"*"` → `AllowList::All`; anything else is treated as comma-separated names.
 fn parse_allow_list(s: &str) -> config::AllowList {

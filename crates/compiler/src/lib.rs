@@ -1,6 +1,6 @@
 //! Feature compiler: resolves backends and produces DesiredResourceGraph.
 //!
-//! The compiler takes a FeatureIndex, Strategy, and ResolvedFeatureOrder and produces
+//! The compiler takes a ComponentIndex, Strategy, and ResolvedComponentOrder and produces
 //! a DesiredResourceGraph with all `desired_backend` fields resolved. This is the
 //! only place where backend resolution happens; Planner must not re-resolve backends.
 //!
@@ -8,13 +8,13 @@
 
 use std::collections::HashMap;
 
+use model::component_index::FsOp as SpecFsOp;
+use model::component_index::{ComponentIndex, ComponentMode, SpecFsEntryType, SpecResourceKind};
 use model::desired_resource_graph::{
-    DesiredResource, DesiredResourceGraph, DesiredResourceKind, FeatureDesiredResources,
+    ComponentDesiredResources, DesiredResource, DesiredResourceGraph, DesiredResourceKind,
     FsEntryType, FsOp, DESIRED_RESOURCE_GRAPH_SCHEMA_VERSION,
 };
-use model::feature_index::FsOp as SpecFsOp;
-use model::feature_index::{FeatureIndex, FeatureMode, SpecFsEntryType, SpecResourceKind};
-use model::id::{CanonicalBackendId, ResolvedFeatureOrder};
+use model::id::{CanonicalBackendId, ResolvedComponentOrder};
 use model::strategy::{BackendStrategy, Strategy};
 
 pub use model::desired_resource_graph::{
@@ -29,20 +29,20 @@ pub use model::desired_resource_graph::{
 /// Errors produced by the compiler.
 #[derive(Debug, thiserror::Error)]
 pub enum CompilerError {
-    /// A feature referenced in `resolved_order` was not found in `feature_index`.
+    /// A feature referenced in `resolved_order` was not found in `component_index`.
     /// This indicates a programming error upstream (resolver output inconsistent with index).
     #[error("feature not found in index: {id}")]
-    FeatureNotFound { id: String },
+    ComponentNotFound { id: String },
 
     /// No backend could be resolved for a resource.
     /// Either `strategy.<kind>.default_backend` is absent and there is no matching override,
     /// or the strategy section itself is absent.
     #[error(
-        "no backend for {kind} resource '{resource_id}' in feature '{feature_id}': \
+        "no backend for {kind} resource '{resource_id}' in component '{component_id}': \
          add a default_backend or an override in strategy"
     )]
     NoBackend {
-        feature_id: String,
+        component_id: String,
         resource_id: String,
         kind: String,
     },
@@ -52,42 +52,40 @@ pub enum CompilerError {
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Compile a FeatureIndex into a DesiredResourceGraph.
+/// Compile a ComponentIndex into a DesiredResourceGraph.
 ///
 /// Processes features in `resolved_order`. Script-mode features are excluded from
-/// the output (they have no resources to compile). For declarative-mode features,
+/// the output (they have no resources to compile). For declarative-mode components,
 /// each resource's `desired_backend` is resolved via `strategy`.
 ///
 /// # Errors
 ///
-/// Returns [`CompilerError::FeatureNotFound`] if a feature ID in `resolved_order`
-/// is missing from `feature_index`. Returns [`CompilerError::NoBackend`] if no backend
+/// Returns [`CompilerError::ComponentNotFound`] if a feature ID in `resolved_order`
+/// is missing from `component_index`. Returns [`CompilerError::NoBackend`] if no backend
 /// can be resolved for a package or runtime resource.
 pub fn compile(
-    feature_index: &FeatureIndex,
+    component_index: &ComponentIndex,
     strategy: &Strategy,
-    resolved_order: &ResolvedFeatureOrder,
+    resolved_order: &ResolvedComponentOrder,
 ) -> Result<DesiredResourceGraph, CompilerError> {
-    let mut features: HashMap<String, FeatureDesiredResources> = HashMap::new();
+    let mut components: HashMap<String, ComponentDesiredResources> = HashMap::new();
 
-    for feature_id in resolved_order {
-        let id_str = feature_id.as_str();
+    for component_id in resolved_order {
+        let id_str = component_id.as_str();
 
-        let meta =
-            feature_index
-                .features
-                .get(id_str)
-                .ok_or_else(|| CompilerError::FeatureNotFound {
-                    id: id_str.to_string(),
-                })?;
+        let meta = component_index.components.get(id_str).ok_or_else(|| {
+            CompilerError::ComponentNotFound {
+                id: id_str.to_string(),
+            }
+        })?;
 
         // Script-mode features have no declarative resources.
         // They are still recorded in the graph with an empty list so the planner
         // can classify them as create / destroy / noop.
-        if meta.mode == FeatureMode::Script {
-            features.insert(
+        if meta.mode == ComponentMode::Script {
+            components.insert(
                 id_str.to_string(),
-                FeatureDesiredResources { resources: vec![] },
+                ComponentDesiredResources { resources: vec![] },
             );
             continue;
         }
@@ -97,9 +95,9 @@ pub fn compile(
             Some(s) => s,
             None => {
                 // Should not occur after feature-index validation, but handle gracefully.
-                features.insert(
+                components.insert(
                     id_str.to_string(),
-                    FeatureDesiredResources { resources: vec![] },
+                    ComponentDesiredResources { resources: vec![] },
                 );
                 continue;
             }
@@ -114,12 +112,12 @@ pub fn compile(
             });
         }
 
-        features.insert(id_str.to_string(), FeatureDesiredResources { resources });
+        components.insert(id_str.to_string(), ComponentDesiredResources { resources });
     }
 
     Ok(DesiredResourceGraph {
         schema_version: DESIRED_RESOURCE_GRAPH_SCHEMA_VERSION,
-        features,
+        components,
     })
 }
 
@@ -129,16 +127,16 @@ pub fn compile(
 
 /// Compile a single SpecResource into a DesiredResourceKind.
 fn compile_resource(
-    resource: &model::feature_index::SpecResource,
+    resource: &model::component_index::SpecResource,
     strategy: &Strategy,
-    feature_id: &str,
+    component_id: &str,
 ) -> Result<DesiredResourceKind, CompilerError> {
     match &resource.kind {
         SpecResourceKind::Package { name } => {
             let backend = resolve_backend(
                 strategy.package.as_ref(),
                 name,
-                feature_id,
+                component_id,
                 &resource.id,
                 "package",
             )?;
@@ -152,7 +150,7 @@ fn compile_resource(
             let backend = resolve_backend(
                 strategy.runtime.as_ref(),
                 name,
-                feature_id,
+                component_id,
                 &resource.id,
                 "runtime",
             )?;
@@ -181,12 +179,12 @@ fn compile_resource(
 fn resolve_backend(
     strategy_section: Option<&BackendStrategy>,
     resource_name: &str,
-    feature_id: &str,
+    component_id: &str,
     resource_id: &str,
     kind_name: &str,
 ) -> Result<CanonicalBackendId, CompilerError> {
     let no_backend = || CompilerError::NoBackend {
-        feature_id: feature_id.to_string(),
+        component_id: component_id.to_string(),
         resource_id: resource_id.to_string(),
         kind: kind_name.to_string(),
     };
@@ -226,35 +224,35 @@ fn map_fs_op(op: SpecFsOp) -> FsOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use model::feature_index::FsOp as SpecFsOp;
-    use model::feature_index::{
-        DepSpec, FeatureMeta, FeatureMode, FeatureSpec, SpecFsEntryType, SpecResource,
-        SpecResourceKind, FEATURE_INDEX_SCHEMA_VERSION,
+    use model::component_index::FsOp as SpecFsOp;
+    use model::component_index::{
+        ComponentMeta, ComponentMode, ComponentSpec, DepSpec, SpecFsEntryType, SpecResource,
+        SpecResourceKind, COMPONENT_INDEX_SCHEMA_VERSION,
     };
-    use model::id::CanonicalFeatureId;
+    use model::id::CanonicalComponentId;
     use model::strategy::{BackendOverride, BackendStrategy, Strategy};
     use std::collections::HashMap;
 
     // --- Builder helpers ----------------------------------------------------
 
-    fn make_feature_id(s: &str) -> CanonicalFeatureId {
-        CanonicalFeatureId::new(s).unwrap()
+    fn make_component_id(s: &str) -> CanonicalComponentId {
+        CanonicalComponentId::new(s).unwrap()
     }
 
-    fn make_index(features: Vec<(&str, FeatureMeta)>) -> FeatureIndex {
-        FeatureIndex {
-            schema_version: FEATURE_INDEX_SCHEMA_VERSION,
-            features: features
+    fn make_index(components: Vec<(&str, ComponentMeta)>) -> ComponentIndex {
+        ComponentIndex {
+            schema_version: COMPONENT_INDEX_SCHEMA_VERSION,
+            components: components
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v))
                 .collect(),
         }
     }
 
-    fn script_meta() -> FeatureMeta {
-        FeatureMeta {
+    fn script_meta() -> ComponentMeta {
+        ComponentMeta {
             spec_version: 1,
-            mode: FeatureMode::Script,
+            mode: ComponentMode::Script,
             description: None,
             source_dir: "/tmp/feat".to_string(),
             dep: DepSpec::default(),
@@ -262,14 +260,14 @@ mod tests {
         }
     }
 
-    fn declarative_meta(resources: Vec<SpecResource>) -> FeatureMeta {
-        FeatureMeta {
+    fn declarative_meta(resources: Vec<SpecResource>) -> ComponentMeta {
+        ComponentMeta {
             spec_version: 1,
-            mode: FeatureMode::Declarative,
+            mode: ComponentMode::Declarative,
             description: None,
             source_dir: "/tmp/feat".to_string(),
             dep: DepSpec::default(),
-            spec: Some(FeatureSpec { resources }),
+            spec: Some(ComponentSpec { resources }),
         }
     }
 
@@ -334,14 +332,14 @@ mod tests {
 
     /// Script-mode features are included in the output graph with empty resources.
     #[test]
-    fn script_feature_is_included_with_empty_resources() {
+    fn script_component_is_included_with_empty_resources() {
         let index = make_index(vec![("core/bash", script_meta())]);
         let strategy = Strategy::default();
-        let order = vec![make_feature_id("core/bash")];
+        let order = vec![make_component_id("core/bash")];
 
         let graph = compile(&index, &strategy, &order).unwrap();
-        assert_eq!(graph.features.len(), 1);
-        assert!(graph.features["core/bash"].resources.is_empty());
+        assert_eq!(graph.components.len(), 1);
+        assert!(graph.components["core/bash"].resources.is_empty());
     }
 
     /// Declarative package resource resolves backend from default_backend.
@@ -355,10 +353,10 @@ mod tests {
             package: Some(backend_strategy_default("core/brew")),
             ..Default::default()
         };
-        let order = vec![make_feature_id("core/git")];
+        let order = vec![make_component_id("core/git")];
 
         let graph = compile(&index, &strategy, &order).unwrap();
-        let resources = &graph.features["core/git"].resources;
+        let resources = &graph.components["core/git"].resources;
         assert_eq!(resources.len(), 1);
         match &resources[0].kind {
             DesiredResourceKind::Package {
@@ -387,10 +385,10 @@ mod tests {
             )),
             ..Default::default()
         };
-        let order = vec![make_feature_id("core/ripgrep")];
+        let order = vec![make_component_id("core/ripgrep")];
 
         let graph = compile(&index, &strategy, &order).unwrap();
-        match &graph.features["core/ripgrep"].resources[0].kind {
+        match &graph.components["core/ripgrep"].resources[0].kind {
             DesiredResourceKind::Package {
                 desired_backend, ..
             } => {
@@ -411,10 +409,10 @@ mod tests {
             runtime: Some(backend_strategy_default("core/mise")),
             ..Default::default()
         };
-        let order = vec![make_feature_id("core/node")];
+        let order = vec![make_component_id("core/node")];
 
         let graph = compile(&index, &strategy, &order).unwrap();
-        match &graph.features["core/node"].resources[0].kind {
+        match &graph.components["core/node"].resources[0].kind {
             DesiredResourceKind::Runtime {
                 name,
                 version,
@@ -443,10 +441,10 @@ mod tests {
             )),
             ..Default::default()
         };
-        let order = vec![make_feature_id("core/python")];
+        let order = vec![make_component_id("core/python")];
 
         let graph = compile(&index, &strategy, &order).unwrap();
-        match &graph.features["core/python"].resources[0].kind {
+        match &graph.components["core/python"].resources[0].kind {
             DesiredResourceKind::Runtime {
                 desired_backend, ..
             } => {
@@ -469,10 +467,10 @@ mod tests {
             )]),
         )]);
         let strategy = Strategy::default();
-        let order = vec![make_feature_id("core/git")];
+        let order = vec![make_component_id("core/git")];
 
         let graph = compile(&index, &strategy, &order).unwrap();
-        match &graph.features["core/git"].resources[0].kind {
+        match &graph.components["core/git"].resources[0].kind {
             DesiredResourceKind::Fs {
                 path,
                 entry_type,
@@ -501,10 +499,10 @@ mod tests {
             )]),
         )]);
         let strategy = Strategy::default();
-        let order = vec![make_feature_id("core/nvim")];
+        let order = vec![make_component_id("core/nvim")];
 
         let graph = compile(&index, &strategy, &order).unwrap();
-        match &graph.features["core/nvim"].resources[0].kind {
+        match &graph.components["core/nvim"].resources[0].kind {
             DesiredResourceKind::Fs { entry_type, op, .. } => {
                 assert_eq!(*entry_type, FsEntryType::Dir);
                 assert_eq!(*op, FsOp::Copy);
@@ -527,7 +525,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let order = vec![make_feature_id("core/git")];
+        let order = vec![make_component_id("core/git")];
 
         let err = compile(&index, &strategy, &order).unwrap_err();
         assert!(matches!(err, CompilerError::NoBackend { .. }));
@@ -545,21 +543,21 @@ mod tests {
             package: Some(backend_strategy_default("core/brew")),
             ..Default::default()
         };
-        let order = vec![make_feature_id("core/node")];
+        let order = vec![make_component_id("core/node")];
 
         let err = compile(&index, &strategy, &order).unwrap_err();
         assert!(matches!(err, CompilerError::NoBackend { .. }));
     }
 
-    /// Feature referenced in resolved_order but absent from index → FeatureNotFound.
+    /// Feature referenced in resolved_order but absent from index → ComponentNotFound.
     #[test]
-    fn feature_not_in_index_returns_error() {
+    fn component_not_in_index_returns_error() {
         let index = make_index(vec![]);
         let strategy = Strategy::default();
-        let order = vec![make_feature_id("core/missing")];
+        let order = vec![make_component_id("core/missing")];
 
         let err = compile(&index, &strategy, &order).unwrap_err();
-        assert!(matches!(err, CompilerError::FeatureNotFound { id } if id == "core/missing"));
+        assert!(matches!(err, CompilerError::ComponentNotFound { id } if id == "core/missing"));
     }
 
     /// Multiple features in resolved_order are all compiled into the graph.
@@ -582,17 +580,17 @@ mod tests {
             ..Default::default()
         };
         let order = vec![
-            make_feature_id("core/git"),
-            make_feature_id("core/bash"), // script: skipped
-            make_feature_id("core/node"),
+            make_component_id("core/git"),
+            make_component_id("core/bash"), // script: skipped
+            make_component_id("core/node"),
         ];
 
         let graph = compile(&index, &strategy, &order).unwrap();
         // bash is now included with empty resources; git and node have resources
-        assert_eq!(graph.features.len(), 3);
-        assert!(graph.features.contains_key("core/git"));
-        assert!(graph.features.contains_key("core/node"));
-        assert!(graph.features["core/bash"].resources.is_empty());
+        assert_eq!(graph.components.len(), 3);
+        assert!(graph.components.contains_key("core/git"));
+        assert!(graph.components.contains_key("core/node"));
+        assert!(graph.components["core/bash"].resources.is_empty());
     }
 
     /// Schema version in output is always the canonical constant.
@@ -600,7 +598,7 @@ mod tests {
     fn output_schema_version_is_canonical() {
         let index = make_index(vec![("core/bash", script_meta())]);
         let strategy = Strategy::default();
-        let order = vec![make_feature_id("core/bash")];
+        let order = vec![make_component_id("core/bash")];
 
         let graph = compile(&index, &strategy, &order).unwrap();
         assert_eq!(graph.schema_version, DESIRED_RESOURCE_GRAPH_SCHEMA_VERSION);

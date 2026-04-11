@@ -5,7 +5,7 @@
 //!
 //! See: `docs/specs/algorithms/planner.md`
 
-use crate::id::CanonicalFeatureId;
+use crate::id::CanonicalComponentId;
 use serde::{Deserialize, Serialize};
 
 /// Ordered set of actions the Executor must apply.
@@ -14,11 +14,11 @@ pub struct Plan {
     /// Ordered list of operations to execute (create/destroy/replace/strengthen).
     pub actions: Vec<PlanAction>,
 
-    /// Features already in the correct state; not included in `actions`.
+    /// Components already in the correct state; not included in `actions`.
     #[serde(default)]
     pub noops: Vec<NoopEntry>,
 
-    /// Features skipped due to planner-level classification (unknown kind, invariant).
+    /// Components skipped due to planner-level classification (unknown kind, invariant).
     #[serde(default)]
     pub blocked: Vec<BlockedEntry>,
 
@@ -26,11 +26,11 @@ pub struct Plan {
     pub summary: PlanSummary,
 }
 
-/// A single planned operation for a feature.
+/// A single planned operation for a component.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlanAction {
-    /// Canonical feature ID this action applies to.
-    pub feature: CanonicalFeatureId,
+    /// Canonical component ID this action applies to.
+    pub component: CanonicalComponentId,
 
     /// Type of operation to perform.
     pub operation: Operation,
@@ -49,15 +49,15 @@ pub struct PlanAction {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Operation {
-    /// Feature is not in state; install it fresh.
+    /// Component is not in state; install it fresh.
     Create,
-    /// Feature is in state but not in desired profile; uninstall it.
+    /// Component is in state but not in desired profile; uninstall it.
     Destroy,
-    /// Feature exists but desired resources are incompatible with current state; uninstall then reinstall.
+    /// Component exists but desired resources are incompatible with current state; uninstall then reinstall.
     Replace,
-    /// Feature exists but backend has changed for one or more resources; uninstall then reinstall with new backend.
+    /// Component exists but backend has changed for one or more resources; uninstall then reinstall with new backend.
     ReplaceBackend,
-    /// Feature exists and is compatible; install additional resources not yet in state.
+    /// Component exists and is compatible; install additional resources not yet in state.
     Strengthen,
 }
 
@@ -95,7 +95,7 @@ pub struct StrengthenDetails {
     pub add_resources: Vec<ResourceRef>,
 }
 
-/// Lightweight reference to a resource within a feature.
+/// Lightweight reference to a resource within a component.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResourceRef {
     /// Resource kind string (e.g. `package`, `runtime`, `fs`).
@@ -105,16 +105,16 @@ pub struct ResourceRef {
     pub id: String,
 }
 
-/// Record of a feature that required no changes.
+/// Record of a component that required no changes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NoopEntry {
-    pub feature: CanonicalFeatureId,
+    pub component: CanonicalComponentId,
 }
 
-/// Record of a feature that was blocked by the planner.
+/// Record of a component that was blocked by the planner.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BlockedEntry {
-    pub feature: CanonicalFeatureId,
+    pub component: CanonicalComponentId,
     pub reason: String,
 }
 
@@ -137,22 +137,22 @@ mod tests {
     fn round_trip_plan() {
         let json = r#"{
             "actions": [
-                { "feature": "core/git", "operation": "create" },
+                { "component": "core/git", "operation": "create" },
                 {
-                    "feature": "core/node",
+                    "component": "core/node",
                     "operation": "replace",
                     "details": { "from_version": "18", "to_version": "20" }
                 },
                 {
-                    "feature": "core/git",
+                    "component": "core/git",
                     "operation": "strengthen",
                     "details": {
                         "add_resources": [{ "kind": "fs", "id": "fs:gitconfig" }]
                     }
                 }
             ],
-            "noops": [{ "feature": "core/bash" }],
-            "blocked": [{ "feature": "local/legacy", "reason": "unknown resource kind: registry" }],
+            "noops": [{ "component": "core/bash" }],
+            "blocked": [{ "component": "local/legacy", "reason": "unknown resource kind: registry" }],
             "summary": {
                 "create": 1, "destroy": 0, "replace": 1,
                 "replace_backend": 0, "strengthen": 1, "blocked": 1
@@ -179,7 +179,7 @@ mod tests {
             _ => panic!("expected strengthen details"),
         }
 
-        assert_eq!(plan.noops[0].feature.as_str(), "core/bash");
+        assert_eq!(plan.noops[0].component.as_str(), "core/bash");
         assert_eq!(plan.blocked[0].reason, "unknown resource kind: registry");
         assert_eq!(plan.summary.create, 1);
     }

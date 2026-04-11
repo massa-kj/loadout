@@ -1,7 +1,0 @@
-spec_version: 1
-mode: script
-description: uv Python packages for development
-depends:
-  - python
-packages:
-  - name: python-lsp-server

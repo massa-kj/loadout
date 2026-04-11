@@ -10,7 +10,7 @@ Not covered: git clone/update implementation details (see `crates/app/src/mutate
 
 ## Purpose
 
-The source registry maps canonical IDs to concrete feature/backend directories.
+The source registry maps canonical IDs to concrete component/backend directories.
 It makes source resolution explicit and deterministic.
 
 Core must not guess providers from filesystem location.
@@ -63,7 +63,7 @@ sources:
       branch: main        # exactly one of: branch | tag | commit
     path: .               # repo-relative subdirectory (optional, default ".")
     allow:
-      features:
+      components:
         - node
         - python
       backends:
@@ -72,7 +72,7 @@ sources:
     type: path
     path: ../loadout-mylab   # filesystem path (relative to sources.yaml, or absolute)
     allow:
-      features:
+      components:
         - node
       backends:
         - mise
@@ -131,10 +131,10 @@ If `ref` is omitted, no automatic synchronization is performed.
 
 | Source type | Semantics |
 |---|---|
-| `type: git` | Repo-relative subdirectory containing `features/` and/or `backends/`. Defaults to `"."` (repository root). Must be relative; `..` and absolute paths are forbidden. |
+| `type: git` | Repo-relative subdirectory containing `components/` and/or `backends/`. Defaults to `"."` (repository root). Must be relative; `..` and absolute paths are forbidden. |
 | `type: path` | Filesystem path to the local source directory. Relative paths are resolved relative to `sources.yaml`'s parent directory. Absolute paths are stored as-is after canonicalization. `~` expansion is supported. |
 
-The directory must contain at least one of `features/` or `backends/`.
+The directory must contain at least one of `components/` or `backends/`.
 
 ### `allow`
 
@@ -147,19 +147,19 @@ Supported forms:
 allow: "*"
 ```
 
-Allows all features and all backends.
+Allows all components and all backends.
 
 ```yaml
 allow:
-  features: "*"
+  components: "*"
   backends: "*"
 ```
 
-Allows all features or all backends by kind.
+Allows all components or all backends by kind.
 
 ```yaml
 allow:
-  features:
+  components:
     - node
     - python
   backends:
@@ -185,7 +185,7 @@ UTC timestamp in RFC 3339 format (`YYYY-MM-DDTHH:MM:SSZ`) recorded at last fetch
 
 ### `manifest_hash`
 
-SHA-256 hash of the source's loadout manifest files (`features/**/*.yaml`,
+SHA-256 hash of the source's loadout manifest files (`components/**/*.yaml`,
 `backends/**/*.yaml`) at the time of last fetch.
 Computed over the repo subtree specified by `path`, not the full repository.
 
@@ -193,12 +193,12 @@ Computed over the repo subtree specified by `path`, not the full repository.
 
 Source directories are derived by source kind.
 
-### Features
+### Components
 
-- `core/<name>` → `{repo}/features/<name>`
-- `local/<name>` → config home `features/<name>`
-- `<external>/<name>` (type: git) → data home `sources/<external>/features/<name>`
-- `<external>/<name>` (type: path) → `<resolved_path>/features/<name>`
+- `core/<name>` → `{repo}/components/<name>`
+- `local/<name>` → config home `components/<name>`
+- `<external>/<name>` (type: git) → data home `sources/<external>/components/<name>`
+- `<external>/<name>` (type: path) → `<resolved_path>/components/<name>`
 
 ### Backends
 
@@ -228,7 +228,7 @@ Source directories are derived by source kind.
 - `type: git`: `url` is required and non-empty. `ref` sub-fields are mutually exclusive.
 - `type: git`, `path` field: must be relative; `..` components and absolute paths are forbidden.
 - `type: path`: `url` must not be specified. `path` is required and non-empty.
-  The resolved directory must exist and must contain `features/` or `backends/`.
+  The resolved directory must exist and must contain `components/` or `backends/`.
   The resolved real path must not equal the `local` source root.
 - Unknown top-level fields in each source entry are reserved.
 
@@ -250,7 +250,7 @@ sources:
     ref:
       branch: main
     allow:
-      features: "*"
+      components: "*"
       backends:
         - npm
         - uv
@@ -266,7 +266,7 @@ sources:
     ref:
       commit: abcdef1234567890abcdef1234567890abcdef12
     allow:
-      features:
+      components:
         - node
         - python
 ```
@@ -279,7 +279,7 @@ sources:
     type: path
     path: ~/projects/loadout-mylab
     allow:
-      features:
+      components:
         - mypkg
 ```
 
@@ -299,7 +299,7 @@ sources:
 
 - `resolved_commit` is always a full 40-character hex string. Short hashes must not be stored.
 - `fetched_at` is always UTC RFC 3339 (`YYYY-MM-DDTHH:MM:SSZ`).
-- `manifest_hash` covers only `features/**/*.yaml` and `backends/**/*.yaml` under the repo subtree specified by `path`. It does not hash the full repository tree.
+- `manifest_hash` covers only `components/**/*.yaml` and `backends/**/*.yaml` under the repo subtree specified by `path`. It does not hash the full repository tree.
 - `type: path` sources are never written to `sources.lock.yaml`.
 
 ### Git operations

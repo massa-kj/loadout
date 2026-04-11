@@ -16,7 +16,7 @@
 //!   lifecycle        Full multi-phase cycle (base → full → shrink → empty)
 //!   version-install  Version recorded in state after install
 //!   version-upgrade  Version mismatch triggers reinstall; state updated
-//!   version-mixed    Versioned and unversioned features coexist correctly
+//!   version-mixed    Versioned and unversioned components coexist correctly
 //!   all              Run all scenarios (default)
 //! ```
 //!

@@ -74,20 +74,20 @@ try {
 
     $LoadoutRoot = Join-Path $env:APPDATA "loadout"
 
-    # --- Set up config, features, and backends ---
+    # --- Set up config, components, and backends ---
     Write-Host "==> Setting up loadout config..." -ForegroundColor Green
-    $FeaturesDir = Join-Path $LoadoutRoot "features"
+    $ComponentsDir = Join-Path $LoadoutRoot "components"
     $BackendsDir = Join-Path $LoadoutRoot "backends"
     $ConfigsDir  = Join-Path $LoadoutRoot "configs"
-    New-Item -ItemType Directory -Force -Path $FeaturesDir, $BackendsDir, $ConfigsDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $ComponentsDir, $BackendsDir, $ConfigsDir | Out-Null
 
-    # Copy repo-bundled features and backends first.
-    Copy-Item "features\*" $FeaturesDir -Recurse -Force
+    # Copy repo-bundled components and backends first.
+    Copy-Item "components\*" $ComponentsDir -Recurse -Force
     Copy-Item "backends\*" $BackendsDir -Recurse -Force
 
-    # Merge fixture backends/features on top (register as local/dummy-*).
+    # Merge fixture backends/components on top (register as local/dummy-*).
     Copy-Item "tests\fixtures\backends\*" $BackendsDir -Recurse -Force
-    Copy-Item "tests\fixtures\features\*" $FeaturesDir -Recurse -Force
+    Copy-Item "tests\fixtures\components\*" $ComponentsDir -Recurse -Force
     Copy-Item "tests\fixtures\configs\*"  $ConfigsDir  -Force
 
     Write-Host "    Config root : $LoadoutRoot" -ForegroundColor Gray

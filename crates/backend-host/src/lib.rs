@@ -59,7 +59,7 @@ pub enum ResourceState {
 pub enum BackendError {
     /// The backend registry does not contain an entry for this ID.
     ///
-    /// Should be unreachable if FeatureCompiler validated backends correctly.
+    /// Should be unreachable if ComponentCompiler validated backends correctly.
     #[error("unknown backend: {id}")]
     UnknownBackend { id: String },
 

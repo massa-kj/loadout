@@ -50,12 +50,12 @@ Documentation must be split clearly to avoid duplication and maintain clarity.
 
 **External contracts (language-agnostic):**
 - YAML/JSON schema **meanings** (e.g., "what does `mode: declarative` mean?")
-- Invariants (e.g., "state must not contain duplicate `fs.path` across features")
-- Safety rules (e.g., "features must not write to `state.json` directly")
+- Invariants (e.g., "state must not contain duplicate `fs.path` across components")
+- Safety rules (e.g., "components must not write to `state.json` directly")
 - Forbidden operations (e.g., "planner must not execute backends")
 - Resolution order (e.g., "profile override > default_backend > abort")
 - Decision tables (e.g., planner classification rules)
-- Plugin interface protocols (e.g., JSON stdin/stdout for backends, env vars for features)
+- Plugin interface protocols (e.g., JSON stdin/stdout for backends, env vars for components)
 
 **These must remain in `docs/` because:**
 - External users (plugin authors, profile writers) need them without reading Rust code
@@ -99,7 +99,7 @@ See implementation: `crates/planner/src/lib.rs` (`classify` function).
 Rust doc should reference `docs/` for **external contract**:
 
 ```rust
-/// Classify a feature based on desired vs. current state.
+/// Classify a component based on desired vs. current state.
 ///
 /// Classification rules are defined in `docs/specs/algorithms/planner.md`.
 pub fn classify(...) -> Classification { ... }
@@ -125,9 +125,9 @@ pub fn classify(...) -> Classification { ... }
 **`docs/specs/data/state.md` must define:**
 - "State is the single authority for what is installed"
 - "`version` must be `3`"
-- "`features` must be an object"
-- "Within a feature, `resource.id` must be unique"
-- "Across features, `fs.path` must be unique"
+- "`components` must be an object"
+- "Within a component, `resource.id` must be unique"
+- "Across components, `fs.path` must be unique"
 - "Core must validate all invariants before execution"
 - JSON schema structure (field names, types)
 
@@ -138,7 +138,7 @@ pub fn classify(...) -> Classification { ... }
 /// Schema and invariants: `docs/specs/data/state.md`.
 pub struct State {
     pub version: u32,
-    pub features: HashMap<CanonicalFeatureId, FeatureState>,
+    pub components: HashMap<CanonicalFeatureId, FeatureState>,
 }
 ```
 
@@ -164,7 +164,7 @@ External APIs are documented in `docs/specs/`. Breaking changes require:
 Examples of external API breakage:
 - Changing YAML/JSON field names visible to users
 - Changing invariants in state schema
-- Changing plugin interface protocol (backend JSON schema, feature env vars)
+- Changing plugin interface protocol (backend JSON schema, component env vars)
 - Changing resolution order or decision table logic
 
 ### Internal APIs (Rust)
@@ -192,9 +192,9 @@ Internal APIs may change freely; they must not be referenced across public bound
 
 ## Maintenance Workflow
 
-### When Adding a New Feature Module
+### When Adding a New Component Module
 
-Update `guides/features.md` if new patterns emerge.
+Update `guides/components.md` if new patterns emerge.
 
 No change to core docs required unless:
 - New resource kind is introduced → update `docs/specs/data/state.md` and `docs/specs/data/desired_resource_graph.md`

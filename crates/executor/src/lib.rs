@@ -9,7 +9,7 @@
 //!   propagate from earlier actions (e.g. brew) to later ones (e.g. npm)
 //!
 //! Error strategy:
-//! - Resource failure  → `Event::ResourceFailed` + feature aborts → `Event::FeatureFailed` → continue
+//! - Resource failure  → `Event::ResourceFailed` + feature aborts → `Event::ComponentFailed` → continue
 //! - State commit fail → `ExecutorError` (fatal, stops execution)
 //! - Required contributor fail → `ExecutorError` (fatal, stops execution)
 //! - Optional contributor fail → `Event::ContributorWarning`, execution continues
@@ -26,14 +26,14 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use backend_host::{BackendError, BackendRegistry};
-use feature_host::Dirs;
+use component_host::Dirs;
+use model::component_index::{ComponentIndex, ComponentMode};
 use model::desired_resource_graph::{DesiredResource, DesiredResourceGraph, DesiredResourceKind};
 use model::env::{ExecutionEnvContext, ExecutionEnvDelta, ExecutionEnvPlan};
-use model::feature_index::{FeatureIndex, FeatureMode};
-use model::id::CanonicalFeatureId;
+use model::id::CanonicalComponentId;
 use model::plan::{Operation, Plan, StrengthenDetails};
 use model::state::{
-    FeatureState, FsDetails, FsEntryType, FsOp, PackageDetails, Resource, ResourceKind,
+    ComponentState, FsDetails, FsEntryType, FsOp, PackageDetails, Resource, ResourceKind,
     RuntimeDetails, State,
 };
 use platform::Platform;
@@ -180,14 +180,14 @@ impl ContributorRegistry {
 #[derive(Debug, Clone)]
 pub enum Event {
     /// A feature is about to be processed.
-    FeatureStart { id: String },
+    ComponentStart { id: String },
     /// A feature was processed successfully.
-    FeatureDone { id: String },
+    ComponentDone { id: String },
     /// A feature failed; execution continues to the next feature.
-    FeatureFailed { id: String, error: String },
+    ComponentFailed { id: String, error: String },
     /// A single resource failed within a feature.
     ResourceFailed {
-        feature_id: String,
+        component_id: String,
         resource_id: String,
         error: String,
     },
@@ -209,7 +209,7 @@ pub enum ExecutorError {
     /// A feature referenced in the plan is absent from the feature index.
     /// This is a programming error: plan and index must be consistent.
     #[error("feature not found in index: {id}")]
-    FeatureNotInIndex { id: String },
+    ComponentNotInIndex { id: String },
 
     /// A resource in the desired graph was not found for a feature that needs it.
     #[error("desired resources not found for feature: {id}")]
@@ -222,14 +222,14 @@ pub enum ExecutorError {
 
 /// Result of a feature that executed successfully.
 #[derive(Debug, Clone)]
-pub struct ExecutedFeature {
+pub struct ExecutedComponent {
     pub id: String,
     pub operation: String,
 }
 
 /// Result of a feature that failed.
 #[derive(Debug, Clone)]
-pub struct FailedFeature {
+pub struct FailedComponent {
     pub id: String,
     pub operation: String,
     pub error: String,
@@ -242,7 +242,7 @@ pub struct FailedFeature {
 #[derive(Debug, Clone)]
 pub struct EnvArtifact {
     /// Feature (action) that generated this record.
-    pub feature_id: String,
+    pub component_id: String,
     /// Phase: "pre" (before action) or "post" (after action).
     pub phase: String,
     /// Contributor key that was evaluated.
@@ -256,8 +256,8 @@ pub struct EnvArtifact {
 /// Summary report produced by `execute()`.
 #[derive(Debug, Default)]
 pub struct ExecutorReport {
-    pub executed: Vec<ExecutedFeature>,
-    pub failed: Vec<FailedFeature>,
+    pub executed: Vec<ExecutedComponent>,
+    pub failed: Vec<FailedComponent>,
     /// Env contributor invocation records for debugging (ephemeral, not in state).
     pub env_artifacts: Vec<EnvArtifact>,
     /// Final env context snapshot after all actions completed.
@@ -271,7 +271,7 @@ pub struct ExecutorReport {
 pub struct ExecutionContext<'a> {
     pub plan: &'a Plan,
     pub graph: &'a DesiredResourceGraph,
-    pub index: &'a FeatureIndex,
+    pub index: &'a ComponentIndex,
     pub registry: &'a BackendRegistry,
     pub contributors: &'a ContributorRegistry,
     pub dirs: &'a Dirs,
@@ -300,13 +300,13 @@ pub fn execute(
     let mut env_ctx = ExecutionEnvContext::from_process_env();
 
     for action in &ctx.plan.actions {
-        let id_str = action.feature.as_str().to_string();
-        on_event(Event::FeatureStart { id: id_str.clone() });
+        let id_str = action.component.as_str().to_string();
+        on_event(Event::ComponentStart { id: id_str.clone() });
 
         let result = execute_action(
             ctx,
             state,
-            &action.feature,
+            &action.component,
             &action.operation,
             &action.details,
             &mut env_ctx,
@@ -322,34 +322,34 @@ pub fn execute(
                         reason: e.to_string(),
                     }
                 })?;
-                on_event(Event::FeatureDone { id: id_str.clone() });
-                report.executed.push(ExecutedFeature {
+                on_event(Event::ComponentDone { id: id_str.clone() });
+                report.executed.push(ExecutedComponent {
                     id: id_str,
                     operation: format!("{:?}", action.operation),
                 });
             }
-            Err(FeatureError::Resource { resource_id, error }) => {
+            Err(ComponentError::Resource { resource_id, error }) => {
                 on_event(Event::ResourceFailed {
-                    feature_id: id_str.clone(),
+                    component_id: id_str.clone(),
                     resource_id,
                     error: error.clone(),
                 });
-                on_event(Event::FeatureFailed {
+                on_event(Event::ComponentFailed {
                     id: id_str.clone(),
                     error: error.clone(),
                 });
-                report.failed.push(FailedFeature {
+                report.failed.push(FailedComponent {
                     id: id_str,
                     operation: format!("{:?}", action.operation),
                     error,
                 });
             }
-            Err(FeatureError::Feature { error }) => {
-                on_event(Event::FeatureFailed {
+            Err(ComponentError::Component { error }) => {
+                on_event(Event::ComponentFailed {
                     id: id_str.clone(),
                     error: error.clone(),
                 });
-                report.failed.push(FailedFeature {
+                report.failed.push(FailedComponent {
                     id: id_str,
                     operation: format!("{:?}", action.operation),
                     error,
@@ -367,14 +367,14 @@ pub fn execute(
 // ---------------------------------------------------------------------------
 
 /// Non-fatal per-feature error variants.
-enum FeatureError {
+enum ComponentError {
     Resource { resource_id: String, error: String },
-    Feature { error: String },
+    Component { error: String },
 }
 
-impl From<feature_host::FeatureHostError> for FeatureError {
-    fn from(e: feature_host::FeatureHostError) -> Self {
-        FeatureError::Feature {
+impl From<component_host::ComponentHostError> for ComponentError {
+    fn from(e: component_host::ComponentHostError) -> Self {
+        ComponentError::Component {
             error: e.to_string(),
         }
     }
@@ -388,95 +388,41 @@ impl From<feature_host::FeatureHostError> for FeatureError {
 fn execute_action(
     ctx: &ExecutionContext<'_>,
     state: &mut State,
-    feature_id: &CanonicalFeatureId,
+    component_id: &CanonicalComponentId,
     op: &Operation,
     details: &Option<model::plan::ActionDetails>,
     env_ctx: &mut ExecutionEnvContext,
     artifacts: &mut Vec<EnvArtifact>,
     on_event: &mut dyn FnMut(Event),
-) -> Result<(), FeatureError> {
-    let id_str = feature_id.as_str();
+) -> Result<(), ComponentError> {
+    let id_str = component_id.as_str();
 
-    let meta = ctx.index.features.get(id_str).ok_or_else(|| {
+    let meta = ctx.index.components.get(id_str).ok_or_else(|| {
         // This is a programming error but we surface it as a feature-level failure
         // so execution can continue. The caller will see FeatureFailed.
-        FeatureError::Feature {
-            error: format!("feature not found in index: {id_str}"),
+        ComponentError::Component {
+            error: format!("component not found in index: {id_str}"),
         }
     })?;
 
     match op {
-        Operation::Create => match meta.mode {
-            FeatureMode::Script => {
-                feature_host::run_install(meta, feature_id, ctx.dirs, ctx.platform)
-                    .map_err(FeatureError::from)?;
-                // Script features are recorded with empty resources.
-                state
-                    .features
-                    .insert(id_str.to_string(), FeatureState { resources: vec![] });
-            }
-            FeatureMode::Declarative => {
-                let desired =
-                    ctx.graph
-                        .features
-                        .get(id_str)
-                        .ok_or_else(|| FeatureError::Feature {
-                            error: format!("desired resources not found for: {id_str}"),
-                        })?;
-
-                let resources = apply_resources(
-                    ctx,
-                    id_str,
-                    &desired.resources,
-                    env_ctx,
-                    artifacts,
-                    on_event,
-                )?;
-                state
-                    .features
-                    .insert(id_str.to_string(), FeatureState { resources });
-            }
-        },
-
-        Operation::Destroy => {
+        Operation::Create => {
             match meta.mode {
-                FeatureMode::Script => {
-                    feature_host::run_uninstall(meta, feature_id, ctx.dirs, ctx.platform)
-                        .map_err(FeatureError::from)?;
-                }
-                FeatureMode::Declarative => {
-                    // Remove resources using the backend recorded in state (authoritative).
-                    if let Some(feat_state) = state.features.get(id_str) {
-                        remove_state_resources(ctx, id_str, &feat_state.resources.clone())?;
-                    }
-                }
-            }
-            state.features.remove(id_str);
-        }
-
-        Operation::Replace => {
-            // Destroy old, then create new.
-            match meta.mode {
-                FeatureMode::Script => {
-                    feature_host::run_uninstall(meta, feature_id, ctx.dirs, ctx.platform)
-                        .map_err(FeatureError::from)?;
-                    feature_host::run_install(meta, feature_id, ctx.dirs, ctx.platform)
-                        .map_err(FeatureError::from)?;
+                ComponentMode::Script => {
+                    component_host::run_install(meta, component_id, ctx.dirs, ctx.platform)
+                        .map_err(ComponentError::from)?;
+                    // Script features are recorded with empty resources.
                     state
-                        .features
-                        .insert(id_str.to_string(), FeatureState { resources: vec![] });
+                        .components
+                        .insert(id_str.to_string(), ComponentState { resources: vec![] });
                 }
-                FeatureMode::Declarative => {
-                    if let Some(feat_state) = state.features.get(id_str) {
-                        remove_state_resources(ctx, id_str, &feat_state.resources.clone())?;
-                    }
-                    let desired =
-                        ctx.graph
-                            .features
-                            .get(id_str)
-                            .ok_or_else(|| FeatureError::Feature {
-                                error: format!("desired resources not found for: {id_str}"),
-                            })?;
+                ComponentMode::Declarative => {
+                    let desired = ctx.graph.components.get(id_str).ok_or_else(|| {
+                        ComponentError::Component {
+                            error: format!("desired resources not found for: {id_str}"),
+                        }
+                    })?;
+
                     let resources = apply_resources(
                         ctx,
                         id_str,
@@ -486,8 +432,60 @@ fn execute_action(
                         on_event,
                     )?;
                     state
-                        .features
-                        .insert(id_str.to_string(), FeatureState { resources });
+                        .components
+                        .insert(id_str.to_string(), ComponentState { resources });
+                }
+            }
+        }
+
+        Operation::Destroy => {
+            match meta.mode {
+                ComponentMode::Script => {
+                    component_host::run_uninstall(meta, component_id, ctx.dirs, ctx.platform)
+                        .map_err(ComponentError::from)?;
+                }
+                ComponentMode::Declarative => {
+                    // Remove resources using the backend recorded in state (authoritative).
+                    if let Some(comp_state) = state.components.get(id_str) {
+                        remove_state_resources(ctx, id_str, &comp_state.resources.clone())?;
+                    }
+                }
+            }
+            state.components.remove(id_str);
+        }
+
+        Operation::Replace => {
+            // Destroy old, then create new.
+            match meta.mode {
+                ComponentMode::Script => {
+                    component_host::run_uninstall(meta, component_id, ctx.dirs, ctx.platform)
+                        .map_err(ComponentError::from)?;
+                    component_host::run_install(meta, component_id, ctx.dirs, ctx.platform)
+                        .map_err(ComponentError::from)?;
+                    state
+                        .components
+                        .insert(id_str.to_string(), ComponentState { resources: vec![] });
+                }
+                ComponentMode::Declarative => {
+                    if let Some(comp_state) = state.components.get(id_str) {
+                        remove_state_resources(ctx, id_str, &comp_state.resources.clone())?;
+                    }
+                    let desired = ctx.graph.components.get(id_str).ok_or_else(|| {
+                        ComponentError::Component {
+                            error: format!("desired resources not found for: {id_str}"),
+                        }
+                    })?;
+                    let resources = apply_resources(
+                        ctx,
+                        id_str,
+                        &desired.resources,
+                        env_ctx,
+                        artifacts,
+                        on_event,
+                    )?;
+                    state
+                        .components
+                        .insert(id_str.to_string(), ComponentState { resources });
                 }
             }
         }
@@ -495,23 +493,23 @@ fn execute_action(
         Operation::ReplaceBackend => {
             // Remove via old backend (from state), apply via new backend (from graph).
             // Script features don't have a backend concept; treat as Replace.
-            if meta.mode == FeatureMode::Script {
-                feature_host::run_uninstall(meta, feature_id, ctx.dirs, ctx.platform)
-                    .map_err(FeatureError::from)?;
-                feature_host::run_install(meta, feature_id, ctx.dirs, ctx.platform)
-                    .map_err(FeatureError::from)?;
+            if meta.mode == ComponentMode::Script {
+                component_host::run_uninstall(meta, component_id, ctx.dirs, ctx.platform)
+                    .map_err(ComponentError::from)?;
+                component_host::run_install(meta, component_id, ctx.dirs, ctx.platform)
+                    .map_err(ComponentError::from)?;
                 state
-                    .features
-                    .insert(id_str.to_string(), FeatureState { resources: vec![] });
+                    .components
+                    .insert(id_str.to_string(), ComponentState { resources: vec![] });
             } else {
-                if let Some(feat_state) = state.features.get(id_str) {
-                    remove_state_resources(ctx, id_str, &feat_state.resources.clone())?;
+                if let Some(comp_state) = state.components.get(id_str) {
+                    remove_state_resources(ctx, id_str, &comp_state.resources.clone())?;
                 }
                 let desired =
                     ctx.graph
-                        .features
+                        .components
                         .get(id_str)
-                        .ok_or_else(|| FeatureError::Feature {
+                        .ok_or_else(|| ComponentError::Component {
                             error: format!("desired resources not found for: {id_str}"),
                         })?;
                 let resources = apply_resources(
@@ -523,15 +521,15 @@ fn execute_action(
                     on_event,
                 )?;
                 state
-                    .features
-                    .insert(id_str.to_string(), FeatureState { resources });
+                    .components
+                    .insert(id_str.to_string(), ComponentState { resources });
             }
         }
 
         Operation::Strengthen => {
             // Apply only the add_resources listed in the plan details.
             // Script features do not have strengthen; treat as noop with warning.
-            if meta.mode == FeatureMode::Script {
+            if meta.mode == ComponentMode::Script {
                 return Ok(());
             }
 
@@ -540,19 +538,19 @@ fn execute_action(
                     add_resources,
                 })) => add_resources,
                 _ => {
-                    return Err(FeatureError::Feature {
+                    return Err(ComponentError::Component {
                         error: "strengthen action missing add_resources details".to_string(),
                     });
                 }
             };
 
-            let desired = ctx
-                .graph
-                .features
-                .get(id_str)
-                .ok_or_else(|| FeatureError::Feature {
-                    error: format!("desired resources not found for: {id_str}"),
-                })?;
+            let desired =
+                ctx.graph
+                    .components
+                    .get(id_str)
+                    .ok_or_else(|| ComponentError::Component {
+                        error: format!("desired resources not found for: {id_str}"),
+                    })?;
 
             // Filter desired resources to only those referenced in add_resources.
             let to_add: Vec<&DesiredResource> = desired
@@ -571,11 +569,11 @@ fn execute_action(
             )?;
 
             // Merge new resources into existing state.
-            let feat_state = state
-                .features
+            let comp_state = state
+                .components
                 .entry(id_str.to_string())
-                .or_insert_with(|| FeatureState { resources: vec![] });
-            feat_state.resources.extend(new_resources);
+                .or_insert_with(|| ComponentState { resources: vec![] });
+            comp_state.resources.extend(new_resources);
         }
     }
 
@@ -587,24 +585,24 @@ fn execute_action(
 // ---------------------------------------------------------------------------
 
 /// Apply all desired resources for a declarative feature.
-/// Returns the resulting state resources, or a FeatureError on the first failure.
+/// Returns the resulting state resources, or a ComponentError on the first failure.
 fn apply_resources(
     ctx: &ExecutionContext<'_>,
-    feature_id: &str,
+    component_id: &str,
     desired: &[DesiredResource],
     env_ctx: &mut ExecutionEnvContext,
     artifacts: &mut Vec<EnvArtifact>,
     on_event: &mut dyn FnMut(Event),
-) -> Result<Vec<Resource>, FeatureError> {
+) -> Result<Vec<Resource>, ComponentError> {
     let mut resources = Vec::with_capacity(desired.len());
 
     for dr in desired {
-        match apply_one_resource(ctx, feature_id, dr, env_ctx, artifacts, on_event) {
+        match apply_one_resource(ctx, component_id, dr, env_ctx, artifacts, on_event) {
             Ok(state_resource) => resources.push(state_resource),
             Err(e) => {
-                return Err(FeatureError::Resource {
+                return Err(ComponentError::Resource {
                     resource_id: dr.id.clone(),
-                    error: format!("[{feature_id}] resource '{}' failed: {e}", dr.id),
+                    error: format!("[{component_id}] resource '{}' failed: {e}", dr.id),
                 });
             }
         }
@@ -622,7 +620,7 @@ fn apply_resources(
 /// signalled by [`BackendApplyResult::post_contributors`] are evaluated.
 fn apply_one_resource(
     ctx: &ExecutionContext<'_>,
-    feature_id: &str,
+    component_id: &str,
     dr: &DesiredResource,
     env_ctx: &mut ExecutionEnvContext,
     artifacts: &mut Vec<EnvArtifact>,
@@ -646,7 +644,7 @@ fn apply_one_resource(
                         delta,
                         "pre",
                         backend_key,
-                        feature_id,
+                        component_id,
                         env_ctx,
                         *ctx.platform,
                         artifacts,
@@ -680,7 +678,7 @@ fn apply_one_resource(
                         delta,
                         "post",
                         backend_key,
-                        feature_id,
+                        component_id,
                         env_ctx,
                         *ctx.platform,
                         artifacts,
@@ -724,7 +722,7 @@ fn apply_one_resource(
                         delta,
                         "pre",
                         backend_key,
-                        feature_id,
+                        component_id,
                         env_ctx,
                         *ctx.platform,
                         artifacts,
@@ -756,7 +754,7 @@ fn apply_one_resource(
                         delta,
                         "post",
                         backend_key,
-                        feature_id,
+                        component_id,
                         env_ctx,
                         *ctx.platform,
                         artifacts,
@@ -827,7 +825,7 @@ fn merge_backend_delta(
     delta: model::env::ExecutionEnvDelta,
     phase: &str,
     backend_key: &str,
-    feature_id: &str,
+    component_id: &str,
     env_ctx: &mut ExecutionEnvContext,
     platform: Platform,
     artifacts: &mut Vec<EnvArtifact>,
@@ -853,7 +851,7 @@ fn merge_backend_delta(
         })
         .collect();
     artifacts.push(EnvArtifact {
-        feature_id: feature_id.to_string(),
+        component_id: component_id.to_string(),
         phase: phase.to_string(),
         contributor_key: backend_key.to_string(),
         delta,
@@ -879,7 +877,7 @@ fn evaluate_contributor(
     key: &str,
     contributor: &dyn ExecutionEnvContributor,
     phase: &str,
-    feature_id: &str,
+    component_id: &str,
     env_ctx: &mut ExecutionEnvContext,
     platform: Platform,
     artifacts: &mut Vec<EnvArtifact>,
@@ -913,7 +911,7 @@ fn evaluate_contributor(
                 })
                 .collect();
             artifacts.push(EnvArtifact {
-                feature_id: feature_id.to_string(),
+                component_id: component_id.to_string(),
                 phase: phase.to_string(),
                 contributor_key: key.to_string(),
                 delta,
@@ -937,16 +935,16 @@ fn evaluate_contributor(
 /// Remove state resources using the backend recorded at install time (authoritative).
 fn remove_state_resources(
     ctx: &ExecutionContext<'_>,
-    feature_id: &str,
+    component_id: &str,
     resources: &[Resource],
-) -> Result<(), FeatureError> {
+) -> Result<(), ComponentError> {
     for res in resources {
         match remove_one_state_resource(ctx, res) {
             Ok(()) => {}
             Err(e) => {
-                return Err(FeatureError::Resource {
+                return Err(ComponentError::Resource {
                     resource_id: res.id.clone(),
-                    error: format!("[{feature_id}] resource '{}' remove failed: {e}", res.id),
+                    error: format!("[{component_id}] resource '{}' remove failed: {e}", res.id),
                 });
             }
         }
@@ -1099,14 +1097,14 @@ mod tests {
     use super::*;
 
     use backend_host::{Backend, BackendError, BackendRegistry};
+    use model::component_index::{
+        ComponentIndex, ComponentMeta, ComponentMode, DepSpec, COMPONENT_INDEX_SCHEMA_VERSION,
+    };
     use model::desired_resource_graph::{
-        DesiredResource, DesiredResourceGraph, DesiredResourceKind, FeatureDesiredResources,
+        ComponentDesiredResources, DesiredResource, DesiredResourceGraph, DesiredResourceKind,
         DESIRED_RESOURCE_GRAPH_SCHEMA_VERSION,
     };
-    use model::feature_index::{
-        DepSpec, FeatureIndex, FeatureMeta, FeatureMode, FEATURE_INDEX_SCHEMA_VERSION,
-    };
-    use model::id::{CanonicalBackendId, CanonicalFeatureId};
+    use model::id::{CanonicalBackendId, CanonicalComponentId};
     use model::plan::{ActionDetails, PlanAction, PlanSummary, StrengthenDetails};
     use model::state::State;
     use platform::Dirs;
@@ -1165,14 +1163,14 @@ mod tests {
         CanonicalBackendId::new(s).unwrap()
     }
 
-    fn feature_id(s: &str) -> CanonicalFeatureId {
-        CanonicalFeatureId::new(s).unwrap()
+    fn component_id(s: &str) -> CanonicalComponentId {
+        CanonicalComponentId::new(s).unwrap()
     }
 
-    fn declarative_meta() -> FeatureMeta {
-        FeatureMeta {
+    fn declarative_meta() -> ComponentMeta {
+        ComponentMeta {
             spec_version: 1,
-            mode: FeatureMode::Declarative,
+            mode: ComponentMode::Declarative,
             description: None,
             source_dir: "/tmp".to_string(),
             dep: DepSpec::default(),
@@ -1180,10 +1178,10 @@ mod tests {
         }
     }
 
-    fn script_meta(source_dir: &str) -> FeatureMeta {
-        FeatureMeta {
+    fn script_meta(source_dir: &str) -> ComponentMeta {
+        ComponentMeta {
             spec_version: 1,
-            mode: FeatureMode::Script,
+            mode: ComponentMode::Script,
             description: None,
             source_dir: source_dir.to_string(),
             dep: DepSpec::default(),
@@ -1201,10 +1199,10 @@ mod tests {
         }
     }
 
-    fn make_index(entries: Vec<(&str, FeatureMeta)>) -> FeatureIndex {
-        FeatureIndex {
-            schema_version: FEATURE_INDEX_SCHEMA_VERSION,
-            features: entries
+    fn make_index(entries: Vec<(&str, ComponentMeta)>) -> ComponentIndex {
+        ComponentIndex {
+            schema_version: COMPONENT_INDEX_SCHEMA_VERSION,
+            components: entries
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v))
                 .collect(),
@@ -1214,9 +1212,9 @@ mod tests {
     fn make_graph(entries: Vec<(&str, Vec<DesiredResource>)>) -> DesiredResourceGraph {
         DesiredResourceGraph {
             schema_version: DESIRED_RESOURCE_GRAPH_SCHEMA_VERSION,
-            features: entries
+            components: entries
                 .into_iter()
-                .map(|(k, v)| (k.to_string(), FeatureDesiredResources { resources: v }))
+                .map(|(k, v)| (k.to_string(), ComponentDesiredResources { resources: v }))
                 .collect(),
         }
     }
@@ -1230,9 +1228,9 @@ mod tests {
         }
     }
 
-    fn make_action(feature: &str, op: Operation) -> PlanAction {
+    fn make_action(component: &str, op: Operation) -> PlanAction {
         PlanAction {
-            feature: feature_id(feature),
+            component: component_id(component),
             operation: op,
             details: None,
         }
@@ -1259,21 +1257,21 @@ mod tests {
         let starts: Vec<_> = events
             .iter()
             .filter_map(|e| match e {
-                Event::FeatureStart { id } => Some(id.clone()),
+                Event::ComponentStart { id } => Some(id.clone()),
                 _ => None,
             })
             .collect();
         let dones: Vec<_> = events
             .iter()
             .filter_map(|e| match e {
-                Event::FeatureDone { id } => Some(id.clone()),
+                Event::ComponentDone { id } => Some(id.clone()),
                 _ => None,
             })
             .collect();
         let failed: Vec<_> = events
             .iter()
             .filter_map(|e| match e {
-                Event::FeatureFailed { id, .. } => Some(id.clone()),
+                Event::ComponentFailed { id, .. } => Some(id.clone()),
                 _ => None,
             })
             .collect();
@@ -1315,8 +1313,8 @@ mod tests {
 
         assert_eq!(report.executed.len(), 1);
         assert!(report.failed.is_empty());
-        assert!(state.features.contains_key("core/git"));
-        assert_eq!(state.features["core/git"].resources.len(), 1);
+        assert!(state.components.contains_key("core/git"));
+        assert_eq!(state.components["core/git"].resources.len(), 1);
         assert!(state_path.exists(), "state file should be committed");
 
         let (starts, dones, failed) = collect_events(&events);
@@ -1362,14 +1360,14 @@ mod tests {
         assert!(report.executed.is_empty());
         assert_eq!(report.failed.len(), 1);
         // State must not contain the feature.
-        assert!(!state.features.contains_key("core/git"));
+        assert!(!state.components.contains_key("core/git"));
 
         let resource_failed = events
             .iter()
             .any(|e| matches!(e, Event::ResourceFailed { .. }));
         let feature_failed = events
             .iter()
-            .any(|e| matches!(e, Event::FeatureFailed { .. }));
+            .any(|e| matches!(e, Event::ComponentFailed { .. }));
         assert!(resource_failed, "expected ResourceFailed event");
         assert!(feature_failed, "expected FeatureFailed event");
     }
@@ -1382,9 +1380,9 @@ mod tests {
 
         // Pre-populate state.
         let mut state = State::empty();
-        state.features.insert(
+        state.components.insert(
             "core/git".to_string(),
-            FeatureState {
+            ComponentState {
                 resources: vec![Resource {
                     id: "package:git".to_string(),
                     kind: ResourceKind::Package {
@@ -1420,8 +1418,8 @@ mod tests {
 
         assert_eq!(report.executed.len(), 1);
         assert!(
-            !state.features.contains_key("core/git"),
-            "feature must be removed from state"
+            !state.components.contains_key("core/git"),
+            "component must be removed from state"
         );
     }
 
@@ -1432,9 +1430,9 @@ mod tests {
         let state_path = tmp.path().join("state.json");
 
         let mut state = State::empty();
-        state.features.insert(
+        state.components.insert(
             "core/git".to_string(),
-            FeatureState {
+            ComponentState {
                 resources: vec![Resource {
                     id: "package:git".to_string(),
                     kind: ResourceKind::Package {
@@ -1472,12 +1470,12 @@ mod tests {
 
         assert!(report.failed.len() == 1);
         // State must still have the feature.
-        assert!(state.features.contains_key("core/git"));
+        assert!(state.components.contains_key("core/git"));
     }
 
     /// Multiple features: failed feature does not stop subsequent features.
     #[test]
-    fn failed_feature_does_not_stop_next_feature() {
+    fn failed_component_does_not_stop_next_component() {
         let tmp = tempfile::tempdir().unwrap();
         let state_path = tmp.path().join("state.json");
 
@@ -1523,8 +1521,8 @@ mod tests {
 
         assert_eq!(report.executed.len(), 1, "core/node should succeed");
         assert_eq!(report.failed.len(), 1, "core/git should fail");
-        assert!(state.features.contains_key("core/node"));
-        assert!(!state.features.contains_key("core/git"));
+        assert!(state.components.contains_key("core/node"));
+        assert!(!state.components.contains_key("core/git"));
     }
 
     /// Strengthen adds only the listed resources to existing state.
@@ -1535,9 +1533,9 @@ mod tests {
 
         // Start with one already-installed resource.
         let mut state = State::empty();
-        state.features.insert(
+        state.components.insert(
             "core/tools".to_string(),
-            FeatureState {
+            ComponentState {
                 resources: vec![Resource {
                     id: "package:git".to_string(),
                     kind: ResourceKind::Package {
@@ -1553,7 +1551,7 @@ mod tests {
 
         // Plan adds ripgrep via strengthen.
         let strengthen_action = PlanAction {
-            feature: feature_id("core/tools"),
+            component: component_id("core/tools"),
             operation: Operation::Strengthen,
             details: Some(ActionDetails::Strengthen(StrengthenDetails {
                 add_resources: vec![model::plan::ResourceRef {
@@ -1590,7 +1588,7 @@ mod tests {
         let report = execute(&ctx, &mut state, &mut |e| events.push(e)).unwrap();
 
         assert_eq!(report.executed.len(), 1);
-        let feat = &state.features["core/tools"];
+        let feat = &state.components["core/tools"];
         assert_eq!(
             feat.resources.len(),
             2,
@@ -1645,8 +1643,8 @@ mod tests {
         let report = execute(&ctx, &mut state, &mut |e| events.push(e)).unwrap();
 
         assert_eq!(report.executed.len(), 1);
-        assert!(state.features.contains_key("core/brew"));
-        assert!(state.features["core/brew"].resources.is_empty());
+        assert!(state.components.contains_key("core/brew"));
+        assert!(state.components["core/brew"].resources.is_empty());
     }
 
     /// Replace declarative: old resources removed, new resources applied.
@@ -1656,9 +1654,9 @@ mod tests {
         let state_path = tmp.path().join("state.json");
 
         let mut state = State::empty();
-        state.features.insert(
+        state.components.insert(
             "core/git".to_string(),
-            FeatureState {
+            ComponentState {
                 resources: vec![Resource {
                     id: "package:git".to_string(),
                     kind: ResourceKind::Package {
@@ -1697,7 +1695,7 @@ mod tests {
 
         assert_eq!(report.executed.len(), 1);
         // Backend should now be core/apt.
-        let feat = &state.features["core/git"];
+        let feat = &state.components["core/git"];
         match &feat.resources[0].kind {
             ResourceKind::Package { backend, .. } => {
                 assert_eq!(backend.as_str(), "core/apt");

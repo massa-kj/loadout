@@ -3,7 +3,7 @@
 # Used by: version_mixed scenario.
 
 profile:
-  features:
+  components:
     local:
       dummy-pkg: {}
       dummy-rt:

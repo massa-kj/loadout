@@ -1,13 +1,13 @@
 //! Lifecycle scenario — full multi-phase cycle: base → full → reapply → shrink → uninstall.
 //!
-//! Uses dummy backends and features; no network access required.
+//! Uses dummy backends and components; no network access required.
 
 use std::path::Path;
 
 use crate::assert::{
-    assert_feature_present, assert_features_empty, assert_no_packages_in_state, assert_path_exists,
-    assert_paths_removed, assert_state_unchanged, assert_state_valid, collect_fs_paths, load_state,
-    load_state_raw,
+    assert_component_present, assert_components_empty, assert_no_packages_in_state,
+    assert_path_exists, assert_paths_removed, assert_state_unchanged, assert_state_valid,
+    collect_fs_paths, load_state, load_state_raw,
 };
 use crate::context::Context;
 use crate::runner::loadout_apply;
@@ -25,8 +25,8 @@ pub fn run(ctx: &Context) -> Result<(), String> {
 
     let state = load_state(&ctx.state_file)?;
     assert_state_valid(&state)?;
-    assert_feature_present(&state, "local/dummy-pkg")?;
-    assert_feature_present(&state, "local/dummy-fs")?;
+    assert_component_present(&state, "local/dummy-pkg")?;
+    assert_component_present(&state, "local/dummy-fs")?;
 
     // ── Phase 2: expand to full profile ──────────────────────────────────────
     println!("==> Phase 2: expand to full profile");
@@ -34,8 +34,8 @@ pub fn run(ctx: &Context) -> Result<(), String> {
 
     let state = load_state(&ctx.state_file)?;
     assert_state_valid(&state)?;
-    // full profile adds local/dummy-rt on top of base features
-    assert_feature_present(&state, "local/dummy-rt")?;
+    // full profile adds local/dummy-rt on top of base components
+    assert_component_present(&state, "local/dummy-rt")?;
 
     println!("==> Snapshotting full state");
     let snapshot_full = load_state_raw(&ctx.state_file)?;
@@ -62,20 +62,20 @@ pub fn run(ctx: &Context) -> Result<(), String> {
 
     let state = load_state(&ctx.state_file)?;
     assert_state_valid(&state)?;
-    // base features must be present
-    assert_feature_present(&state, "local/dummy-pkg")?;
-    assert_feature_present(&state, "local/dummy-fs")?;
+    // base components must be present
+    assert_component_present(&state, "local/dummy-pkg")?;
+    assert_component_present(&state, "local/dummy-fs")?;
 
-    // full-only feature must have been removed
+    // full-only component must have been removed
     let unexpected: Vec<&str> = state
-        .features
+        .components
         .keys()
         .map(String::as_str)
         .filter(|k| *k != "local/dummy-pkg" && *k != "local/dummy-fs")
         .collect();
     if !unexpected.is_empty() {
         return Err(format!(
-            "unexpected features remain after profile shrink: {:?}",
+            "unexpected components remain after profile shrink: {:?}",
             unexpected
         ));
     }
@@ -86,7 +86,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
 
     let state = load_state(&ctx.state_file)?;
     assert_state_valid(&state)?;
-    assert_features_empty(&state)?;
+    assert_components_empty(&state)?;
     assert_paths_removed(&tracked_files)?;
     assert_path_exists(sentinel)?;
     assert_no_packages_in_state(&state)?;

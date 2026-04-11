@@ -4,7 +4,7 @@ use app::ExecutorReport;
 
 /// Print the apply execution report.
 ///
-/// Returns `true` if all features succeeded, `false` if any failed.
+/// Returns `true` if all components succeeded, `false` if any failed.
 pub fn print_apply_report(report: &ExecutorReport) -> bool {
     println!();
     if report.failed.is_empty() {

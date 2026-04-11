@@ -20,7 +20,7 @@
     - uninstall:       Tracked files removed; untracked files preserved
     - version-install: Version recorded in state after install
     - version-upgrade: Version mismatch triggers reinstall; state updated
-    - version-mixed:   Versioned and unversioned features coexist correctly
+    - version-mixed:   Versioned and unversioned components coexist correctly
     - shell:           Open an interactive Sandbox session (no scenario)
     - clean:           Remove generated .wsb files, logs, and release binaries
 

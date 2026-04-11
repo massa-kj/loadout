@@ -11,7 +11,7 @@
 //!
 //! ```yaml
 //! profile:
-//!   features:
+//!   components:
 //!     core:
 //!       git: {}
 //!     local:
@@ -30,18 +30,18 @@
 //!
 //! bundles:
 //!   base:
-//!     features:
+//!     components:
 //!       core:
 //!         git: {}
 //!   work:
-//!     features:
+//!     components:
 //!       dev:
 //!         terraform: {}
 //!
 //! profile:
-//!   features:
+//!   components:
 //!     local:
-//!       nvim: {}      # profile.features overrides all bundles
+//!       nvim: {}      # profile.components overrides all bundles
 //! ```
 //!
 //! After expansion and normalization, all feature keys are canonical `source_id/name`.
@@ -55,8 +55,8 @@
 
 pub mod write;
 pub use write::{
-    add_feature, create_config, raw_set, raw_show, raw_unset, remove_feature,
-    rewrite_backend_source, rewrite_feature_source,
+    add_component, create_config, raw_set, raw_show, raw_unset, remove_component,
+    rewrite_backend_source, rewrite_component_source,
 };
 
 use std::collections::{HashMap, HashSet};
@@ -65,7 +65,7 @@ use std::path::Path;
 use serde::Deserialize;
 
 pub use model::{
-    profile::{Profile, ProfileFeatureConfig},
+    profile::{Profile, ProfileComponentConfig},
     sources::{
         AllowList, AllowSpec, DetailedAllow, SourceEntry, SourceLockEntry, SourceRef, SourceType,
         SourcesLock, SourcesSpec, WildcardAll,
@@ -96,23 +96,23 @@ pub enum ConfigError {
 // ─── Raw profile types (config-crate-local) ─────────────────────────────────
 
 /// Raw per-feature config as parsed from YAML (grouping syntax inner value).
-/// Mirrors `ProfileFeatureConfig` but is local to this crate.
+/// Mirrors `ProfileComponentConfig` but is local to this crate.
 #[derive(Deserialize, Default, Clone)]
-struct RawFeatureConfig {
+struct RawComponentConfig {
     #[serde(default)]
     version: Option<String>,
 }
 
 /// Grouped feature map: `source_id → (feature_name → config)`.
 /// This is the only accepted input shape; bare names and canonical direct form are rejected.
-type GroupedFeatures = HashMap<String, HashMap<String, RawFeatureConfig>>;
+type GroupedComponents = HashMap<String, HashMap<String, RawComponentConfig>>;
 
 /// Raw profile as read from a standalone profile YAML file.
 /// `features` uses the grouped syntax.
 #[derive(Deserialize)]
 struct RawProfile {
     #[serde(default)]
-    features: GroupedFeatures,
+    components: GroupedComponents,
 }
 
 // ─── Raw bundle types (config-crate-local) ──────────────────────────────────
@@ -130,7 +130,7 @@ struct RawBundleRef {
 #[derive(Deserialize)]
 struct RawBundle {
     #[serde(default)]
-    features: GroupedFeatures,
+    components: GroupedComponents,
 }
 
 /// `bundles:` section in config.yaml — named bundle definitions.
@@ -140,7 +140,7 @@ type RawBundlesMap = HashMap<String, RawBundle>;
 
 /// Expand grouped features into a flat canonical map.
 ///
-/// `{source_id: {name: config}}` → `{"source_id/name": ProfileFeatureConfig}`
+/// `{source_id: {name: config}}` → `{"source_id/name": ProfileComponentConfig}`
 ///
 /// Validates:
 /// - `source_id` must not be empty
@@ -149,10 +149,10 @@ type RawBundlesMap = HashMap<String, RawBundle>;
 ///
 /// Does NOT verify that `source_id` exists in the source registry;
 /// that check happens later at `SourceRegistry` construction.
-fn expand_grouped_features(
-    grouped: GroupedFeatures,
-) -> Result<HashMap<String, ProfileFeatureConfig>, ConfigError> {
-    let mut out: HashMap<String, ProfileFeatureConfig> = HashMap::new();
+fn expand_grouped_components(
+    grouped: GroupedComponents,
+) -> Result<HashMap<String, ProfileComponentConfig>, ConfigError> {
+    let mut out: HashMap<String, ProfileComponentConfig> = HashMap::new();
 
     for (source_id, names) in grouped {
         if source_id.is_empty() {
@@ -174,7 +174,7 @@ fn expand_grouped_features(
             }
             out.insert(
                 canonical,
-                ProfileFeatureConfig {
+                ProfileComponentConfig {
                     version: cfg.version,
                 },
             );
@@ -186,13 +186,13 @@ fn expand_grouped_features(
 
 /// Merge bundles in `use` list order (last entry wins), then overlay profile features.
 ///
-/// Returns merged grouped features ready for `expand_grouped_features`.
-/// Priority (lowest → highest): bundles[0], bundles[1], …, profile.features.
+/// Returns merged grouped features ready for `expand_grouped_components`.
+/// Priority (lowest → highest): bundles[0], bundles[1], …, profile.components.
 fn expand_bundles(
     bundle_ref: &RawBundleRef,
     bundles: &RawBundlesMap,
-    profile_features: GroupedFeatures,
-) -> Result<GroupedFeatures, ConfigError> {
+    profile_components: GroupedComponents,
+) -> Result<GroupedComponents, ConfigError> {
     // Validate: all referenced bundle names must be defined.
     for name in &bundle_ref.use_list {
         if !bundles.contains_key(name) {
@@ -203,10 +203,10 @@ fn expand_bundles(
     }
 
     // Merge: iterate use list in order; last bundle wins per feature.
-    let mut merged: GroupedFeatures = HashMap::new();
+    let mut merged: GroupedComponents = HashMap::new();
     for name in &bundle_ref.use_list {
         let bundle = &bundles[name];
-        for (source_id, names) in &bundle.features {
+        for (source_id, names) in &bundle.components {
             let source_entry = merged.entry(source_id.clone()).or_default();
             for (feat_name, cfg) in names {
                 // Later bundle overwrites earlier bundle for same feature.
@@ -215,8 +215,8 @@ fn expand_bundles(
         }
     }
 
-    // Overlay: profile.features overwrites all bundle-merged features.
-    for (source_id, names) in profile_features {
+    // Overlay: profile.components overwrites all bundle-merged features.
+    for (source_id, names) in profile_components {
         let source_entry = merged.entry(source_id).or_default();
         for (feat_name, cfg) in names {
             source_entry.insert(feat_name, cfg);
@@ -240,8 +240,8 @@ fn expand_bundles(
 /// ```
 pub fn load_profile(path: &Path) -> Result<Profile, ConfigError> {
     let raw: RawProfile = io::load_yaml(path)?;
-    let flat = expand_grouped_features(raw.features)?;
-    Ok(Profile { features: flat })
+    let flat = expand_grouped_components(raw.components)?;
+    Ok(Profile { components: flat })
 }
 
 // ─── Strategy ───────────────────────────────────────────────────────────────
@@ -313,12 +313,12 @@ fn validate_backend_strategy_field(field: &str, value: Option<&str>) -> Result<(
 ///
 /// bundles:
 ///   base:
-///     features:
+///     components:
 ///       core:
 ///         git: {}
 ///
 /// profile:
-///   features:
+///   components:
 ///     local:
 ///       nvim: {}
 ///
@@ -350,11 +350,11 @@ pub fn load_config(path: &Path) -> Result<(Profile, Strategy), ConfigError> {
     })?;
 
     // Bundle expansion: merge bundles in use-list order (last wins), then overlay profile.
-    let merged = expand_bundles(&raw.bundle, &raw.bundles, raw_profile.features)?;
+    let merged = expand_bundles(&raw.bundle, &raw.bundles, raw_profile.components)?;
 
     // Normalize grouped features to canonical flat map.
-    let flat = expand_grouped_features(merged)?;
-    let profile = Profile { features: flat };
+    let flat = expand_grouped_components(merged)?;
+    let profile = Profile { components: flat };
 
     // strategy is optional; absent → Strategy::default().
     let strategy = match raw.strategy {
@@ -537,12 +537,12 @@ fn validate_and_resolve_sources(
 
         // Validate allow-list names if Detailed (applies to both source types).
         if let Some(AllowSpec::Detailed(ref detail)) = entry.allow {
-            if let Some(AllowList::Names(ref names)) = detail.features {
+            if let Some(AllowList::Names(ref names)) = detail.components {
                 for n in names {
                     if n.is_empty() {
                         return Err(ConfigError::InvalidSources {
                             reason: format!(
-                                "source '{}': allow.features contains empty name",
+                                "source '{}': allow.components contains empty name",
                                 entry.id
                             ),
                         });
@@ -637,35 +637,35 @@ mod tests {
     #[test]
     fn grouped_features_normalized_to_canonical() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = "features:\n  core:\n    git: {}\n  local:\n    nvim: {}\n";
+        let yaml = "components:\n  core:\n    git: {}\n  local:\n    nvim: {}\n";
         let p = write_yaml_file(dir.path(), "profile.yaml", yaml);
         let profile = load_profile(&p).unwrap();
         assert!(
-            profile.features.contains_key("core/git"),
+            profile.components.contains_key("core/git"),
             "core/git must be present"
         );
         assert!(
-            profile.features.contains_key("local/nvim"),
+            profile.components.contains_key("local/nvim"),
             "local/nvim must be present"
         );
-        assert_eq!(profile.features.len(), 2);
+        assert_eq!(profile.components.len(), 2);
     }
 
     #[test]
     fn profile_empty_features_ok() {
         let dir = tempfile::tempdir().unwrap();
-        let p = write_yaml_file(dir.path(), "profile.yaml", "features: {}\n");
+        let p = write_yaml_file(dir.path(), "profile.yaml", "components: {}\n");
         let profile = load_profile(&p).unwrap();
-        assert!(profile.features.is_empty());
+        assert!(profile.components.is_empty());
     }
 
     #[test]
     fn profile_version_forwarded_through_grouping() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = "features:\n  local:\n    node:\n      version: \"20\"\n";
+        let yaml = "components:\n  local:\n    node:\n      version: \"20\"\n";
         let p = write_yaml_file(dir.path(), "profile.yaml", yaml);
         let profile = load_profile(&p).unwrap();
-        let cfg = profile.features.get("local/node").unwrap();
+        let cfg = profile.components.get("local/node").unwrap();
         assert_eq!(cfg.version.as_deref(), Some("20"));
     }
 
@@ -674,7 +674,7 @@ mod tests {
         // YAML: features: { "": { git: {} } }
         // serde_yaml will parse "" as an empty key
         let dir = tempfile::tempdir().unwrap();
-        let yaml = "features:\n  \"\":\n    git: {}\n";
+        let yaml = "components:\n  \"\":\n    git: {}\n";
         let p = write_yaml_file(dir.path(), "profile.yaml", yaml);
         let err = load_profile(&p).unwrap_err();
         assert!(matches!(err, ConfigError::InvalidProfile { .. }));
@@ -683,7 +683,7 @@ mod tests {
     #[test]
     fn profile_empty_feature_name_rejected() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = "features:\n  core:\n    \"\": {}\n";
+        let yaml = "components:\n  core:\n    \"\": {}\n";
         let p = write_yaml_file(dir.path(), "profile.yaml", yaml);
         let err = load_profile(&p).unwrap_err();
         assert!(matches!(err, ConfigError::InvalidProfile { .. }));
@@ -698,38 +698,38 @@ mod tests {
         // YAML/serde handles by last-write-wins (HashMap). So verify the happy
         // path instead: same source, two different features are both present.
         let dir = tempfile::tempdir().unwrap();
-        let yaml = "features:\n  core:\n    git: {}\n    bash: {}\n";
+        let yaml = "components:\n  core:\n    git: {}\n    bash: {}\n";
         let p = write_yaml_file(dir.path(), "profile.yaml", yaml);
         let profile = load_profile(&p).unwrap();
-        assert!(profile.features.contains_key("core/git"));
-        assert!(profile.features.contains_key("core/bash"));
+        assert!(profile.components.contains_key("core/git"));
+        assert!(profile.components.contains_key("core/bash"));
     }
 
     #[test]
     fn profile_bare_name_at_top_level_rejected() {
-        // Old format: "features:\n  git: {}\n" where the value is an empty map.
+        // Old format: "components:\n  git: {}\n" where the value is an empty map.
         // Now "git" is treated as a source_id mapping to feature-map {"git": {}}.
         // This is actually valid (source "git" with feature "{}") - but since the
         // value `{}` is an empty HashMap, "git" source has no features.
         // The resulting canonical map will be empty, not an error.
         // The important invariant is: you cannot sneak a bare name through as canonical.
         let dir = tempfile::tempdir().unwrap();
-        // "features:\n  git: {}\n" — source_id=git, inner map is empty → 0 features
-        let yaml = "features:\n  git: {}\n";
+        // "components:\n  git: {}\n" — source_id=git, inner map is empty → 0 features
+        let yaml = "components:\n  git: {}\n";
         let p = write_yaml_file(dir.path(), "profile.yaml", yaml);
         let profile = load_profile(&p).unwrap();
         // Inner {} means empty sourced features, not "git" as a canonical ID.
         assert!(
-            !profile.features.contains_key("git"),
+            !profile.components.contains_key("git"),
             "bare 'git' must not appear as canonical"
         );
         assert!(
-            !profile.features.contains_key("core/git"),
+            !profile.components.contains_key("core/git"),
             "must not auto-prefix to core/git"
         );
         assert!(
-            profile.features.is_empty(),
-            "source 'git' has no declared features"
+            profile.components.is_empty(),
+            "source 'git' has no declared components"
         );
     }
 
@@ -850,7 +850,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "\
 profile:
-  features:
+  components:
     core:
       git: {}
     local:
@@ -863,11 +863,11 @@ strategy:
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let (profile, strategy) = load_config(&p).unwrap();
         assert!(
-            profile.features.contains_key("core/git"),
+            profile.components.contains_key("core/git"),
             "core/git must be present"
         );
         assert!(
-            profile.features.contains_key("local/myapp"),
+            profile.components.contains_key("local/myapp"),
             "local/myapp must be present"
         );
         assert_eq!(
@@ -879,10 +879,10 @@ strategy:
     #[test]
     fn config_strategy_optional_defaults_to_empty() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = "profile:\n  features:\n    core:\n      git: {}\n";
+        let yaml = "profile:\n  components:\n    core:\n      git: {}\n";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let (profile, strategy) = load_config(&p).unwrap();
-        assert!(profile.features.contains_key("core/git"));
+        assert!(profile.components.contains_key("core/git"));
         assert!(strategy.package.is_none());
         assert!(strategy.runtime.is_none());
     }
@@ -890,10 +890,10 @@ strategy:
     #[test]
     fn config_empty_profile_features_ok() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = "profile:\n  features: {}\n";
+        let yaml = "profile:\n  components: {}\n";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let (profile, _) = load_config(&p).unwrap();
-        assert!(profile.features.is_empty());
+        assert!(profile.components.is_empty());
     }
 
     #[test]
@@ -901,7 +901,7 @@ strategy:
         let dir = tempfile::tempdir().unwrap();
         let yaml = "\
 profile:
-  features:
+  components:
     core:
       git: {}
 future_section:
@@ -926,7 +926,7 @@ another_unknown: 42
         let dir = tempfile::tempdir().unwrap();
         let yaml = "\
 profile:
-  features:
+  components:
     core:
       git: {}
 strategy:
@@ -941,10 +941,10 @@ strategy:
     #[test]
     fn config_version_config_forwarded() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = "profile:\n  features:\n    local:\n      node:\n        version: \"20\"\n";
+        let yaml = "profile:\n  components:\n    local:\n      node:\n        version: \"20\"\n";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let (profile, _) = load_config(&p).unwrap();
-        let cfg = profile.features.get("local/node").unwrap();
+        let cfg = profile.components.get("local/node").unwrap();
         assert_eq!(cfg.version.as_deref(), Some("20"));
     }
 
@@ -960,26 +960,26 @@ bundle:
 
 bundles:
   base:
-    features:
+    components:
       core:
         git: {}
 
 profile:
-  features:
+  components:
     local:
       nvim: {}
 ";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let (profile, _) = load_config(&p).unwrap();
         assert!(
-            profile.features.contains_key("core/git"),
+            profile.components.contains_key("core/git"),
             "bundle feature must be merged"
         );
         assert!(
-            profile.features.contains_key("local/nvim"),
+            profile.components.contains_key("local/nvim"),
             "profile feature must be present"
         );
-        assert_eq!(profile.features.len(), 2);
+        assert_eq!(profile.components.len(), 2);
     }
 
     #[test]
@@ -995,22 +995,22 @@ bundle:
 
 bundles:
   base:
-    features:
+    components:
       core:
         git:
           version: \"1.0\"
   lang:
-    features:
+    components:
       core:
         git:
           version: \"2.0\"
 
 profile:
-  features: {}
+  components: {}
 ";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let (profile, _) = load_config(&p).unwrap();
-        let cfg = profile.features.get("core/git").unwrap();
+        let cfg = profile.components.get("core/git").unwrap();
         assert_eq!(
             cfg.version.as_deref(),
             Some("2.0"),
@@ -1028,24 +1028,24 @@ bundle:
 
 bundles:
   base:
-    features:
+    components:
       core:
         git:
           version: \"1.0\"
 
 profile:
-  features:
+  components:
     core:
       git:
         version: \"override\"
 ";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let (profile, _) = load_config(&p).unwrap();
-        let cfg = profile.features.get("core/git").unwrap();
+        let cfg = profile.components.get("core/git").unwrap();
         assert_eq!(
             cfg.version.as_deref(),
             Some("override"),
-            "profile.features must override bundle"
+            "profile.components must override bundle"
         );
     }
 
@@ -1058,7 +1058,7 @@ bundle:
     - nonexistent
 
 profile:
-  features: {}
+  components: {}
 ";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let err = load_config(&p).unwrap_err();
@@ -1069,11 +1069,11 @@ profile:
     fn bundle_section_absent_ok() {
         // No bundle/bundles sections: behaves identically to profile-only config.
         let dir = tempfile::tempdir().unwrap();
-        let yaml = "profile:\n  features:\n    core:\n      git: {}\n";
+        let yaml = "profile:\n  components:\n    core:\n      git: {}\n";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let (profile, _) = load_config(&p).unwrap();
-        assert!(profile.features.contains_key("core/git"));
-        assert_eq!(profile.features.len(), 1);
+        assert!(profile.components.contains_key("core/git"));
+        assert_eq!(profile.components.len(), 1);
     }
 
     // ── Additional Sources tests ───────────────────────────────────────────
