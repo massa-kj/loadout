@@ -26,11 +26,11 @@ pub enum PlannerError {
     ///
     /// This is always a programming error caused by a mismatch between resolver and compiler output.
     /// Should be unreachable in normal operation if the pipeline is correctly sequenced.
-    #[error("feature '{id}' is in the resolved order but not in the DesiredResourceGraph")]
+    #[error("component '{id}' is in the resolved order but not in the DesiredResourceGraph")]
     ComponentOrderMismatch { id: String },
 }
 
-/// Feature-level classification produced by the diff phase.
+/// Component-level classification produced by the diff phase.
 #[derive(Debug, Clone, PartialEq)]
 enum Classification {
     Create,
@@ -54,7 +54,7 @@ enum Classification {
 /// and is deterministic (same inputs always produce the same output).
 ///
 /// # Parameters
-/// - `desired`: compiled desired resources (FeatureCompiler output, includes resolved backends)
+/// - `desired`: compiled desired resources (ComponentCompiler output, includes resolved backends)
 /// - `state`: current authoritative state (components installed, resources recorded)
 /// - `resolved_order`: topologically sorted component IDs (resolver output, defines install order)
 ///
@@ -87,7 +87,7 @@ pub fn plan(
     }
 
     // Build ordered list of all components to consider.
-    // Features in desired but not in resolved_order (shouldn't happen in normal use)
+    // Components in desired but not in resolved_order (shouldn't happen in normal use)
     // are appended at the end in sorted order to remain deterministic.
     let ordered_desired: Vec<&str> = {
         let mut v: Vec<&str> = resolved_order.iter().map(|id| id.as_str()).collect();
@@ -98,7 +98,7 @@ pub fn plan(
         v
     };
 
-    // Features in state but not in desired → destroy (reverse order of install).
+    // Components in state but not in desired → destroy (reverse order of install).
     let destroy_ids: Vec<&str> = {
         let mut v: Vec<&str> = state_ids.difference(&desired_ids).copied().collect();
         // Reverse topological order for destroy: reverse of resolved_order for known components,
@@ -144,10 +144,10 @@ pub fn plan(
         let desired_comp = desired.components.get(id).unwrap(); // validated above or present
 
         let classification = if !state_ids.contains(id) {
-            // Feature not in state → create.
+            // Component not in state → create.
             Classification::Create
         } else {
-            // Feature in both → diff resources.
+            // Component in both → diff resources.
             classify_existing(id, desired_comp, state)
         };
 

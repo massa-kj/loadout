@@ -44,7 +44,7 @@ Component Index + strategy
 {
   "schema_version": 1,
   "components": {
-    "<canonical_feature_id>": {
+    "<canonical_component_id>": {
       "resources": [
         {
           "id": "<resource_id>",

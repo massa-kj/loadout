@@ -2,7 +2,7 @@
 
 Full-stack integration tests that run the loadout system in isolated environments.
 
-Unlike unit and integration tests, these tests execute real feature scripts against
+Unlike unit and integration tests, these tests execute real component scripts against
 a clean OS installation to verify end-to-end behavior.
 
 ## Purpose
@@ -78,7 +78,7 @@ Both environments cover the same set of scenarios:
 | `uninstall`       | Tracked files removed; untracked files preserved              |
 | `version-install` | Version recorded in state after install                       |
 | `version-upgrade` | Version mismatch triggers reinstall; state updated            |
-| `version-mixed`   | Versioned and unversioned features coexist correctly          |
+| `version-mixed`   | Versioned and unversioned components coexist correctly          |
 
 ## Design Philosophy
 

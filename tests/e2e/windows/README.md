@@ -46,7 +46,7 @@ release binaries are not present. After the first build the check is fast.
 | `uninstall`      | Tracked resources removed; untracked files preserved      |
 | `version-install`| Version recorded in state after runtime install           |
 | `version-upgrade`| Version mismatch triggers reinstall; state updated        |
-| `version-mixed`  | Versioned and unversioned features coexist correctly      |
+| `version-mixed`  | Versioned and unversioned components coexist correctly      |
 
 ## How It Works
 
@@ -60,17 +60,17 @@ release binaries are not present. After the first build the check is fast.
    * Installs binaries into `%LOCALAPPDATA%\loadout\bin\`
    * Sets `XDG_CONFIG_HOME` and `XDG_STATE_HOME` to `%APPDATA%` so that
      `loadout.exe` and `loadout-e2e.exe` agree on the same config/state paths
-   * Copies configs, features, and dummy backends to `%APPDATA%\loadout\`
+   * Copies configs, components, and dummy backends to `%APPDATA%\loadout\`
    * Runs `loadout-e2e.exe <scenario>`
 
 ## Path Convention (Windows)
 
 | Purpose          | Path                                  |
 |------------------|---------------------------------------|
-| Config / features / backends | `%APPDATA%\loadout\`    |
+| Config / components / backends | `%APPDATA%\loadout\`    |
 | State file       | `%APPDATA%\loadout\state.json`        |
 | Configs dir      | `%APPDATA%\loadout\configs\`          |
-| Features dir     | `%APPDATA%\loadout\features\`         |
+| Components dir     | `%APPDATA%\loadout\components\`         |
 | Backends dir     | `%APPDATA%\loadout\backends\`         |
 
 `loadout.exe` uses `%APPDATA%\loadout\` natively on Windows.

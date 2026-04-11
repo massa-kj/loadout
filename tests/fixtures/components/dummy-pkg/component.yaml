@@ -1,6 +1,6 @@
 spec_version: 1
 description: |
-  Dummy package feature for E2E testing.
+  Dummy package component for E2E testing.
   Uses the local/dummy-pkg backend — no network access required.
 depends: []
 

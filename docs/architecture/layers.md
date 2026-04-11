@@ -60,7 +60,7 @@ Must NOT: perform package management directly, re-classify after planner has dec
 The `load` step includes all of the following before handing off to core:
 - Bundle expansion (`bundle.use` → merge `bundles:` definitions)
 - Namespace grouping normalization (`source_id: { name: {} }` → `source_id/name`)
-- Canonicalization (flat `HashMap<String, ProfileFeatureConfig>` keyed by canonical ID)
+- Canonicalization (flat `HashMap<String, ProfileComponentConfig>` keyed by canonical ID)
 - Validation (empty keys, undefined bundle names, duplicate canonicals)
 
 ### core
@@ -123,7 +123,7 @@ ComponentIndexBuilder
     ↓ ComponentIndex (normalized component metadata)
 Resolver
   (dependency resolution, topological sort using dep fields only)
-    ↓ ResolvedFeatureOrder (ordered list of component IDs)
+    ↓ ResolvedComponentOrder (ordered list of component IDs)
 ComponentCompiler
   ├─ resource expansion (from component specs)
   └─ backend resolution (using Strategy + platform defaults)
@@ -162,9 +162,9 @@ State Commit
 | Load | Impure (I/O) | Filesystem | Profile, Strategy, Sources, State |
 | SourceRegistry | Pure (lookup) | Sources | Source paths, allow-lists |
 | ComponentIndexBuilder | Impure (I/O) | Source paths, component.yaml | ComponentIndex |
-| Resolver | Pure | Profile.components, ComponentIndex.dep | ResolvedFeatureOrder |
-| ComponentCompiler | Pure | ResolvedFeatureOrder, ComponentIndex, Strategy | DesiredResourceGraph |
-| Planner | Pure | DesiredResourceGraph, State, ResolvedFeatureOrder | Plan |
+| Resolver | Pure | Profile.components, ComponentIndex.dep | ResolvedComponentOrder |
+| ComponentCompiler | Pure | ResolvedComponentOrder, ComponentIndex, Strategy | DesiredResourceGraph |
+| Planner | Pure | DesiredResourceGraph, State, ResolvedComponentOrder | Plan |
 | Executor | Impure (side effects) | Plan, DesiredResourceGraph, ComponentIndex, BackendRegistry | Effects |
 | State Commit | Impure (I/O) | Execution results | state.json, env_plan.json (cache) |
 | Activate | Impure (I/O) | env_plan.json (cache), shell kind | Shell activation script (stdout) |
@@ -176,7 +176,7 @@ State Commit
 - **Sources**: Plugin locations and security allow-lists
 - **State**: Single authority for installed resources (backend, version, fs paths)
 - **ComponentIndex**: Normalized component metadata (depends, capabilities, resources)
-- **ResolvedFeatureOrder**: Topologically sorted component IDs (dependency-resolved)
+- **ResolvedComponentOrder**: Topologically sorted component IDs (dependency-resolved)
 - **DesiredResourceGraph**: Expanded resources with resolved backends
 - **Plan**: Authoritative instruction set (create/destroy/replace/noop/blocked)
 - **BackendRegistry**: Dispatcher mapping `CanonicalBackendId` → `Backend` trait implementation

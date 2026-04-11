@@ -1,6 +1,6 @@
 spec_version: 1
 description: |
-  Dummy filesystem feature for E2E testing.
+  Dummy filesystem component for E2E testing.
   Creates a marker file under ~/.config/loadout/dummy-fs-marker.
   Verifies fs resource tracking and safe removal without backend involvement.
 depends: []

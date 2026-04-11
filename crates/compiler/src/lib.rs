@@ -1,4 +1,4 @@
-//! Feature compiler: resolves backends and produces DesiredResourceGraph.
+//! Component compiler: resolves backends and produces DesiredResourceGraph.
 //!
 //! The compiler takes a ComponentIndex, Strategy, and ResolvedComponentOrder and produces
 //! a DesiredResourceGraph with all `desired_backend` fields resolved. This is the
@@ -29,9 +29,9 @@ pub use model::desired_resource_graph::{
 /// Errors produced by the compiler.
 #[derive(Debug, thiserror::Error)]
 pub enum CompilerError {
-    /// A feature referenced in `resolved_order` was not found in `component_index`.
+    /// A component referenced in `resolved_order` was not found in `component_index`.
     /// This indicates a programming error upstream (resolver output inconsistent with index).
-    #[error("feature not found in index: {id}")]
+    #[error("component not found in index: {id}")]
     ComponentNotFound { id: String },
 
     /// No backend could be resolved for a resource.
@@ -54,13 +54,13 @@ pub enum CompilerError {
 
 /// Compile a ComponentIndex into a DesiredResourceGraph.
 ///
-/// Processes features in `resolved_order`. Script-mode features are excluded from
+/// Processes components in `resolved_order`. Script-mode components are excluded from
 /// the output (they have no resources to compile). For declarative-mode components,
 /// each resource's `desired_backend` is resolved via `strategy`.
 ///
 /// # Errors
 ///
-/// Returns [`CompilerError::ComponentNotFound`] if a feature ID in `resolved_order`
+/// Returns [`CompilerError::ComponentNotFound`] if a component ID in `resolved_order`
 /// is missing from `component_index`. Returns [`CompilerError::NoBackend`] if no backend
 /// can be resolved for a package or runtime resource.
 pub fn compile(
@@ -79,7 +79,7 @@ pub fn compile(
             }
         })?;
 
-        // Script-mode features have no declarative resources.
+        // Script-mode components have no declarative resources.
         // They are still recorded in the graph with an empty list so the planner
         // can classify them as create / destroy / noop.
         if meta.mode == ComponentMode::Script {
@@ -94,7 +94,7 @@ pub fn compile(
         let spec = match &meta.spec {
             Some(s) => s,
             None => {
-                // Should not occur after feature-index validation, but handle gracefully.
+                // Should not occur after component-index validation, but handle gracefully.
                 components.insert(
                     id_str.to_string(),
                     ComponentDesiredResources { resources: vec![] },
@@ -201,7 +201,7 @@ fn resolve_backend(
     CanonicalBackendId::new(default).map_err(|_| no_backend())
 }
 
-/// Convert SpecFsEntryType (feature spec) to FsEntryType (desired resource graph).
+/// Convert SpecFsEntryType (component spec) to FsEntryType (desired resource graph).
 fn map_entry_type(t: SpecFsEntryType) -> FsEntryType {
     match t {
         SpecFsEntryType::File => FsEntryType::File,
@@ -209,7 +209,7 @@ fn map_entry_type(t: SpecFsEntryType) -> FsEntryType {
     }
 }
 
-/// Convert FsOp from the feature spec namespace to the desired resource graph namespace.
+/// Convert FsOp from the component spec namespace to the desired resource graph namespace.
 fn map_fs_op(op: SpecFsOp) -> FsOp {
     match op {
         SpecFsOp::Link => FsOp::Link,
@@ -330,7 +330,7 @@ mod tests {
 
     // --- Tests --------------------------------------------------------------
 
-    /// Script-mode features are included in the output graph with empty resources.
+    /// Script-mode components are included in the output graph with empty resources.
     #[test]
     fn script_component_is_included_with_empty_resources() {
         let index = make_index(vec![("core/bash", script_meta())]);
@@ -549,7 +549,7 @@ mod tests {
         assert!(matches!(err, CompilerError::NoBackend { .. }));
     }
 
-    /// Feature referenced in resolved_order but absent from index → ComponentNotFound.
+    /// Component referenced in resolved_order but absent from index → ComponentNotFound.
     #[test]
     fn component_not_in_index_returns_error() {
         let index = make_index(vec![]);
@@ -560,9 +560,9 @@ mod tests {
         assert!(matches!(err, CompilerError::ComponentNotFound { id } if id == "core/missing"));
     }
 
-    /// Multiple features in resolved_order are all compiled into the graph.
+    /// Multiple components in resolved_order are all compiled into the graph.
     #[test]
-    fn multiple_features_all_compiled() {
+    fn multiple_components_all_compiled() {
         let index = make_index(vec![
             (
                 "core/git",

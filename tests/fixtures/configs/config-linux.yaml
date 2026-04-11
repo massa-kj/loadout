@@ -35,7 +35,7 @@ strategy:
     # Default backend for runtime installs (node, python, rust, lua, etc.).
     default_backend: local/mise
     # Per-resource backend overrides, keyed by the runtime name
-    # (e.g. "node", "python") — not the feature name.
+    # (e.g. "node", "python") — not the component name.
     # Example:
     #   overrides:
     #     node:

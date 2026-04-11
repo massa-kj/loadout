@@ -1,6 +1,6 @@
 //! Source registry — canonical ID to filesystem path resolution and allow-list enforcement.
 //!
-//! The registry maps canonical feature and backend IDs to concrete directories on disk,
+//! The registry maps canonical component and backend IDs to concrete directories on disk,
 //! and enforces the allow-list rules declared in `sources.yaml` for external sources.
 //!
 //! # Source Kinds
@@ -13,8 +13,8 @@
 //!
 //! # Path Resolution
 //!
-//! **Features:**
-//! - `core/<name>` → embedded in binary; `feature_dir` returns `UnknownSource`
+//! **Components:**
+//! - `core/<name>` → embedded in binary; `component_dir` returns `UnknownSource`
 //! - `local/<name>` → `{config_home}/components/<name>`
 //! - `<ext>/<name>` → `{data_home}/sources/<ext>/components/<name>`
 //!
@@ -29,7 +29,7 @@
 //! - External sources: `allow` field in the source entry is checked.
 //!   - `allow` absent → deny-all (error).
 //!   - `allow: "*"` → allow everything.
-//!   - `allow: { features: ..., backends: ... }` → check respective allow-list.
+//!   - `allow: { components: ..., backends: ... }` → check respective allow-list.
 //!
 //! No implicit fallback between `local`, external, and `core` is permitted.
 //!
@@ -66,7 +66,7 @@ pub enum RegistryError {
         source_id: String,
     },
 
-    /// The allow-list for an external source does not permit this feature.
+    /// The allow-list for an external source does not permit this component.
     #[error("component '{component_id}' is not in the allow-list of source '{source_id}'")]
     ComponentNotAllowed {
         component_id: String,
@@ -119,7 +119,7 @@ impl SourceRegistry {
         }
     }
 
-    /// Resolve the filesystem directory for a canonical feature ID.
+    /// Resolve the filesystem directory for a canonical component ID.
     ///
     /// Does NOT check whether the directory exists on disk.
     /// Does NOT enforce the allow-list — call [`check_component_allowed`](Self::check_component_allowed) separately.
@@ -135,7 +135,7 @@ impl SourceRegistry {
         self.resolve_dir(id.source(), id.name(), ResourceKind::Backend)
     }
 
-    /// Check whether a canonical feature ID is permitted by the source's allow-list.
+    /// Check whether a canonical component ID is permitted by the source's allow-list.
     ///
     /// - `core` and `local` sources are always allowed.
     /// - External sources without an `allow` field are deny-all.
@@ -335,7 +335,7 @@ mod tests {
         SourcesSpec { sources: entries }
     }
 
-    // ── feature_dir ───────────────────────────────────────────────────────────
+    // ── component_dir ───────────────────────────────────────────────────────────
 
     #[test]
     fn component_dir_core_returns_unknown_source() {
@@ -396,13 +396,13 @@ mod tests {
     // ── check_component_allowed ─────────────────────────────────────────────────
 
     #[test]
-    fn core_feature_always_allowed() {
+    fn core_component_always_allowed() {
         let r = empty_registry();
         r.check_component_allowed(&component("core/git")).unwrap();
     }
 
     #[test]
-    fn local_feature_always_allowed() {
+    fn local_component_always_allowed() {
         let r = empty_registry();
         r.check_component_allowed(&component("local/mycomponent"))
             .unwrap();

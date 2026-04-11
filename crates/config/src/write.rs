@@ -318,8 +318,8 @@ pub fn rewrite_component_source(
 
     // Rewrite profile.components.
     {
-        if let Some(features) = navigate_to_mapping_mut(&mut doc, &["profile", "components"]) {
-            if move_component_in_mapping(features, old_source, name, new_source) {
+        if let Some(components) = navigate_to_mapping_mut(&mut doc, &["profile", "components"]) {
+            if move_component_in_mapping(components, old_source, name, new_source) {
                 changed = true;
             }
         }
@@ -327,10 +327,10 @@ pub fn rewrite_component_source(
 
     // Rewrite bundles.*.components.
     for bundle_name in &bundle_names {
-        if let Some(features) =
+        if let Some(mapping) =
             navigate_to_mapping_mut(&mut doc, &["bundles", bundle_name.as_str(), "components"])
         {
-            if move_component_in_mapping(features, old_source, name, new_source) {
+            if move_component_in_mapping(mapping, old_source, name, new_source) {
                 changed = true;
             }
         }
@@ -400,7 +400,7 @@ fn navigate_to_mapping_mut<'a>(
 /// Removes the `old_source` key if it becomes empty after the move.
 /// Returns `true` if the move was performed.
 fn move_component_in_mapping(
-    features: &mut serde_yaml::Mapping,
+    mapping: &mut serde_yaml::Mapping,
     old_source: &str,
     name: &str,
     new_source: &str,
@@ -410,7 +410,7 @@ fn move_component_in_mapping(
 
     // Extract the component value from the old source entry.
     let component_val = {
-        let old_src = match features
+        let old_src = match mapping
             .get_mut(&old_src_key)
             .and_then(|v| v.as_mapping_mut())
         {
@@ -424,24 +424,24 @@ fn move_component_in_mapping(
     };
 
     // Remove the old_source key if it is now empty.
-    if features
+    if mapping
         .get(&old_src_key)
         .and_then(|v| v.as_mapping())
         .map(|m| m.is_empty())
         .unwrap_or(false)
     {
-        features.remove(&old_src_key);
+        mapping.remove(&old_src_key);
     }
 
     // Insert into new_source, creating the entry if absent.
     let new_src_key = Value::String(new_source.to_string());
-    if !features.contains_key(&new_src_key) {
-        features.insert(
+    if !mapping.contains_key(&new_src_key) {
+        mapping.insert(
             new_src_key.clone(),
             Value::Mapping(serde_yaml::Mapping::new()),
         );
     }
-    if let Some(new_src) = features
+    if let Some(new_src) = mapping
         .get_mut(&new_src_key)
         .and_then(|v| v.as_mapping_mut())
     {

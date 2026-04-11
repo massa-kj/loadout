@@ -15,13 +15,13 @@ It is produced by the Component Index Builder and consumed by the Resolver and C
 - Permitted/forbidden operations per consumer
 
 **What Rust code defines (source of truth):**
-- `ComponentIndex`, `FeatureMeta`, `DepSpec`, `FeatureSpec` types (`crates/model/src/feature_index.rs`)
+- `ComponentIndex`, `ComponentMeta`, `DepSpec`, `ComponentSpec` types (`crates/model/src/component_index.rs`)
 - Component Index Builder implementation (`crates/component-index/src/lib.rs`)
 - Field types and deserialization logic
 
 **Cross-reference:**
 - Implementation: `crates/component-index/src/lib.rs`
-- Data model: `crates/model/src/feature_index.rs`
+- Data model: `crates/model/src/component_index.rs`
 - For field-level structure documentation, see rustdoc: `cargo doc --open`
 
 ## Position in Pipeline
@@ -43,13 +43,13 @@ Source Registry + component.yaml files
 {
   "schema_version": 1,
   "components": {
-    "<canonical_feature_id>": {
+    "<canonical_component_id>": {
       "spec_version": 1,
       "mode": "script | declarative",
       "description": "<human readable>",
       "source_dir": "<absolute path to component directory>",
       "dep": {
-        "depends": [ "<canonical_feature_id>", "..." ],
+        "depends": [ "<canonical_component_id>", "..." ],
         "requires": [ { "name": "<capability>" } ],
         "provides": [ { "name": "<capability>" } ]
       },
@@ -77,13 +77,13 @@ Component keys are canonical IDs of the form `<source_id>/<name>` (e.g. `core/gi
 {
   "schema_version": 1,
   "components": {
-    "<canonical_feature_id>": {
+    "<canonical_component_id>": {
       "spec_version": 1,
       "mode": "script | declarative",
       "description": "<human readable>",
       "source_dir": "<absolute path to component directory>",
       "dep": {
-        "depends": [ "<canonical_feature_id>", "..." ],
+        "depends": [ "<canonical_component_id>", "..." ],
         "requires": [ { "name": "<capability>" } ],
         "provides": [ { "name": "<capability>" } ]
       },
@@ -95,7 +95,7 @@ Component keys are canonical IDs of the form `<source_id>/<name>` (e.g. `core/gi
 }
 ```
 
-For detailed field types, see `crates/model/src/feature_index.rs` (rustdoc).
+For detailed field types, see `crates/model/src/component_index.rs` (rustdoc).
 
 ## Key Fields and Semantics
 

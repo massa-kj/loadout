@@ -4,9 +4,9 @@
 //
 // Phase 1: apply, plan, activate, completions
 // Phase 2: state (migrate), context (set/show/unset), doctor
-// Phase 3: state show, config, feature, backend, source (read-only commands)
-// Phase 4: config edit/init/feature/raw, feature/backend/source edit (mutation commands)
-// Phase 5: feature/backend new, feature/backend validate (scaffold/validation)
+// Phase 3: state show, config, component, backend, source (read-only commands)
+// Phase 4: config edit/init/component/raw, component/backend/source edit (mutation commands)
+// Phase 5: component/backend new, component/backend validate (scaffold/validation)
 
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
@@ -254,7 +254,7 @@ pub struct ConfigInitArgs {
     pub name: String,
 }
 
-// ── config feature ───────────────────────────────────────────────────────────
+// ── config component ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Subcommand)]
 pub enum ConfigComponentCommand {

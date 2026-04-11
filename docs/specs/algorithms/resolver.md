@@ -11,7 +11,7 @@ Not covered: execution, state mutations, planner decision logic, component metad
 ## Document Boundary
 
 **What this document defines (source of truth):**
-- Resolver inputs/outputs (Component Index → ResolvedFeatureOrder)
+- Resolver inputs/outputs (Component Index → ResolvedComponentOrder)
 - Dependency model semantics (depends/provides/requires)
 - Graph construction algorithm (explicit edges + capability resolution)
 - Cycle detection requirement (DAG enforcement)
@@ -19,7 +19,7 @@ Not covered: execution, state mutations, planner decision logic, component metad
 - Determinism guarantee (same inputs → same order)
 
 **What Rust code defines (source of truth):**
-- `ResolvedFeatureOrder` type (`crates/model/src/lib.rs`)
+- `ResolvedComponentOrder` type (`crates/model/src/lib.rs`)
 - Resolver function signature and algorithm (`crates/resolver/src/lib.rs`)
 - Error types (`ResolverError` in `crates/resolver/src/lib.rs`)
 
@@ -32,8 +32,8 @@ Not covered: execution, state mutations, planner decision logic, component metad
 
 The resolver receives:
 
-* `feature_index` — parsed Component Index produced by Component Index Builder (see `specs/data/component_index.md`)
-* `desired_features` — list of canonical component identifiers from the resolved profile
+* `component_index` — parsed Component Index produced by Component Index Builder (see `specs/data/component_index.md`)
+* `desired_components` — list of canonical component identifiers from the resolved profile
 
 All resolver inputs must already be normalized to canonical IDs of the form `<source_id>/<name>`.
 Bare names are normalized upstream to `core/<name>` before resolver execution.
@@ -64,7 +64,7 @@ depends:
 Normalization rules for `dep.depends`:
 
 * bare name `git` in `core/neovim` → `core/git`
-* bare name `helper` in `local/myfeat` → `local/helper`
+* bare name `helper` in `local/mycomponent` → `local/helper`
 * cross-source dependency must be explicit, e.g. `core/git` or `community/node`
 
 **`provides` / `requires`** — capability-based dependency.
@@ -105,7 +105,7 @@ Cycles are forbidden. The dependency graph must be a DAG.
 
 ## Output Contract
 
-The resolver outputs a `ResolvedFeatureOrder`: a topologically sorted list of canonical component identifiers.
+The resolver outputs a `ResolvedComponentOrder`: a topologically sorted list of canonical component identifiers.
 
 * Install order: dependencies appear before dependents.
 * Uninstall order: reverse of install order (managed by planner/executor).

@@ -14,7 +14,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
 
     let config = ctx.config("config-version-mixed.yaml");
 
-    println!("==> Running apply with mixed features");
+    println!("==> Running apply with mixed components");
     loadout_apply(ctx, &config)?;
 
     println!("==> Checking state file existence");

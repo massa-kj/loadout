@@ -66,7 +66,7 @@ Documentation must be split clearly to avoid duplication and maintain clarity.
 
 **Implementation contracts (Rust-specific):**
 - Struct/enum definitions (`pub struct State { ... }`)
-- Field types and constraints (`resources: HashMap<CanonicalFeatureId, Vec<Resource>>`)
+- Field types and constraints (`resources: HashMap<CanonicalComponentId, Vec<Resource>>`)
 - Function signatures (`pub fn classify(...) -> Classification`)
 - Error type variants (`BackendError::ScriptFailed { exit_code, stderr }`)
 - Implementation examples (doctests)
@@ -138,7 +138,7 @@ pub fn classify(...) -> Classification { ... }
 /// Schema and invariants: `docs/specs/data/state.md`.
 pub struct State {
     pub version: u32,
-    pub components: HashMap<CanonicalFeatureId, FeatureState>,
+    pub components: HashMap<CanonicalComponentId, ComponentState>,
 }
 ```
 

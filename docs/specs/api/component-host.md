@@ -26,7 +26,7 @@ Script-mode components **must NOT write to `state.json`**. State updates are the
 ## Component Directory Layout
 
 ```text
-<feature_source_dir>/
+<component_source_dir>/
   component.yaml         # metadata (mode: script, dependencies, etc.)
   install.sh           # installation script
   uninstall.sh         # removal script

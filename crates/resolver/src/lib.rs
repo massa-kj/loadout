@@ -1,6 +1,6 @@
 //! Dependency resolver for loadout.
 //!
-//! Reads only `dep.*` fields from the Feature Index, builds a dependency DAG,
+//! Reads only `dep.*` fields from the Component Index, builds a dependency DAG,
 //! performs cycle detection, and returns a topologically sorted `ResolvedComponentOrder`.
 //!
 //! The resolver is a **pure function**: it does not read files, modify state, or call backends.
@@ -14,16 +14,16 @@ use thiserror::Error;
 /// Errors produced by the resolver.
 #[derive(Debug, Error, PartialEq)]
 pub enum ResolverError {
-    /// A feature listed in the desired set is not present in the Feature Index.
+    /// A component listed in the desired set is not present in the Component Index.
     ///
-    /// Example: Profile requests `"foo/bar"` but no such feature.yaml exists.
-    #[error("feature '{id}' is not present in the Feature Index")]
+    /// Example: Profile requests `"foo/bar"` but no such component.yaml exists.
+    #[error("component '{id}' is not present in the Component Index")]
     ComponentNotFound { id: String },
 
-    /// An explicit `dep.depends` entry points to a feature not in the desired set.
+    /// An explicit `dep.depends` entry points to a component not in the desired set.
     ///
     /// Example: A depends on B, but B was not requested and has no transitive requirer.
-    #[error("feature '{dependent}' depends on '{dependency}', but '{dependency}' is not in the desired set")]
+    #[error("component '{dependent}' depends on '{dependency}', but '{dependency}' is not in the desired set")]
     MissingDependency {
         dependent: String,
         dependency: String,
@@ -31,8 +31,8 @@ pub enum ResolverError {
 
     /// A `dep.requires` capability has no provider in the desired set.
     ///
-    /// Example: Feature requires `capability:package-manager` but no brew/apt is in the profile.
-    #[error("feature '{requirer}' requires capability '{capability}', but no provider is in the desired set")]
+    /// Example: Component requires `capability:package-manager` but no brew/apt is in the profile.
+    #[error("component '{requirer}' requires capability '{capability}', but no provider is in the desired set")]
     MissingCapabilityProvider {
         requirer: String,
         capability: String,
@@ -54,7 +54,7 @@ pub enum ResolverError {
 ///
 /// # Algorithm
 ///
-/// 1. Expand desired features to include transitive dependencies (walk `dep.depends`)
+/// 1. Expand desired components to include transitive dependencies (walk `dep.depends`)
 /// 2. Resolve capability-based dependencies (map `dep.requires` to `dep.provides`)
 /// 3. Build dependency graph (directed edges from dependents to dependencies)
 /// 4. Perform topological sort with cycle detection
@@ -64,7 +64,7 @@ pub enum ResolverError {
 /// # Errors
 ///
 /// Returns [`ResolverError`] if:
-/// - a desired feature is not in the index
+/// - a desired component is not in the index
 /// - an explicit dependency is not in the desired set
 /// - a required capability has no provider in the desired set
 /// - the dependency graph contains a cycle
@@ -75,7 +75,7 @@ pub fn resolve(
     // Build a set for fast membership checks.
     let desired_set: HashSet<&str> = desired_components.iter().map(|id| id.as_str()).collect();
 
-    // Validate all desired features exist in the index.
+    // Validate all desired components exist in the index.
     for id in desired_components {
         if !component_index.components.contains_key(id.as_str()) {
             return Err(ResolverError::ComponentNotFound {
@@ -84,7 +84,7 @@ pub fn resolve(
         }
     }
 
-    // Build a capability → providers map over desired features only.
+    // Build a capability → providers map over desired components only.
     let mut capability_providers: HashMap<&str, Vec<&str>> = HashMap::new();
     for id in desired_components {
         if let Some(meta) = component_index.components.get(id.as_str()) {
@@ -97,8 +97,8 @@ pub fn resolve(
         }
     }
 
-    // Build adjacency list: feature → its dependencies (within desired set).
-    // Keys are feature id strings; values are sets of dependency id strings.
+    // Build adjacency list: component → its dependencies (within desired set).
+    // Keys are component id strings; values are sets of dependency id strings.
     let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
 
     for id in desired_components {
@@ -380,7 +380,7 @@ mod tests {
     }
 
     #[test]
-    fn feature_not_in_index() {
+    fn component_not_in_index() {
         let index = make_index(&[]);
         let desired = ids(&["core/ghost"]);
         let err = resolve(&index, &desired).unwrap_err();

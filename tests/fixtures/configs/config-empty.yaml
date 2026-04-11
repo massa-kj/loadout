@@ -1,4 +1,4 @@
-# Empty profile: removes all features.
+# Empty profile: removes all components.
 # Used by: lifecycle, uninstall scenarios (full uninstall phase)
 
 profile:

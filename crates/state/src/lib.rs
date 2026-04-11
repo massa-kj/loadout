@@ -41,7 +41,7 @@ pub enum StateError {
     #[error("state I/O error: {0}")]
     Io(#[from] io::IoError),
 
-    /// `state.json` is v2 (bare feature keys). Run `loadout migrate` first.
+    /// `state.json` is v2 (bare component keys). Run `loadout migrate` first.
     #[error("state version {version} requires migration; run `loadout migrate`")]
     NeedsMigration { version: u32 },
 
@@ -60,7 +60,7 @@ pub enum StateError {
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
-/// Return an empty (no features installed) initial state.
+/// Return an empty (no components installed) initial state.
 pub fn empty() -> State {
     State::empty()
 }
@@ -173,11 +173,11 @@ pub fn validate(state: &State) -> Result<(), StateError> {
         });
     }
 
-    // Track fs.path uniqueness across all features.
+    // Track fs.path uniqueness across all components.
     let mut seen_fs_paths: HashSet<&str> = HashSet::new();
 
     for (component_id, component_state) in &state.components {
-        // Check for duplicate resource.id within feature.
+        // Check for duplicate resource.id within component.
         let mut seen_ids: HashSet<&str> = HashSet::new();
         for resource in &component_state.resources {
             if resource.id.is_empty() {
@@ -239,7 +239,7 @@ fn validate_fs_resource<'a>(
 /// Transform a raw v2 state JSON value into a validated v3 [`State`].
 ///
 /// Migration rules:
-/// * Bare feature keys (no `/`) are prefixed with `core/`.
+/// * Bare component keys (no `/`) are prefixed with `core/`.
 /// * Keys that already contain `/` are preserved unchanged.
 /// * Version is set to 3.
 /// * Resource entries are preserved unchanged.
@@ -254,7 +254,7 @@ pub fn migrate_v2_to_v3(raw: &serde_json::Value) -> Result<State, StateError> {
         }
     }
 
-    let features_obj = raw
+    let components_obj = raw
         .get("components")
         .and_then(|v| v.as_object())
         .ok_or_else(|| StateError::Corrupt {
@@ -263,15 +263,15 @@ pub fn migrate_v2_to_v3(raw: &serde_json::Value) -> Result<State, StateError> {
 
     let mut migrated_components: HashMap<String, ComponentState> = HashMap::new();
 
-    for (key, feature_val) in features_obj {
+    for (key, component_val) in components_obj {
         let canonical_key = if key.contains('/') {
             key.clone()
         } else {
             format!("core/{key}")
         };
 
-        let component_state: ComponentState =
-            serde_json::from_value(feature_val.clone()).map_err(|e| StateError::Corrupt {
+        let component_state: ComponentState = serde_json::from_value(component_val.clone())
+            .map_err(|e| StateError::Corrupt {
                 reason: format!("failed to parse component '{key}': {e}"),
             })?;
 
@@ -402,10 +402,10 @@ mod tests {
     }
 
     #[test]
-    fn validate_duplicate_fs_path_across_features_rejected() {
+    fn validate_duplicate_fs_path_across_components_rejected() {
         let path = "/home/user/.gitconfig";
         let mut s = state_with_fs("core/git", "fs:gitconfig", path);
-        // Add another feature with the same fs.path.
+        // Add another component with the same fs.path.
         s.components.insert(
             "core/other".into(),
             ComponentState {

@@ -46,7 +46,7 @@ Planner operates only on:
 
 1. `desired_resource_graph` — compiled desired resources, grouped by component (produced by ComponentCompiler)
 2. `state` — current authoritative state
-3. `resolved_feature_order` — topologically sorted component identifiers from resolver
+3. `resolved_component_order` — topologically sorted component identifiers from resolver
 
 Component identifiers in `desired_resource_graph`, `state`, and planner output are canonical IDs of the form
 `<source_id>/<name>`. Planner does not normalize bare names; normalization happens before planner input construction.
@@ -158,5 +158,5 @@ Apply must not re-run classification inside the executor.
 
 ## Determinism Guarantee
 
-Given identical `desired_resource_graph`, `state`, `resolved_feature_order`, and `inventory`:
+Given identical `desired_resource_graph`, `state`, `resolved_component_order`, and `inventory`:
 the planner must produce an identical plan. No randomness permitted.

@@ -20,7 +20,7 @@ Not covered: profile semantics,strategy semantics, planner rules, backend select
 - Migration semantics (v2 → v3)
 
 **What Rust code defines (source of truth):**
-- Struct definitions and field types (`State`, `FeatureState`, `Resource`, `ResourceKind` in `crates/model/src/state.rs`)
+- Struct definitions and field types (`State`, `ComponentState`, `Resource`, `ResourceKind` in `crates/model/src/state.rs`)
 - Parsing and validation logic (`crates/state/src/lib.rs`)
 - JSON serialization format (via serde)
 
@@ -129,7 +129,7 @@ For detailed field definitions and types, see `crates/model/src/state.rs` (rustd
 ## Identity Rules
 
 Within a single component: `resource.id` must be unique.
-Across components: the pair `(feature_id, resource.id)` must be unique.
+Across components: the pair `(component_id, resource.id)` must be unique.
 The same `fs.path` must NOT be recorded by multiple components.
 
 ## Invariants

@@ -13,7 +13,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
 
     let config = ctx.config("config-version-v20.yaml");
 
-    println!("==> Running apply with version-specified features");
+    println!("==> Running apply with version-specified components");
     loadout_apply(ctx, &config)?;
 
     println!("==> Checking state file existence");

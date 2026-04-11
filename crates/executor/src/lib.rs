@@ -1,15 +1,15 @@
-//! Executor: executes a Plan by calling feature-host and backend-host, then commits state.
+//! Executor: executes a Plan by calling component-host and backend-host, then commits state.
 //!
 //! Responsibilities:
 //! - Process `Plan.actions` in order
-//! - For each action, dispatch to `feature-host` (script mode) or `backend-host` (declarative)
-//! - Maintain per-feature atomicity: commit state only if all resources succeed
+//! - For each action, dispatch to `component-host` (script mode) or `backend-host` (declarative)
+//! - Maintain per-component atomicity: commit state only if all resources succeed
 //! - Emit `Event`s so callers (CLI / app) can show progress without coupling to I/O
 //! - Accumulate `ExecutionEnvContext` across actions so PATH and similar variables
 //!   propagate from earlier actions (e.g. brew) to later ones (e.g. npm)
 //!
 //! Error strategy:
-//! - Resource failure  → `Event::ResourceFailed` + feature aborts → `Event::ComponentFailed` → continue
+//! - Resource failure  → `Event::ResourceFailed` + component aborts → `Event::ComponentFailed` → continue
 //! - State commit fail → `ExecutorError` (fatal, stops execution)
 //! - Required contributor fail → `ExecutorError` (fatal, stops execution)
 //! - Optional contributor fail → `Event::ContributorWarning`, execution continues
@@ -58,9 +58,9 @@ pub struct ExecutionEnvQuery<'a> {
 /// Implemented by:
 /// - builtin backend-adjacent structs (e.g. `BrewContributor`, `MiseContributor`)
 /// - runtime provider structs
-/// - feature contributors that have opted in via `feature.yaml`
+/// - component contributors that have opted in via `component.yaml`
 ///
-/// Constraints for feature contributors:
+/// Constraints for component contributors:
 /// - May only contribute `PrependPath` / `AppendPath` mutations (command/runtime exposure)
 /// - Must not mutate global scalar variables (`Set` / `Unset` on shared keys is forbidden)
 /// - All mutations must be reversible (i.e. can be undone by `RemovePath`)
@@ -179,13 +179,13 @@ impl ContributorRegistry {
 /// Events are informational; they do not affect the execution flow.
 #[derive(Debug, Clone)]
 pub enum Event {
-    /// A feature is about to be processed.
+    /// A component is about to be processed.
     ComponentStart { id: String },
-    /// A feature was processed successfully.
+    /// A component was processed successfully.
     ComponentDone { id: String },
-    /// A feature failed; execution continues to the next feature.
+    /// A component failed; execution continues to the next component.
     ComponentFailed { id: String, error: String },
-    /// A single resource failed within a feature.
+    /// A single resource failed within a component.
     ResourceFailed {
         component_id: String,
         resource_id: String,
@@ -201,18 +201,18 @@ pub enum Event {
 /// to continue modifying state.
 #[derive(Debug, thiserror::Error)]
 pub enum ExecutorError {
-    /// State could not be committed after a successful feature execution.
+    /// State could not be committed after a successful component execution.
     /// The state file may be corrupt or the filesystem is unavailable.
     #[error("state commit failed: {reason}")]
     StateCommitFailed { reason: String },
 
-    /// A feature referenced in the plan is absent from the feature index.
+    /// A component referenced in the plan is absent from the component index.
     /// This is a programming error: plan and index must be consistent.
-    #[error("feature not found in index: {id}")]
+    #[error("component not found in index: {id}")]
     ComponentNotInIndex { id: String },
 
-    /// A resource in the desired graph was not found for a feature that needs it.
-    #[error("desired resources not found for feature: {id}")]
+    /// A resource in the desired graph was not found for a component that needs it.
+    #[error("desired resources not found for component: {id}")]
     DesiredResourcesNotFound { id: String },
 
     /// A required contributor failed, making it unsafe to continue execution.
@@ -220,14 +220,14 @@ pub enum ExecutorError {
     RequiredContributorFailed { backend_id: String, reason: String },
 }
 
-/// Result of a feature that executed successfully.
+/// Result of a component that executed successfully.
 #[derive(Debug, Clone)]
 pub struct ExecutedComponent {
     pub id: String,
     pub operation: String,
 }
 
-/// Result of a feature that failed.
+/// Result of a component that failed.
 #[derive(Debug, Clone)]
 pub struct FailedComponent {
     pub id: String,
@@ -241,7 +241,7 @@ pub struct FailedComponent {
 /// future `loadout activate --from-last-apply` support.
 #[derive(Debug, Clone)]
 pub struct EnvArtifact {
-    /// Feature (action) that generated this record.
+    /// Component (action) that generated this record.
     pub component_id: String,
     /// Phase: "pre" (before action) or "post" (after action).
     pub phase: String,
@@ -283,10 +283,10 @@ pub struct ExecutionContext<'a> {
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Execute a plan, mutating `state` in place on each successful feature commit.
+/// Execute a plan, mutating `state` in place on each successful component commit.
 ///
 /// `on_event` receives progress events as they occur (non-blocking).
-/// Returns a report of executed and failed features.
+/// Returns a report of executed and failed components.
 /// Returns `Err` only on unrecoverable failures (state commit I/O, invariant violation).
 pub fn execute(
     ctx: &ExecutionContext<'_>,
@@ -316,7 +316,7 @@ pub fn execute(
 
         match result {
             Ok(()) => {
-                // Commit state after each successful feature.
+                // Commit state after each successful component.
                 state::commit(ctx.state_path, state).map_err(|e| {
                     ExecutorError::StateCommitFailed {
                         reason: e.to_string(),
@@ -366,7 +366,7 @@ pub fn execute(
 // Internal error types
 // ---------------------------------------------------------------------------
 
-/// Non-fatal per-feature error variants.
+/// Non-fatal per-component error variants.
 enum ComponentError {
     Resource { resource_id: String, error: String },
     Component { error: String },
@@ -398,8 +398,8 @@ fn execute_action(
     let id_str = component_id.as_str();
 
     let meta = ctx.index.components.get(id_str).ok_or_else(|| {
-        // This is a programming error but we surface it as a feature-level failure
-        // so execution can continue. The caller will see FeatureFailed.
+        // This is a programming error but we surface it as a component-level failure
+        // so execution can continue. The caller will see ComponentFailed.
         ComponentError::Component {
             error: format!("component not found in index: {id_str}"),
         }
@@ -411,7 +411,7 @@ fn execute_action(
                 ComponentMode::Script => {
                     component_host::run_install(meta, component_id, ctx.dirs, ctx.platform)
                         .map_err(ComponentError::from)?;
-                    // Script features are recorded with empty resources.
+                    // Script components are recorded with empty resources.
                     state
                         .components
                         .insert(id_str.to_string(), ComponentState { resources: vec![] });
@@ -492,7 +492,7 @@ fn execute_action(
 
         Operation::ReplaceBackend => {
             // Remove via old backend (from state), apply via new backend (from graph).
-            // Script features don't have a backend concept; treat as Replace.
+            // Script components don't have a backend concept; treat as Replace.
             if meta.mode == ComponentMode::Script {
                 component_host::run_uninstall(meta, component_id, ctx.dirs, ctx.platform)
                     .map_err(ComponentError::from)?;
@@ -528,7 +528,7 @@ fn execute_action(
 
         Operation::Strengthen => {
             // Apply only the add_resources listed in the plan details.
-            // Script features do not have strengthen; treat as noop with warning.
+            // Script components do not have strengthen; treat as noop with warning.
             if meta.mode == ComponentMode::Script {
                 return Ok(());
             }
@@ -584,7 +584,7 @@ fn execute_action(
 // Resource-level helpers
 // ---------------------------------------------------------------------------
 
-/// Apply all desired resources for a declarative feature.
+/// Apply all desired resources for a declarative component.
 /// Returns the resulting state resources, or a ComponentError on the first failure.
 fn apply_resources(
     ctx: &ExecutionContext<'_>,
@@ -1280,7 +1280,7 @@ mod tests {
 
     // --- Tests --------------------------------------------------------------
 
-    /// Create declarative feature: resources applied, state committed.
+    /// Create declarative component: resources applied, state committed.
     #[test]
     fn create_declarative_success_updates_state() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1323,9 +1323,9 @@ mod tests {
         assert!(failed.is_empty());
     }
 
-    /// Create declarative feature with failing backend: FeatureFailed emitted, state unchanged.
+    /// Create declarative component with failing backend: ComponentFailed emitted, state unchanged.
     #[test]
-    fn create_declarative_resource_fail_emits_feature_failed() {
+    fn create_declarative_resource_fail_emits_component_failed() {
         let tmp = tempfile::tempdir().unwrap();
         let state_path = tmp.path().join("state.json");
 
@@ -1359,20 +1359,20 @@ mod tests {
 
         assert!(report.executed.is_empty());
         assert_eq!(report.failed.len(), 1);
-        // State must not contain the feature.
+        // State must not contain the component.
         assert!(!state.components.contains_key("core/git"));
 
         let resource_failed = events
             .iter()
             .any(|e| matches!(e, Event::ResourceFailed { .. }));
-        let feature_failed = events
+        let component_failed = events
             .iter()
             .any(|e| matches!(e, Event::ComponentFailed { .. }));
         assert!(resource_failed, "expected ResourceFailed event");
-        assert!(feature_failed, "expected FeatureFailed event");
+        assert!(component_failed, "expected ComponentFailed event");
     }
 
-    /// Destroy declarative feature: resources removed, state cleared.
+    /// Destroy declarative component: resources removed, state cleared.
     #[test]
     fn destroy_declarative_success_removes_state() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1423,7 +1423,7 @@ mod tests {
         );
     }
 
-    /// Destroy declarative feature with failing backend: state unchanged.
+    /// Destroy declarative component with failing backend: state unchanged.
     #[test]
     fn destroy_resource_fail_leaves_state_unchanged() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1469,11 +1469,11 @@ mod tests {
         let report = execute(&ctx, &mut state, &mut |e| events.push(e)).unwrap();
 
         assert!(report.failed.len() == 1);
-        // State must still have the feature.
+        // State must still have the component.
         assert!(state.components.contains_key("core/git"));
     }
 
-    /// Multiple features: failed feature does not stop subsequent features.
+    /// Multiple components: failed component does not stop subsequent components.
     #[test]
     fn failed_component_does_not_stop_next_component() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1596,9 +1596,9 @@ mod tests {
         );
     }
 
-    /// Create script feature: install script executed, empty resources recorded in state.
+    /// Create script component: install script executed, empty resources recorded in state.
     #[test]
-    fn create_script_feature_records_empty_resources() {
+    fn create_script_component_records_empty_resources() {
         let tmp = tempfile::tempdir().unwrap();
         let state_path = tmp.path().join("state.json");
         let feat_dir = tmp.path().join("feat");

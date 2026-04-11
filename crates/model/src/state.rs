@@ -24,7 +24,7 @@ pub struct State {
 }
 
 impl State {
-    /// Construct an empty (no features installed) initial state.
+    /// Construct an empty (no components installed) initial state.
     pub fn empty() -> Self {
         Self {
             version: STATE_VERSION,
@@ -36,17 +36,17 @@ impl State {
 /// Resources recorded for a single installed component.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ComponentState {
-    /// Resources installed for this feature.
+    /// Resources installed for this component.
     pub resources: Vec<Resource>,
 }
 
 /// A recorded resource entry in state.
 ///
 /// `id` must be unique within a component's resource list.
-/// The `(feature_id, resource.id)` pair must be unique across all features.
+/// The `(component_id, resource.id)` pair must be unique across all components.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Resource {
-    /// Stable, human-readable resource identifier unique within a feature.
+    /// Stable, human-readable resource identifier unique within a component.
     pub id: String,
 
     /// Resource kind and kind-specific data.

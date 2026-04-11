@@ -1,7 +1,7 @@
 //! DesiredResourceGraph data types.
 //!
 //! The DesiredResourceGraph is the structured representation of all resources that should
-//! exist after a successful apply, grouped by component. It is produced by FeatureCompiler
+//! exist after a successful apply, grouped by component. It is produced by ComponentCompiler
 //! and consumed exclusively by Planner.
 //!
 //! See: `docs/specs/data/desired_resource_graph.md`
@@ -15,7 +15,7 @@ pub const DESIRED_RESOURCE_GRAPH_SCHEMA_VERSION: u32 = 1;
 
 /// Compiled desired resources grouped by component, with backends already resolved.
 ///
-/// Immutable once produced by FeatureCompiler. Neither Planner nor Executor may modify it.
+/// Immutable once produced by ComponentCompiler. Neither Planner nor Executor may modify it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DesiredResourceGraph {
     /// Schema version. Must be [`DESIRED_RESOURCE_GRAPH_SCHEMA_VERSION`] (1).
@@ -29,7 +29,7 @@ pub struct DesiredResourceGraph {
 /// Desired resources for a single component.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ComponentDesiredResources {
-    /// Resources that should exist for this feature after apply.
+    /// Resources that should exist for this component after apply.
     pub resources: Vec<DesiredResource>,
 }
 
@@ -39,7 +39,7 @@ pub struct ComponentDesiredResources {
 /// Changing a resource `id` is a breaking change requiring state migration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DesiredResource {
-    /// Stable resource identifier unique within a feature's resource list.
+    /// Stable resource identifier unique within a component's resource list.
     pub id: String,
 
     /// Resource kind and kind-specific data (backend already resolved).
@@ -49,7 +49,7 @@ pub struct DesiredResource {
 
 /// Kind-specific data for a desired resource (post-compiler, backend resolved).
 ///
-/// `desired_backend` is present for `Package` and `Runtime` because FeatureCompiler
+/// `desired_backend` is present for `Package` and `Runtime` because ComponentCompiler
 /// has already resolved strategy. The Planner uses this field for backend-mismatch detection.
 ///
 /// `Fs` resources have no backend; they are handled directly by the `fs` module.
@@ -65,7 +65,7 @@ pub enum DesiredResourceKind {
     Package {
         /// Package name as known to the backend (e.g., `"git"`, `"neovim"`).
         name: String,
-        /// Canonical backend ID resolved by FeatureCompiler (e.g., `"core/brew"`).
+        /// Canonical backend ID resolved by ComponentCompiler (e.g., `"core/brew"`).
         ///
         /// The Planner uses this for backend-mismatch detection. The Executor dispatches to this backend.
         desired_backend: CanonicalBackendId,
@@ -78,16 +78,16 @@ pub enum DesiredResourceKind {
         name: String,
         /// Version string (exact or constraint, e.g., `"20.0.0"`, `"3.12"`).
         version: String,
-        /// Canonical backend ID resolved by FeatureCompiler (e.g., `"core/mise"`).
+        /// Canonical backend ID resolved by ComponentCompiler (e.g., `"core/mise"`).
         desired_backend: CanonicalBackendId,
     },
     /// A filesystem entry to be created or linked (no backend).
     ///
     /// Handled directly by the `fs` module without backend involvement.
     Fs {
-        /// Path to source file/dir relative to the feature directory.
+        /// Path to source file/dir relative to the component directory.
         ///
-        /// Defaults to `files/<basename(path)>` if omitted in the feature spec.
+        /// Defaults to `files/<basename(path)>` if omitted in the component spec.
         #[serde(skip_serializing_if = "Option::is_none")]
         source: Option<String>,
         /// Target path where the file/dir should exist (absolute or `~`-relative).

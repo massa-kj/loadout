@@ -91,7 +91,7 @@ function Test-SandboxAvailable {
             return $true
         } catch {
             Write-Host ""
-            Write-Warn "Windows Sandbox feature not found"
+            Write-Warn "Windows Sandbox component not found"
             Write-Info "Ensure you are running Windows 10 Pro/Enterprise (1903+) or Windows 11"
             Write-Host ""
             return $false
@@ -103,9 +103,9 @@ function Test-SandboxAvailable {
             return $true
         }
         Write-Host ""
-        Write-Warn "Windows Sandbox feature not found"
+        Write-Warn "Windows Sandbox component not found"
         Write-Info "Ensure you are running Windows 10 Pro/Enterprise (1903+) or Windows 11"
-        Write-Info "(Run as administrator to perform a definitive feature-state check)"
+        Write-Info "(Run as administrator to perform a definitive component-state check)"
         Write-Host ""
         return $false
     }

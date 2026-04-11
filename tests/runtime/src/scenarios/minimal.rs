@@ -31,13 +31,13 @@ pub fn run(ctx: &Context) -> Result<(), String> {
     println!("==> Checking version field");
     assert_state_version(&state)?;
 
-    println!("==> Checking features object exists");
+    println!("==> Checking components object exists");
     assert_components_present(&state)?;
 
-    println!("==> Checking no duplicate resource ids per feature");
+    println!("==> Checking no duplicate resource ids per component");
     assert_no_duplicate_resource_ids(&state)?;
 
-    println!("==> Checking no duplicate fs.path across features");
+    println!("==> Checking no duplicate fs.path across components");
     assert_no_duplicate_fs_paths(&state)?;
 
     println!("==> Checking all fs paths are absolute");

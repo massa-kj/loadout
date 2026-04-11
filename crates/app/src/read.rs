@@ -15,10 +15,10 @@ use crate::context::{AppContext, AppError};
 use crate::pipeline::{build_source_roots, load_sources_optional, to_ci_platform};
 
 // ---------------------------------------------------------------------------
-// Feature types
+// Component types
 // ---------------------------------------------------------------------------
 
-/// Summary of a single feature for list output.
+/// Summary of a single component for list output.
 #[derive(Debug, Serialize)]
 pub struct ComponentSummary {
     pub id: String,
@@ -27,7 +27,7 @@ pub struct ComponentSummary {
     pub description: Option<String>,
 }
 
-/// Full detail of a single feature for show output.
+/// Full detail of a single component for show output.
 #[derive(Debug, Serialize)]
 pub struct ComponentDetail {
     pub id: String,
@@ -117,7 +117,7 @@ pub struct ConfigDetail {
 }
 
 // ---------------------------------------------------------------------------
-// list_features
+// list_components
 // ---------------------------------------------------------------------------
 
 /// List all components visible from the current source roots.
@@ -153,7 +153,7 @@ pub fn list_components(
 }
 
 // ---------------------------------------------------------------------------
-// show_feature
+// show_component
 // ---------------------------------------------------------------------------
 
 /// Load and return full detail for the component with the given canonical ID.
@@ -509,7 +509,7 @@ fn format_allow(allow: &Option<model::sources::AllowSpec>) -> Option<String> {
         None => None,
         Some(model::sources::AllowSpec::All(_)) => Some("*".to_string()),
         Some(model::sources::AllowSpec::Detailed(d)) => {
-            let features = d.components.as_ref().map(|l| match l {
+            let components = d.components.as_ref().map(|l| match l {
                 model::sources::AllowList::All(_) => "components:*".to_string(),
                 model::sources::AllowList::Names(v) => format!("components:[{}]", v.join(",")),
             });
@@ -518,7 +518,7 @@ fn format_allow(allow: &Option<model::sources::AllowSpec>) -> Option<String> {
                 model::sources::AllowList::Names(v) => format!("backends:[{}]", v.join(",")),
             });
             Some(
-                [features, backends]
+                [components, backends]
                     .into_iter()
                     .flatten()
                     .collect::<Vec<_>>()

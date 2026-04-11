@@ -1,9 +1,9 @@
 spec_version: 1
 description: |
-  Dummy runtime feature for E2E testing.
+  Dummy runtime component for E2E testing.
   Uses the local/dummy-rt backend — no network access required.
   The version in this file is the default; the profile config can override it
-  via the feature's 'version' field.
+  via the component's 'version' field.
 depends: []
 
 provides:

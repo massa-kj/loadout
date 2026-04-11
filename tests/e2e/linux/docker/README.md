@@ -119,9 +119,9 @@ cat "$XDG_STATE_HOME/loadout/state.json"
 The most comprehensive scenario — verifies the full lifecycle in a single pass:
 
 1. base apply — state initialised correctly
-2. full apply — additional features installed
+2. full apply — additional components installed
 3. full apply (repeat) — idempotency confirmed
-4. base apply — unwanted features removed safely
+4. base apply — unwanted components removed safely
 5. empty apply — all tracked resources removed
 
 `all` runs this scenario as the primary test.
@@ -132,7 +132,7 @@ Basic execution:
 
 * State file created
 * Version field correct (`version == 3`)
-* Features recorded
+* Components recorded
 * No duplicate resource IDs
 * All `fs` paths are absolute
 
@@ -161,10 +161,10 @@ Version specification:
 
 ### version-mixed
 
-Coexistence of versioned and unversioned features:
+Coexistence of versioned and unversioned components:
 
-* Features with a version spec record a `runtime` resource
-* Features without a version spec do not
+* Components with a version spec record a `runtime` resource
+* Components without a version spec do not
 
 ### version-upgrade
 

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Canonical feature identifier: `<source_id>/<name>` (e.g. `core/git`).
+/// Canonical component identifier: `<source_id>/<name>` (e.g. `core/git`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct CanonicalComponentId(String);

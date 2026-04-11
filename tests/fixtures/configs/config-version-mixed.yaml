@@ -1,5 +1,5 @@
-# Mixed config: versioned (dummy-rt) and non-versioned (dummy-pkg) features.
-# Verifies: versioned features record runtime.version; non-versioned do not.
+# Mixed config: versioned (dummy-rt) and non-versioned (dummy-pkg) components.
+# Verifies: versioned components record runtime.version; non-versioned do not.
 # Used by: version_mixed scenario.
 
 profile:

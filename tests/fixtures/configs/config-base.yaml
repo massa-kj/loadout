@@ -1,4 +1,4 @@
-# Minimal feature set: package + fs resources, no runtime.
+# Minimal component set: package + fs resources, no runtime.
 # Verifies state creation, file tracking, and no duplicates.
 # Used by: minimal, lifecycle (base phase), idempotent, uninstall scenarios.
 

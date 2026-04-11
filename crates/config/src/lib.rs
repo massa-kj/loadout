@@ -6,7 +6,7 @@
 //! ## Input format
 //!
 //! Profiles use *namespace grouping* syntax: the outer key is a `source_id`,
-//! the inner key is the feature name. Both bare names and canonical `source/name`
+//! the inner key is the component name. Both bare names and canonical `source/name`
 //! forms are **rejected**; grouping is the only accepted syntax.
 //!
 //! ```yaml
@@ -20,7 +20,7 @@
 //!         version: "3.12"
 //! ```
 //!
-//! Bundles allow reusable feature sets:
+//! Bundles allow reusable component sets:
 //!
 //! ```yaml
 //! bundle:
@@ -44,7 +44,7 @@
 //!       nvim: {}      # profile.components overrides all bundles
 //! ```
 //!
-//! After expansion and normalization, all feature keys are canonical `source_id/name`.
+//! After expansion and normalization, all component keys are canonical `source_id/name`.
 //! Source existence is NOT verified here; that happens at `SourceRegistry` construction.
 //!
 //! **Path resolution contract**: callers supply explicit `&Path` values.
@@ -95,7 +95,7 @@ pub enum ConfigError {
 
 // ─── Raw profile types (config-crate-local) ─────────────────────────────────
 
-/// Raw per-feature config as parsed from YAML (grouping syntax inner value).
+/// Raw per-component config as parsed from YAML (grouping syntax inner value).
 /// Mirrors `ProfileComponentConfig` but is local to this crate.
 #[derive(Deserialize, Default, Clone)]
 struct RawComponentConfig {
@@ -103,12 +103,12 @@ struct RawComponentConfig {
     version: Option<String>,
 }
 
-/// Grouped feature map: `source_id → (feature_name → config)`.
+/// Grouped component map: `source_id → (component_name → config)`.
 /// This is the only accepted input shape; bare names and canonical direct form are rejected.
 type GroupedComponents = HashMap<String, HashMap<String, RawComponentConfig>>;
 
 /// Raw profile as read from a standalone profile YAML file.
-/// `features` uses the grouped syntax.
+/// `components` uses the grouped syntax.
 #[derive(Deserialize)]
 struct RawProfile {
     #[serde(default)]
@@ -126,7 +126,7 @@ struct RawBundleRef {
     use_list: Vec<String>,
 }
 
-/// A single bundle definition. Uses the same grouped-features syntax as profiles.
+/// A single bundle definition. Uses the same grouped-components syntax as profiles.
 #[derive(Deserialize)]
 struct RawBundle {
     #[serde(default)]
@@ -138,13 +138,13 @@ type RawBundlesMap = HashMap<String, RawBundle>;
 
 // ─── Expansion helpers ───────────────────────────────────────────────────────
 
-/// Expand grouped features into a flat canonical map.
+/// Expand grouped components into a flat canonical map.
 ///
 /// `{source_id: {name: config}}` → `{"source_id/name": ProfileComponentConfig}`
 ///
 /// Validates:
 /// - `source_id` must not be empty
-/// - feature name must not be empty
+/// - component name must not be empty
 /// - duplicate canonical IDs are rejected
 ///
 /// Does NOT verify that `source_id` exists in the source registry;
@@ -163,13 +163,13 @@ fn expand_grouped_components(
         for (name, cfg) in names {
             if name.is_empty() {
                 return Err(ConfigError::InvalidProfile {
-                    reason: format!("feature name under source '{source_id}' must not be empty"),
+                    reason: format!("component name under source '{source_id}' must not be empty"),
                 });
             }
             let canonical = format!("{source_id}/{name}");
             if out.contains_key(&canonical) {
                 return Err(ConfigError::InvalidProfile {
-                    reason: format!("duplicate feature '{canonical}'"),
+                    reason: format!("duplicate component '{canonical}'"),
                 });
             }
             out.insert(
@@ -184,9 +184,9 @@ fn expand_grouped_components(
     Ok(out)
 }
 
-/// Merge bundles in `use` list order (last entry wins), then overlay profile features.
+/// Merge bundles in `use` list order (last entry wins), then overlay profile components.
 ///
-/// Returns merged grouped features ready for `expand_grouped_components`.
+/// Returns merged grouped components ready for `expand_grouped_components`.
 /// Priority (lowest → highest): bundles[0], bundles[1], …, profile.components.
 fn expand_bundles(
     bundle_ref: &RawBundleRef,
@@ -202,20 +202,20 @@ fn expand_bundles(
         }
     }
 
-    // Merge: iterate use list in order; last bundle wins per feature.
+    // Merge: iterate use list in order; last bundle wins per component.
     let mut merged: GroupedComponents = HashMap::new();
     for name in &bundle_ref.use_list {
         let bundle = &bundles[name];
         for (source_id, names) in &bundle.components {
             let source_entry = merged.entry(source_id.clone()).or_default();
             for (feat_name, cfg) in names {
-                // Later bundle overwrites earlier bundle for same feature.
+                // Later bundle overwrites earlier bundle for same component.
                 source_entry.insert(feat_name.clone(), cfg.clone());
             }
         }
     }
 
-    // Overlay: profile.components overwrites all bundle-merged features.
+    // Overlay: profile.components overwrites all bundle-merged components.
     for (source_id, names) in profile_components {
         let source_entry = merged.entry(source_id).or_default();
         for (feat_name, cfg) in names {
@@ -232,7 +232,7 @@ fn expand_bundles(
 ///
 /// The file must use grouping syntax:
 /// ```yaml
-/// features:
+/// components:
 ///   core:
 ///     git: {}
 ///   local:
@@ -297,12 +297,12 @@ fn validate_backend_strategy_field(field: &str, value: Option<&str>) -> Result<(
 /// so future sections added to the format will not break existing versions.
 ///
 /// Sections:
-/// - `profile` — required. Features use grouping syntax `source_id: { name: {} }`.
+/// - `profile` — required. Components use grouping syntax `source_id: { name: {} }`.
 /// - `strategy` — optional. Absent → `Strategy::default()` (no overrides).
 /// - `bundle`   — optional. Lists which bundles to apply (`use: [base, work]`).
 /// - `bundles`  — optional. Named bundle definitions (same grouping syntax as profile).
 ///
-/// Pipeline: bundle expansion → grouped-feature normalization → canonical Profile.
+/// Pipeline: bundle expansion → grouped-component normalization → canonical Profile.
 ///
 /// # Format
 ///
@@ -352,7 +352,7 @@ pub fn load_config(path: &Path) -> Result<(Profile, Strategy), ConfigError> {
     // Bundle expansion: merge bundles in use-list order (last wins), then overlay profile.
     let merged = expand_bundles(&raw.bundle, &raw.bundles, raw_profile.components)?;
 
-    // Normalize grouped features to canonical flat map.
+    // Normalize grouped components to canonical flat map.
     let flat = expand_grouped_components(merged)?;
     let profile = Profile { components: flat };
 
@@ -635,7 +635,7 @@ mod tests {
     // ── Profile (grouping) tests ───────────────────────────────────────────
 
     #[test]
-    fn grouped_features_normalized_to_canonical() {
+    fn grouped_components_normalized_to_canonical() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "components:\n  core:\n    git: {}\n  local:\n    nvim: {}\n";
         let p = write_yaml_file(dir.path(), "profile.yaml", yaml);
@@ -652,7 +652,7 @@ mod tests {
     }
 
     #[test]
-    fn profile_empty_features_ok() {
+    fn profile_empty_components_ok() {
         let dir = tempfile::tempdir().unwrap();
         let p = write_yaml_file(dir.path(), "profile.yaml", "components: {}\n");
         let profile = load_profile(&p).unwrap();
@@ -671,7 +671,7 @@ mod tests {
 
     #[test]
     fn profile_empty_source_id_rejected() {
-        // YAML: features: { "": { git: {} } }
+        // YAML: components: { "": { git: {} } }
         // serde_yaml will parse "" as an empty key
         let dir = tempfile::tempdir().unwrap();
         let yaml = "components:\n  \"\":\n    git: {}\n";
@@ -681,7 +681,7 @@ mod tests {
     }
 
     #[test]
-    fn profile_empty_feature_name_rejected() {
+    fn profile_empty_component_name_rejected() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "components:\n  core:\n    \"\": {}\n";
         let p = write_yaml_file(dir.path(), "profile.yaml", yaml);
@@ -696,7 +696,7 @@ mod tests {
         // "core: { git: {} }" appears once). Duplicates can only occur within
         // the same source group — e.g. outer key "core" appearing twice, which
         // YAML/serde handles by last-write-wins (HashMap). So verify the happy
-        // path instead: same source, two different features are both present.
+        // path instead: same source, two different components are both present.
         let dir = tempfile::tempdir().unwrap();
         let yaml = "components:\n  core:\n    git: {}\n    bash: {}\n";
         let p = write_yaml_file(dir.path(), "profile.yaml", yaml);
@@ -708,17 +708,17 @@ mod tests {
     #[test]
     fn profile_bare_name_at_top_level_rejected() {
         // Old format: "components:\n  git: {}\n" where the value is an empty map.
-        // Now "git" is treated as a source_id mapping to feature-map {"git": {}}.
-        // This is actually valid (source "git" with feature "{}") - but since the
-        // value `{}` is an empty HashMap, "git" source has no features.
+        // Now "git" is treated as a source_id mapping to component-map {"git": {}}.
+        // This is actually valid (source "git" with component "{}") - but since the
+        // value `{}` is an empty HashMap, "git" source has no components.
         // The resulting canonical map will be empty, not an error.
         // The important invariant is: you cannot sneak a bare name through as canonical.
         let dir = tempfile::tempdir().unwrap();
-        // "components:\n  git: {}\n" — source_id=git, inner map is empty → 0 features
+        // "components:\n  git: {}\n" — source_id=git, inner map is empty → 0 components
         let yaml = "components:\n  git: {}\n";
         let p = write_yaml_file(dir.path(), "profile.yaml", yaml);
         let profile = load_profile(&p).unwrap();
-        // Inner {} means empty sourced features, not "git" as a canonical ID.
+        // Inner {} means empty sourced components, not "git" as a canonical ID.
         assert!(
             !profile.components.contains_key("git"),
             "bare 'git' must not appear as canonical"
@@ -888,7 +888,7 @@ strategy:
     }
 
     #[test]
-    fn config_empty_profile_features_ok() {
+    fn config_empty_profile_components_ok() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "profile:\n  components: {}\n";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
@@ -951,7 +951,7 @@ strategy:
     // ── Bundle tests ───────────────────────────────────────────────────────
 
     #[test]
-    fn bundle_features_merged_into_profile() {
+    fn bundle_components_merged_into_profile() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "\
 bundle:
@@ -973,11 +973,11 @@ profile:
         let (profile, _) = load_config(&p).unwrap();
         assert!(
             profile.components.contains_key("core/git"),
-            "bundle feature must be merged"
+            "bundle component must be merged"
         );
         assert!(
             profile.components.contains_key("local/nvim"),
-            "profile feature must be present"
+            "profile component must be present"
         );
         assert_eq!(profile.components.len(), 2);
     }
@@ -1019,7 +1019,7 @@ profile:
     }
 
     #[test]
-    fn bundle_profile_features_override_bundle() {
+    fn bundle_profile_components_override_bundle() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "\
 bundle:

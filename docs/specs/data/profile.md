@@ -17,8 +17,8 @@ A config file (`config.yaml`) contains the following top-level sections:
 profile:
   components:
     <source_id>:
-      <feature_name>: {}
-      <feature_name>:
+      <component_name>: {}
+      <component_name>:
         version: "<string>"
 
 bundle:            # optional — lists which bundles to apply
@@ -29,7 +29,7 @@ bundles:           # optional — named bundle definitions
   <bundle_name>:
     components:
       <source_id>:
-        <feature_name>: {}
+        <component_name>: {}
 
 strategy:          # optional — may be omitted; defaults to Strategy::default()
   ...
@@ -156,7 +156,7 @@ profile:
         version: "22.17.1"
       python:
         version: "3.12"
-      myfeat: {}
+      mycomponent: {}
 
 strategy:
   runtime:
