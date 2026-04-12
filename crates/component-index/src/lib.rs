@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 
 use model::component_index::{
     CapabilityRef, ComponentIndex, ComponentMeta, ComponentMode, ComponentSpec, DepSpec,
-    SpecResource, SpecResourceKind, COMPONENT_INDEX_SCHEMA_VERSION,
+    ScriptSpec, SpecResource, SpecResourceKind, COMPONENT_INDEX_SCHEMA_VERSION,
 };
 use serde::Deserialize;
 use thiserror::Error;
@@ -51,6 +51,41 @@ pub enum ComponentIndexError {
     /// A `declarative` mode component has no `resources` list.
     #[error("component '{component_id}': mode is declarative but no resources are declared")]
     DeclarativeMissingResources { component_id: String },
+
+    /// A `managed_script` component has no `resources` list or declares no `tool` resources.
+    #[error(
+        "component '{component_id}': mode is managed_script but no tool resources are declared"
+    )]
+    ManagedScriptMissingResources { component_id: String },
+
+    /// A `managed_script` component declares a resource kind other than `tool`.
+    #[error(
+        "component '{component_id}': mode is managed_script but resource '{resource_id}' \
+         has kind '{kind}' (only 'tool' is allowed in managed_script components)"
+    )]
+    ManagedScriptInvalidResourceKind {
+        component_id: String,
+        resource_id: String,
+        kind: String,
+    },
+
+    /// A `managed_script` (or `script`) component does not declare `scripts.install`/`scripts.uninstall`.
+    #[error(
+        "component '{component_id}': mode is {mode} but 'scripts.install' and \
+         'scripts.uninstall' are required"
+    )]
+    ScriptsMissing { component_id: String, mode: String },
+
+    /// A `tool` resource has no identity verify (only `versioned_command`-only verify is invalid).
+    #[error(
+        "component '{component_id}': tool resource '{resource_id}' \
+         must declare an identity verify (resolved_command, file, symlink_target, or directory). \
+         versioned_command alone is insufficient."
+    )]
+    ToolMissingIdentityVerify {
+        component_id: String,
+        resource_id: String,
+    },
 
     /// A `dep.depends` entry uses a multi-slash form (normalized form must be `<source>/<name>`).
     #[error(
@@ -211,9 +246,10 @@ fn build_one(
         }
     }
 
-    // Determine mode. Default is declarative; script must be declared explicitly.
+    // Determine mode. Default is declarative; script/managed_script must be declared explicitly.
     let mode = match merged.mode.as_deref() {
         Some("script") => ComponentMode::Script,
+        Some("managed_script") => ComponentMode::ManagedScript,
         _ => ComponentMode::Declarative,
     };
 
@@ -256,6 +292,55 @@ fn build_one(
         }
     }
 
+    // `managed_script` mode requires scripts.install and scripts.uninstall.
+    // `script` mode supports implicit file-name discovery by component-host, so scripts: is optional.
+    if matches!(mode, ComponentMode::ManagedScript) {
+        let scripts_ok = merged
+            .scripts
+            .as_ref()
+            .is_some_and(|s| s.install.is_some() && s.uninstall.is_some());
+        if !scripts_ok {
+            return Err(ComponentIndexError::ScriptsMissing {
+                component_id: component_id.to_string(),
+                mode: "managed_script".to_string(),
+            });
+        }
+    }
+
+    // `managed_script` mode: all resources must be `kind: tool`, and at least one must exist.
+    if matches!(mode, ComponentMode::ManagedScript) {
+        let has_resources = spec.as_ref().is_some_and(|s| !s.resources.is_empty());
+        if !has_resources {
+            return Err(ComponentIndexError::ManagedScriptMissingResources {
+                component_id: component_id.to_string(),
+            });
+        }
+        for resource in spec.as_ref().unwrap().resources.iter() {
+            if !matches!(resource.kind, SpecResourceKind::Tool { .. }) {
+                let kind_str = match &resource.kind {
+                    SpecResourceKind::Package { .. } => "package",
+                    SpecResourceKind::Runtime { .. } => "runtime",
+                    SpecResourceKind::Fs { .. } => "fs",
+                    SpecResourceKind::Tool { .. } => unreachable!(),
+                };
+                return Err(ComponentIndexError::ManagedScriptInvalidResourceKind {
+                    component_id: component_id.to_string(),
+                    resource_id: resource.id.clone(),
+                    kind: kind_str.to_string(),
+                });
+            }
+        }
+    }
+
+    // Build ScriptSpec from raw scripts fields.
+    // For managed_script: already validated present above.
+    // For script: optional (component-host falls back to convention-based file discovery).
+    let scripts = merged.scripts.and_then(|raw| {
+        let install = raw.install?;
+        let uninstall = raw.uninstall?;
+        Some(ScriptSpec { install, uninstall })
+    });
+
     Ok(ComponentMeta {
         spec_version: SUPPORTED_SPEC_VERSION,
         mode,
@@ -263,6 +348,7 @@ fn build_one(
         source_dir: component_dir.to_string_lossy().into_owned(),
         dep,
         spec,
+        scripts,
     })
 }
 
@@ -288,6 +374,9 @@ fn merge(mut base: RawComponentYaml, overlay: RawComponentYaml) -> RawComponentY
     }
     if overlay.resources.is_some() {
         base.resources = overlay.resources;
+    }
+    if overlay.scripts.is_some() {
+        base.scripts = overlay.scripts;
     }
     base
 }
@@ -339,6 +428,14 @@ struct RawComponentYaml {
     requires: Option<Vec<RawCapRef>>,
     provides: Option<Vec<RawCapRef>>,
     resources: Option<Vec<RawSpecResource>>,
+    scripts: Option<RawScriptSpec>,
+}
+
+/// Raw script entry points from `component.yaml`.
+#[derive(Debug, Default, Deserialize)]
+struct RawScriptSpec {
+    install: Option<String>,
+    uninstall: Option<String>,
 }
 
 /// Raw capability reference (`{ name: "..." }`).
@@ -664,5 +761,115 @@ mod tests {
         assert_eq!(dep.provides[1].name, "package_manager");
         assert_eq!(dep.requires.len(), 1);
         assert_eq!(dep.requires[0].name, "shell");
+    }
+
+    // ─── managed_script mode ─────────────────────────────────────────────────
+
+    #[test]
+    fn managed_script_component_parsed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fdir = make_component_dir(tmp.path(), "brew");
+        let yaml = concat!(
+            "spec_version: 1\n",
+            "mode: managed_script\n",
+            "scripts:\n",
+            "  install: install.sh\n",
+            "  uninstall: uninstall.sh\n",
+            "resources:\n",
+            "  - id: tool:brew\n",
+            "    kind: tool\n",
+            "    name: brew\n",
+            "    verify:\n",
+            "      identity:\n",
+            "        type: resolved_command\n",
+            "        command: brew\n",
+            "        expected_path:\n",
+            "          one_of:\n",
+            "            - /home/linuxbrew/.linuxbrew/bin/brew\n",
+        );
+        write(&fdir, "component.yaml", yaml);
+
+        let index = build(&[source_root("core", tmp.path())], &Platform::Linux).unwrap();
+        let meta = index.components.get("core/brew").unwrap();
+        assert_eq!(meta.mode, ComponentMode::ManagedScript);
+        let scripts = meta.scripts.as_ref().unwrap();
+        assert_eq!(scripts.install, "install.sh");
+        assert_eq!(scripts.uninstall, "uninstall.sh");
+        let spec = meta.spec.as_ref().unwrap();
+        assert_eq!(spec.resources.len(), 1);
+        assert_eq!(spec.resources[0].id, "tool:brew");
+        assert!(matches!(
+            spec.resources[0].kind,
+            model::component_index::SpecResourceKind::Tool { .. }
+        ));
+    }
+
+    #[test]
+    fn managed_script_missing_scripts_is_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fdir = make_component_dir(tmp.path(), "brew");
+        let yaml = concat!(
+            "spec_version: 1\n",
+            "mode: managed_script\n",
+            "resources:\n",
+            "  - id: tool:brew\n",
+            "    kind: tool\n",
+            "    name: brew\n",
+            "    verify:\n",
+            "      identity:\n",
+            "        type: resolved_command\n",
+            "        command: brew\n",
+            "        expected_path:\n",
+            "          one_of:\n",
+            "            - /home/linuxbrew/.linuxbrew/bin/brew\n",
+        );
+        write(&fdir, "component.yaml", yaml);
+
+        let err = build(&[source_root("core", tmp.path())], &Platform::Linux).unwrap_err();
+        assert!(matches!(err, ComponentIndexError::ScriptsMissing { .. }));
+    }
+
+    #[test]
+    fn managed_script_missing_resources_is_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fdir = make_component_dir(tmp.path(), "brew");
+        let yaml = concat!(
+            "spec_version: 1\n",
+            "mode: managed_script\n",
+            "scripts:\n",
+            "  install: install.sh\n",
+            "  uninstall: uninstall.sh\n",
+        );
+        write(&fdir, "component.yaml", yaml);
+
+        let err = build(&[source_root("core", tmp.path())], &Platform::Linux).unwrap_err();
+        assert!(matches!(
+            err,
+            ComponentIndexError::ManagedScriptMissingResources { .. }
+        ));
+    }
+
+    #[test]
+    fn managed_script_non_tool_resource_is_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fdir = make_component_dir(tmp.path(), "brew");
+        let yaml = concat!(
+            "spec_version: 1\n",
+            "mode: managed_script\n",
+            "scripts:\n",
+            "  install: install.sh\n",
+            "  uninstall: uninstall.sh\n",
+            "resources:\n",
+            "  - id: pkg:git\n",
+            "    kind: package\n",
+            "    name: git\n",
+        );
+        write(&fdir, "component.yaml", yaml);
+
+        let err = build(&[source_root("core", tmp.path())], &Platform::Linux).unwrap_err();
+        assert!(matches!(
+            err,
+            ComponentIndexError::ManagedScriptInvalidResourceKind { .. }
+        ));
     }
 }

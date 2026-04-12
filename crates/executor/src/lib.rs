@@ -416,6 +416,8 @@ fn execute_action(
                         .components
                         .insert(id_str.to_string(), ComponentState { resources: vec![] });
                 }
+                // Phase 5/6: managed_script create not yet implemented.
+                ComponentMode::ManagedScript => todo!("managed_script create"),
                 ComponentMode::Declarative => {
                     let desired = ctx.graph.components.get(id_str).ok_or_else(|| {
                         ComponentError::Component {
@@ -444,6 +446,8 @@ fn execute_action(
                     component_host::run_uninstall(meta, component_id, ctx.dirs, ctx.platform)
                         .map_err(ComponentError::from)?;
                 }
+                // Phase 5/6: managed_script destroy not yet implemented.
+                ComponentMode::ManagedScript => todo!("managed_script destroy"),
                 ComponentMode::Declarative => {
                     // Remove resources using the backend recorded in state (authoritative).
                     if let Some(comp_state) = state.components.get(id_str) {
@@ -466,6 +470,8 @@ fn execute_action(
                         .components
                         .insert(id_str.to_string(), ComponentState { resources: vec![] });
                 }
+                // Phase 5/6: managed_script replace not yet implemented.
+                ComponentMode::ManagedScript => todo!("managed_script replace"),
                 ComponentMode::Declarative => {
                     if let Some(comp_state) = state.components.get(id_str) {
                         remove_state_resources(ctx, id_str, &comp_state.resources.clone())?;
@@ -1193,6 +1199,7 @@ mod tests {
             source_dir: "/tmp".to_string(),
             dep: DepSpec::default(),
             spec: None,
+            scripts: None,
         }
     }
 
@@ -1204,6 +1211,7 @@ mod tests {
             source_dir: source_dir.to_string(),
             dep: DepSpec::default(),
             spec: None,
+            scripts: None,
         }
     }
 

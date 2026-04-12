@@ -260,6 +260,7 @@ mod tests {
                             .collect(),
                     },
                     spec: None,
+                    scripts: None,
                 };
                 (id.to_string(), meta)
             })

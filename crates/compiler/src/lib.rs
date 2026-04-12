@@ -90,6 +90,9 @@ pub fn compile(
             continue;
         }
 
+        // ManagedScript components declare `tool` resources that are compiled like declarative
+        // resources. Scripts handle install/uninstall; core handles verification and state.
+
         // Declarative mode: expand spec resources into desired resources.
         let spec = match &meta.spec {
             Some(s) => s,
@@ -171,6 +174,12 @@ fn compile_resource(
             path: path.clone(),
             entry_type: map_entry_type(entry_type.clone()),
             op: map_fs_op(op.clone()),
+        }),
+
+        // Tool resources have no backend; identity verify and observed facts are core-managed.
+        SpecResourceKind::Tool { name, verify } => Ok(DesiredResourceKind::Tool {
+            name: name.clone(),
+            verify: verify.clone(),
         }),
     }
 }
@@ -257,6 +266,7 @@ mod tests {
             source_dir: "/tmp/feat".to_string(),
             dep: DepSpec::default(),
             spec: None,
+            scripts: None,
         }
     }
 
@@ -268,6 +278,7 @@ mod tests {
             source_dir: "/tmp/feat".to_string(),
             dep: DepSpec::default(),
             spec: Some(ComponentSpec { resources }),
+            scripts: None,
         }
     }
 

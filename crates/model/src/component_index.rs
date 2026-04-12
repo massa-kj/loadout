@@ -6,6 +6,7 @@
 //!
 //! See: `docs/specs/data/component_index.md`
 
+use crate::tool::ToolVerifyContract;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -29,7 +30,7 @@ pub struct ComponentMeta {
     /// Component spec schema version. Must be 1.
     pub spec_version: u32,
 
-    /// Execution mode: script or declarative.
+    /// Execution mode: script, managed_script, or declarative.
     pub mode: ComponentMode,
 
     /// Human-readable description.
@@ -42,26 +43,41 @@ pub struct ComponentMeta {
     /// Dependency declarations. May be empty but must be present.
     pub dep: DepSpec,
 
-    /// Resource declarations. Present for `declarative` mode components;
+    /// Resource declarations. Present for `declarative` and `managed_script` mode components;
     /// may be absent for `script` mode components.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spec: Option<ComponentSpec>,
+
+    /// Script entry points. Present for `script` and `managed_script` mode components.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scripts: Option<ScriptSpec>,
 }
 
 /// Component execution mode.
 ///
-/// Determines how the executor handles a component: via subprocess (script mode)
-/// or via direct resource application (declarative mode).
+/// Determines how the executor handles a component.
 ///
 /// See `docs/guides/components.md` and `docs/specs/api/component-host.md`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ComponentMode {
-    /// Execute `install.sh` / `uninstall.sh` scripts.
+    /// Execute `install.sh` / `uninstall.sh` scripts without any resource model.
     ///
     /// Used when installation logic cannot be expressed as declarative resources
     /// (e.g., system configuration, templating, conditional logic).
+    /// Core records no resources in state; uninstall semantics are entirely script-driven.
     Script,
+
+    /// Script-driven installation combined with core-managed `tool` resources.
+    ///
+    /// Install and uninstall are performed by component scripts, but core owns
+    /// verification (post-install identity verify) and state updates.
+    /// All declared resources must be `kind: tool`. Other kinds are not permitted initially.
+    ///
+    /// Safer than `script` but still danger: arbitrary script execution remains.
+    /// Prefer `declarative` whenever a resource can be expressed without scripts.
+    ManagedScript,
+
     /// Declare resources in `component.yaml`; executor applies them without scripts.
     ///
     /// Preferred mode for packages, runtimes, and files. Provides better plan accuracy
@@ -102,6 +118,17 @@ pub struct DepSpec {
 pub struct CapabilityRef {
     /// Capability name.
     pub name: String,
+}
+
+/// Script entry points for `script` and `managed_script` mode components.
+///
+/// Both `install` and `uninstall` paths are relative to the component's `source_dir`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScriptSpec {
+    /// Relative path to the install script (e.g., `"install.sh"` or `"install.ps1"`).
+    pub install: String,
+    /// Relative path to the uninstall script (e.g., `"uninstall.sh"` or `"uninstall.ps1"`).
+    pub uninstall: String,
 }
 
 /// Resource spec for declarative mode components.
@@ -156,6 +183,23 @@ pub enum SpecResourceKind {
         entry_type: SpecFsEntryType,
         /// Operation to perform.
         op: FsOp,
+    },
+
+    /// External tool introduced via a `managed_script` component.
+    ///
+    /// Unlike packages and runtimes, tools have no backend.
+    /// The component's install/uninstall scripts deploy the tool;
+    /// core verifies its presence and records observed facts in state.
+    ///
+    /// Constraints enforced at build time:
+    /// - `verify.identity` is required (identity-bearing type: `resolved_command`, `file`, or
+    ///   `symlink_target`). A `versioned_command`-only verify is invalid.
+    /// - `verify.version` is optional; if present, the planner uses it for compatibility.
+    Tool {
+        /// Tool name (e.g., `"brew"`, `"deno"`).
+        name: String,
+        /// Verification contract. `identity` is required; `version` is optional.
+        verify: ToolVerifyContract,
     },
 }
 

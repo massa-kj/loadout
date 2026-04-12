@@ -51,6 +51,7 @@ fn list(args: ComponentListArgs) {
                 for s in group {
                     let mode = match s.mode {
                         model::component_index::ComponentMode::Script => "script     ",
+                        model::component_index::ComponentMode::ManagedScript => "managed_scr",
                         model::component_index::ComponentMode::Declarative => "declarative",
                     };
                     let desc = s.description.as_deref().unwrap_or("");
@@ -88,6 +89,7 @@ fn print_component_text(detail: &app::ComponentDetail) {
         "mode:       {}",
         match meta.mode {
             model::component_index::ComponentMode::Script => "script",
+            model::component_index::ComponentMode::ManagedScript => "managed_script",
             model::component_index::ComponentMode::Declarative => "declarative",
         }
     );
@@ -121,6 +123,9 @@ fn print_component_text(detail: &app::ComponentDetail) {
                     ..
                 } => {
                     println!("    kind: fs  path: {path}  type: {entry_type:?}  op: {op:?}");
+                }
+                model::component_index::SpecResourceKind::Tool { name, .. } => {
+                    println!("    kind: tool  name: {name}");
                 }
             }
         }

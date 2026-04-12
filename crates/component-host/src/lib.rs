@@ -217,6 +217,7 @@ mod tests {
             source_dir: source_dir.to_string(),
             dep: DepSpec::default(),
             spec: None,
+            scripts: None,
         }
     }
 
