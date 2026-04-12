@@ -300,7 +300,18 @@ fn classify_existing(
         // All shared resources are compatible, no extras → noop.
         Classification::Noop
     } else {
-        // New resources to add → strengthen.
+        // New resources to add → strengthen, unless any desired resource is `tool`.
+        // `managed_script` components use scripts for the entire install/uninstall cycle;
+        // resource-level addition cannot be isolated, so strengthen must be replace.
+        // We detect this by checking whether any desired resource (including shared ones)
+        // is a Tool kind: if so, the component is managed_script and strengthen is invalid.
+        let has_tool_resource = desired_comp.resources.iter().any(|r| matches!(r.kind, DesiredResourceKind::Tool { .. }));
+        if has_tool_resource {
+            return Classification::Replace {
+                from_version: None,
+                to_version: None,
+            };
+        }
         let add_resource_ids = desired_only
             .into_iter()
             .map(|id| {
@@ -411,12 +422,47 @@ fn check_compatibility(
             }
             Compatibility::Compatible
         }
+        // Tool resources: delegate to check_tool_compatibility.
+        (D::Tool { verify: dv, .. }, S::Tool { tool: st }) => {
+            check_tool_compatibility(dv, st)
+        }
         // Kind mismatch (e.g. package in desired, runtime in state) → replace.
         _ => Compatibility::Incompatible {
             from_version: None,
             to_version: None,
         },
     }
+}
+
+/// Compare a desired `tool` resource against its recorded state counterpart.
+///
+/// Compatibility rules (design doc `managed_script` section):
+/// - `verify.identity` change → incompatible (replace)
+/// - `verify.version.constraint` change (add/remove/modify) → incompatible (replace)
+/// - Other changes (script changes, name cosmetics, etc.) → compatible
+fn check_tool_compatibility(
+    desired_verify: &model::tool::ToolVerifyContract,
+    recorded: &model::tool::ToolResource,
+) -> Compatibility {
+    // Identity contract must match exactly.
+    if desired_verify.identity != recorded.verify.identity {
+        return Compatibility::Incompatible {
+            from_version: None,
+            to_version: None,
+        };
+    }
+
+    // Version constraint change (including add/remove) → replace.
+    let desired_constraint = desired_verify.version.as_ref().and_then(|v| v.constraint.as_deref());
+    let recorded_constraint = recorded.verify.version.as_ref().and_then(|v| v.constraint.as_deref());
+    if desired_constraint != recorded_constraint {
+        return Compatibility::Incompatible {
+            from_version: recorded_constraint.map(str::to_owned),
+            to_version: desired_constraint.map(str::to_owned),
+        };
+    }
+
+    Compatibility::Compatible
 }
 
 fn is_unknown_kind(_kind: &DesiredResourceKind) -> bool {
@@ -763,5 +809,288 @@ mod tests {
         assert_eq!(p.summary.create, 1);
         assert_eq!(p.summary.destroy, 1);
         assert_eq!(p.noops.len(), 1);
+    }
+
+    // ── tool resource helpers ─────────────────────────────────────────────────
+
+    fn make_tool_verify(command: &str, path: &str, constraint: Option<&str>) -> model::tool::ToolVerifyContract {
+        use model::tool::{OneOf, ToolIdentityVerify, ToolVerifyContract, ToolVersionVerify, VersionParseRule};
+        ToolVerifyContract {
+            identity: ToolIdentityVerify::ResolvedCommand {
+                command: command.to_string(),
+                expected_path: OneOf {
+                    one_of: vec![path.to_string()],
+                },
+            },
+            version: constraint.map(|c| ToolVersionVerify {
+                command: command.to_string(),
+                args: vec!["--version".to_string()],
+                parse: VersionParseRule {
+                    first_line_regex: "^([0-9]+\\.[0-9]+\\.[0-9]+)".to_string(),
+                },
+                constraint: Some(c.to_string()),
+            }),
+        }
+    }
+
+    fn desired_with_tool(
+        component: &str,
+        res_id: &str,
+        name: &str,
+        verify: model::tool::ToolVerifyContract,
+    ) -> DesiredResourceGraph {
+        let mut g = empty_desired(&[component]);
+        g.components
+            .get_mut(component)
+            .unwrap()
+            .resources
+            .push(DesiredResource {
+                id: res_id.to_string(),
+                kind: DesiredResourceKind::Tool {
+                    name: name.to_string(),
+                    verify,
+                },
+            });
+        g
+    }
+
+    fn state_with_tool(
+        component: &str,
+        res_id: &str,
+        name: &str,
+        verify: model::tool::ToolVerifyContract,
+    ) -> State {
+        use model::tool::{ToolObservedFacts, ToolResource};
+        let mut s = State::empty();
+        s.components.insert(
+            component.to_string(),
+            ComponentState {
+                resources: vec![Resource {
+                    id: res_id.to_string(),
+                    kind: ResourceKind::Tool {
+                        tool: ToolResource {
+                            name: name.to_string(),
+                            verify,
+                            observed: ToolObservedFacts {
+                                resolved_path: Some(
+                                    "/home/linuxbrew/.linuxbrew/bin/brew".to_string(),
+                                ),
+                                version: None,
+                            },
+                        },
+                    },
+                }],
+            },
+        );
+        s
+    }
+
+    // ── tool: create / destroy / noop ─────────────────────────────────────────
+
+    #[test]
+    fn tool_create_when_not_in_state() {
+        let verify = make_tool_verify("brew", "/home/linuxbrew/.linuxbrew/bin/brew", None);
+        let desired = desired_with_tool("core/brew", "tool:brew", "brew", verify);
+        let state = State::empty();
+        let order = vec![cid("core/brew")];
+        let p = plan(&desired, &state, &order).unwrap();
+        assert_eq!(p.actions.len(), 1);
+        assert_eq!(p.actions[0].operation, Operation::Create);
+    }
+
+    #[test]
+    fn tool_noop_when_identity_contract_identical() {
+        let verify = make_tool_verify("brew", "/home/linuxbrew/.linuxbrew/bin/brew", None);
+        let desired = desired_with_tool("core/brew", "tool:brew", "brew", verify.clone());
+        let state = state_with_tool("core/brew", "tool:brew", "brew", verify);
+        let order = vec![cid("core/brew")];
+        let p = plan(&desired, &state, &order).unwrap();
+        assert!(p.actions.is_empty());
+        assert_eq!(p.noops.len(), 1);
+    }
+
+    #[test]
+    fn tool_destroy_when_not_in_desired() {
+        let verify = make_tool_verify("brew", "/home/linuxbrew/.linuxbrew/bin/brew", None);
+        let desired = empty_desired(&[]);
+        let state = state_with_tool("core/brew", "tool:brew", "brew", verify);
+        let order: ResolvedComponentOrder = vec![];
+        let p = plan(&desired, &state, &order).unwrap();
+        assert_eq!(p.actions.len(), 1);
+        assert_eq!(p.actions[0].operation, Operation::Destroy);
+    }
+
+    // ── tool: replace triggers ────────────────────────────────────────────────
+
+    #[test]
+    fn tool_replace_on_identity_contract_change() {
+        // Change the expected_path in identity → replace.
+        use model::tool::{OneOf, ToolIdentityVerify, ToolVerifyContract};
+        let old_verify = make_tool_verify("brew", "/home/linuxbrew/.linuxbrew/bin/brew", None);
+        let new_verify = ToolVerifyContract {
+            identity: ToolIdentityVerify::ResolvedCommand {
+                command: "brew".to_string(),
+                expected_path: OneOf {
+                    one_of: vec!["/opt/homebrew/bin/brew".to_string()],
+                },
+            },
+            version: None,
+        };
+        let desired = desired_with_tool("core/brew", "tool:brew", "brew", new_verify);
+        let state = state_with_tool("core/brew", "tool:brew", "brew", old_verify);
+        let order = vec![cid("core/brew")];
+        let p = plan(&desired, &state, &order).unwrap();
+        assert_eq!(p.actions[0].operation, Operation::Replace);
+    }
+
+    #[test]
+    fn tool_replace_on_version_constraint_added() {
+        // No constraint → with constraint: replace.
+        let old_verify = make_tool_verify("brew", "/home/linuxbrew/.linuxbrew/bin/brew", None);
+        let new_verify = make_tool_verify("brew", "/home/linuxbrew/.linuxbrew/bin/brew", Some(">=4.0.0"));
+        let desired = desired_with_tool("core/brew", "tool:brew", "brew", new_verify);
+        let state = state_with_tool("core/brew", "tool:brew", "brew", old_verify);
+        let order = vec![cid("core/brew")];
+        let p = plan(&desired, &state, &order).unwrap();
+        assert_eq!(p.actions[0].operation, Operation::Replace);
+    }
+
+    #[test]
+    fn tool_replace_on_version_constraint_removed() {
+        // With constraint → no constraint: replace.
+        let old_verify = make_tool_verify("brew", "/home/linuxbrew/.linuxbrew/bin/brew", Some(">=4.0.0"));
+        let new_verify = make_tool_verify("brew", "/home/linuxbrew/.linuxbrew/bin/brew", None);
+        let desired = desired_with_tool("core/brew", "tool:brew", "brew", new_verify);
+        let state = state_with_tool("core/brew", "tool:brew", "brew", old_verify);
+        let order = vec![cid("core/brew")];
+        let p = plan(&desired, &state, &order).unwrap();
+        assert_eq!(p.actions[0].operation, Operation::Replace);
+    }
+
+    #[test]
+    fn tool_replace_on_version_constraint_changed() {
+        // Constraint value change: replace with from/to version info.
+        let old_verify = make_tool_verify("brew", "/home/linuxbrew/.linuxbrew/bin/brew", Some(">=4.0.0"));
+        let new_verify = make_tool_verify("brew", "/home/linuxbrew/.linuxbrew/bin/brew", Some(">=5.0.0"));
+        let desired = desired_with_tool("core/brew", "tool:brew", "brew", new_verify);
+        let state = state_with_tool("core/brew", "tool:brew", "brew", old_verify);
+        let order = vec![cid("core/brew")];
+        let p = plan(&desired, &state, &order).unwrap();
+        assert_eq!(p.actions[0].operation, Operation::Replace);
+        // Version info should be propagated for display.
+        match &p.actions[0].details {
+            Some(ActionDetails::Replace(d)) => {
+                assert_eq!(d.from_version.as_deref(), Some(">=4.0.0"));
+                assert_eq!(d.to_version.as_deref(), Some(">=5.0.0"));
+            }
+            _ => panic!("expected replace details with version info"),
+        }
+    }
+
+    #[test]
+    fn tool_noop_when_only_version_command_differs() {
+        // Only version.command/args/parse changes; constraint is the same → noop.
+        use model::tool::{OneOf, ToolIdentityVerify, ToolVerifyContract, ToolVersionVerify, VersionParseRule};
+        let base_identity = ToolIdentityVerify::ResolvedCommand {
+            command: "brew".to_string(),
+            expected_path: OneOf {
+                one_of: vec!["/home/linuxbrew/.linuxbrew/bin/brew".to_string()],
+            },
+        };
+        let old_verify = ToolVerifyContract {
+            identity: base_identity.clone(),
+            version: Some(ToolVersionVerify {
+                command: "brew".to_string(),
+                args: vec!["--version".to_string()],
+                parse: VersionParseRule { first_line_regex: "^old (.+)".to_string() },
+                constraint: Some(">=4.0.0".to_string()),
+            }),
+        };
+        let new_verify = ToolVerifyContract {
+            identity: base_identity,
+            version: Some(ToolVersionVerify {
+                command: "brew".to_string(),
+                args: vec!["--version".to_string()],
+                parse: VersionParseRule { first_line_regex: "^Homebrew (.+)".to_string() },
+                constraint: Some(">=4.0.0".to_string()), // same constraint, different regex
+            }),
+        };
+        let desired = desired_with_tool("core/brew", "tool:brew", "brew", new_verify);
+        let state = state_with_tool("core/brew", "tool:brew", "brew", old_verify);
+        let order = vec![cid("core/brew")];
+        let p = plan(&desired, &state, &order).unwrap();
+        // Only constraint is compared; parse regex difference is not a replace trigger.
+        assert!(p.actions.is_empty(), "expected noop, got: {:?}", p.actions);
+        assert_eq!(p.noops.len(), 1);
+    }
+
+    // ── managed_script: strengthen → replace normalization ───────────────────
+
+    #[test]
+    fn managed_script_tool_addition_produces_replace_not_strengthen() {
+        // State has one tool resource; desired adds a second tool resource.
+        // Because the component has tool resources, strengthen must be normalized to replace.
+        use model::tool::{ToolIdentityVerify, ToolVerifyContract};
+
+        let verify_brew = make_tool_verify("brew", "/home/linuxbrew/.linuxbrew/bin/brew", None);
+        let verify_deno = ToolVerifyContract {
+            identity: ToolIdentityVerify::File {
+                path: "/home/user/.deno/bin/deno".to_string(),
+                executable: true,
+            },
+            version: None,
+        };
+
+        // desired: brew + deno
+        let mut desired = desired_with_tool("core/tools", "tool:brew", "brew", verify_brew.clone());
+        desired
+            .components
+            .get_mut("core/tools")
+            .unwrap()
+            .resources
+            .push(DesiredResource {
+                id: "tool:deno".to_string(),
+                kind: DesiredResourceKind::Tool {
+                    name: "deno".to_string(),
+                    verify: verify_deno,
+                },
+            });
+
+        // state: only brew
+        let state = state_with_tool("core/tools", "tool:brew", "brew", verify_brew);
+        let order = vec![cid("core/tools")];
+        let p = plan(&desired, &state, &order).unwrap();
+        assert_eq!(p.actions.len(), 1);
+        assert_eq!(
+            p.actions[0].operation,
+            Operation::Replace,
+            "tool addition in managed_script must produce Replace, not Strengthen"
+        );
+    }
+
+    #[test]
+    fn non_tool_component_still_produces_strengthen() {
+        // A declarative component (no tool resources) with a new resource → strengthen.
+        // This confirms the strengthen→replace normalization is scoped to tool-containing components.
+        let mut desired =
+            with_package(empty_desired(&["core/git"]), "core/git", "git", "core/brew");
+        desired
+            .components
+            .get_mut("core/git")
+            .unwrap()
+            .resources
+            .push(DesiredResource {
+                id: "fs:gitconfig".to_string(),
+                kind: DesiredResourceKind::Fs {
+                    source: None,
+                    path: "~/.gitconfig".to_string(),
+                    entry_type: FsEntryType::File,
+                    op: FsOp::Link,
+                },
+            });
+        let state = state_with_package("core/git", "git", "core/brew");
+        let order = vec![cid("core/git")];
+        let p = plan(&desired, &state, &order).unwrap();
+        assert_eq!(p.actions[0].operation, Operation::Strengthen);
     }
 }
