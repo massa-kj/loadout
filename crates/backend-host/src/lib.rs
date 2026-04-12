@@ -518,6 +518,11 @@ fn build_command_with_env(
             cmd.env("LOADOUT_FS_ENTRY_TYPE", format!("{:?}", entry_type));
             cmd.env("LOADOUT_FS_OP", format!("{:?}", op));
         }
+        DesiredResourceKind::Tool { .. } => {
+            // Tool resources are installed/removed by managed_script component scripts,
+            // not by any backend. Reaching this path indicates a logic error in the executor.
+            panic!("backend-host must not be invoked for tool resources");
+        }
     }
 
     cmd

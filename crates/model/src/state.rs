@@ -6,6 +6,7 @@
 //! See: `docs/specs/data/state.md`
 
 use crate::id::CanonicalBackendId;
+use crate::tool::ToolResource;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -92,6 +93,21 @@ pub enum ResourceKind {
     Fs {
         /// Path, entry type, and operation details.
         fs: FsDetails,
+    },
+
+    /// An external tool introduced via a `managed_script` component.
+    ///
+    /// Tools are installed and removed by component scripts, but core owns
+    /// verification and state updates. Unlike packages, tools are not managed
+    /// by any backend and require an identity verify contract.
+    ///
+    /// The `observed` field records facts captured during install verify,
+    /// used for absence checks on uninstall and future drift detection.
+    ///
+    /// See: `docs/specs/data/state.md` (tool resource section)
+    Tool {
+        /// Tool name, verify contract snapshot, and observed facts.
+        tool: ToolResource,
     },
 }
 

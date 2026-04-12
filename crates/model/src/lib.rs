@@ -13,6 +13,7 @@ pub mod profile;
 pub mod sources;
 pub mod state;
 pub mod strategy;
+pub mod tool;
 
 pub use component_index::ComponentIndex;
 pub use desired_resource_graph::DesiredResourceGraph;

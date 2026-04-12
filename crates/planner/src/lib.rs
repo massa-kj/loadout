@@ -430,6 +430,7 @@ fn kind_str(kind: &DesiredResourceKind) -> &'static str {
         DesiredResourceKind::Package { .. } => "package",
         DesiredResourceKind::Runtime { .. } => "runtime",
         DesiredResourceKind::Fs { .. } => "fs",
+        DesiredResourceKind::Tool { .. } => "tool",
     }
 }
 

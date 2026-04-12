@@ -807,6 +807,15 @@ fn apply_one_resource(
                 },
             })
         }
+        DesiredResourceKind::Tool { .. } => {
+            // Tool resources are installed by managed_script component scripts.
+            // This path should not be reached: managed_script apply is handled by a
+            // separate code path (Phase 6), not by apply_one_resource.
+            Err(format!(
+                "[{component_id}] resource '{}': tool resources must be handled by managed_script executor, not apply_one_resource",
+                dr.id
+            ))
+        }
     }
 }
 
@@ -987,6 +996,15 @@ fn remove_one_state_resource(ctx: &ExecutionContext<'_>, res: &Resource) -> Resu
         }
         ResourceKind::Fs { fs } => {
             remove_fs(&fs.path, &fs.entry_type)?;
+        }
+        ResourceKind::Tool { .. } => {
+            // Tool resources are removed by managed_script component scripts.
+            // This path should not be reached: managed_script destroy is handled by a
+            // separate code path (Phase 6), not by remove_one_state_resource.
+            return Err(format!(
+                "resource '{}': tool resources must be handled by managed_script executor, not remove_one_state_resource",
+                res.id
+            ));
         }
     }
     Ok(())

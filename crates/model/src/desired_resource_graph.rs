@@ -7,6 +7,7 @@
 //! See: `docs/specs/data/desired_resource_graph.md`
 
 use crate::id::CanonicalBackendId;
+use crate::tool::ToolVerifyContract;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -96,6 +97,27 @@ pub enum DesiredResourceKind {
         entry_type: FsEntryType,
         /// Operation to perform (`link` for symlink, `copy` for copy).
         op: FsOp,
+    },
+
+    /// An external tool to be introduced via a `managed_script` component.
+    ///
+    /// Unlike packages and runtimes, tools have no backend. The component's install/uninstall
+    /// scripts are solely responsible for deployment. Core owns verify and state.
+    ///
+    /// The Planner uses `verify.identity` (and `verify.version.constraint` if present)
+    /// for compatibility checks. Actual verification is performed by the Executor.
+    ///
+    /// See: `docs/specs/data/desired_resource_graph.md` (tool resource section)
+    Tool {
+        /// Tool name as declared in the component (e.g., `"brew"`, `"deno"`).
+        name: String,
+        /// Verification contract. `identity` is required; `version` is optional.
+        ///
+        /// The Planner's compatibility check is based on this contract:
+        /// - `identity` change → `replace`
+        /// - `version.constraint` change → `replace`
+        /// - Other changes (script improvements etc.) do not cause `replace`
+        verify: ToolVerifyContract,
     },
 }
 
