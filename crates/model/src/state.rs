@@ -265,4 +265,140 @@ mod tests {
             _ => panic!("expected fs"),
         }
     }
+
+    #[test]
+    fn round_trip_tool_with_observed_path() {
+        let json = r#"{
+            "version": 3,
+            "components": {
+                "core/brew": {
+                    "resources": [
+                        {
+                            "id": "tool:brew",
+                            "kind": "tool",
+                            "tool": {
+                                "name": "brew",
+                                "verify": {
+                                    "identity": {
+                                        "type": "resolved_command",
+                                        "command": "brew",
+                                        "expected_path": {
+                                            "one_of": [
+                                                "/home/linuxbrew/.linuxbrew/bin/brew",
+                                                "/opt/homebrew/bin/brew"
+                                            ]
+                                        }
+                                    }
+                                },
+                                "observed": {
+                                    "resolved_path": "/home/linuxbrew/.linuxbrew/bin/brew",
+                                    "version": "4.3.12"
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }"#;
+        let s: State = serde_json::from_str(json).unwrap();
+        let feat = &s.components["core/brew"];
+        assert_eq!(feat.resources.len(), 1);
+        assert_eq!(feat.resources[0].id, "tool:brew");
+        match &feat.resources[0].kind {
+            ResourceKind::Tool { tool } => {
+                assert_eq!(tool.name, "brew");
+                assert_eq!(
+                    tool.observed.resolved_path.as_deref(),
+                    Some("/home/linuxbrew/.linuxbrew/bin/brew")
+                );
+                assert_eq!(tool.observed.version.as_deref(), Some("4.3.12"));
+            }
+            _ => panic!("expected tool"),
+        }
+    }
+
+    #[test]
+    fn round_trip_tool_observed_empty() {
+        // observed fields are optional; both None is valid (e.g., after version-less install).
+        let json = r#"{
+            "version": 3,
+            "components": {
+                "core/deno": {
+                    "resources": [
+                        {
+                            "id": "tool:deno",
+                            "kind": "tool",
+                            "tool": {
+                                "name": "deno",
+                                "verify": {
+                                    "identity": {
+                                        "type": "file",
+                                        "path": "/home/user/.deno/bin/deno",
+                                        "executable": true
+                                    }
+                                },
+                                "observed": {}
+                            }
+                        }
+                    ]
+                }
+            }
+        }"#;
+        let s: State = serde_json::from_str(json).unwrap();
+        let feat = &s.components["core/deno"];
+        match &feat.resources[0].kind {
+            ResourceKind::Tool { tool } => {
+                assert_eq!(tool.name, "deno");
+                assert!(tool.observed.resolved_path.is_none());
+                assert!(tool.observed.version.is_none());
+            }
+            _ => panic!("expected tool"),
+        }
+    }
+
+    #[test]
+    fn tool_serialized_kind_tag_is_tool() {
+        use crate::tool::{OneOf, ToolIdentityVerify, ToolObservedFacts, ToolResource, ToolVerifyContract};
+        let s = State {
+            version: STATE_VERSION,
+            components: {
+                let mut m = std::collections::HashMap::new();
+                m.insert(
+                    "core/brew".to_string(),
+                    ComponentState {
+                        resources: vec![Resource {
+                            id: "tool:brew".to_string(),
+                            kind: ResourceKind::Tool {
+                                tool: ToolResource {
+                                    name: "brew".to_string(),
+                                    verify: ToolVerifyContract {
+                                        identity: ToolIdentityVerify::ResolvedCommand {
+                                            command: "brew".to_string(),
+                                            expected_path: OneOf {
+                                                one_of: vec![
+                                                    "/home/linuxbrew/.linuxbrew/bin/brew"
+                                                        .to_string(),
+                                                ],
+                                            },
+                                        },
+                                        version: None,
+                                    },
+                                    observed: ToolObservedFacts {
+                                        resolved_path: Some(
+                                            "/home/linuxbrew/.linuxbrew/bin/brew".to_string(),
+                                        ),
+                                        version: None,
+                                    },
+                                },
+                            },
+                        }],
+                    },
+                );
+                m
+            },
+        };
+        let json = serde_json::to_value(&s).unwrap();
+        let kind_tag = &json["components"]["core/brew"]["resources"][0]["kind"];
+        assert_eq!(kind_tag, "tool");
+    }
 }

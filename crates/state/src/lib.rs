@@ -33,6 +33,7 @@ pub use model::state::{
     ComponentState, FsDetails, FsEntryType, FsOp, PackageDetails, Resource, ResourceKind,
     RuntimeDetails, State, STATE_VERSION,
 };
+pub use model::tool::{ToolObservedFacts, ToolResource};
 
 /// Errors produced by state operations.
 #[derive(Debug, Error)]
@@ -194,9 +195,15 @@ pub fn validate(state: &State) -> Result<(), StateError> {
                 });
             }
 
-            // Check fs-specific invariants.
-            if let ResourceKind::Fs { fs } = &resource.kind {
-                validate_fs_resource(component_id, &resource.id, fs, &mut seen_fs_paths)?;
+            // Check kind-specific invariants.
+            match &resource.kind {
+                ResourceKind::Fs { fs } => {
+                    validate_fs_resource(component_id, &resource.id, fs, &mut seen_fs_paths)?;
+                }
+                ResourceKind::Tool { tool } => {
+                    validate_tool_resource(component_id, &resource.id, tool)?;
+                }
+                ResourceKind::Package { .. } | ResourceKind::Runtime { .. } => {}
             }
         }
     }
@@ -229,6 +236,39 @@ fn validate_fs_resource<'a>(
                 fs.path
             ),
         });
+    }
+
+    Ok(())
+}
+
+/// Validate invariants for a recorded `tool` resource.
+///
+/// Invariants:
+/// - `tool.name` must not be empty.
+/// - `tool.observed.resolved_path`, if present, must be an absolute path.
+fn validate_tool_resource(
+    component_id: &str,
+    resource_id: &str,
+    tool: &ToolResource,
+) -> Result<(), StateError> {
+    if tool.name.is_empty() {
+        return Err(StateError::InvalidState {
+            reason: format!(
+                "component '{component_id}', resource '{resource_id}': tool.name must not be empty"
+            ),
+        });
+    }
+
+    if let Some(ref path) = tool.observed.resolved_path {
+        let p = std::path::Path::new(path.as_str());
+        if !p.is_absolute() {
+            return Err(StateError::InvalidState {
+                reason: format!(
+                    "component '{component_id}', resource '{resource_id}': \
+                     tool.observed.resolved_path '{path}' must be absolute"
+                ),
+            });
+        }
     }
 
     Ok(())
@@ -582,5 +622,100 @@ mod tests {
         let raw = serde_json::json!({ "version": 1, "components": {} });
         let err = migrate_v2_to_v3(&raw).unwrap_err();
         assert!(matches!(err, StateError::VersionMismatch { .. }));
+    }
+
+    // ── tool resource invariants ──────────────────────────────────────────────
+
+    fn state_with_tool(
+        component: &str,
+        res_id: &str,
+        name: &str,
+        resolved_path: Option<&str>,
+    ) -> State {
+        use model::tool::{
+            OneOf, ToolIdentityVerify, ToolObservedFacts, ToolResource, ToolVerifyContract,
+        };
+        let mut s = State::empty();
+        s.components.insert(
+            component.into(),
+            ComponentState {
+                resources: vec![Resource {
+                    id: res_id.into(),
+                    kind: ResourceKind::Tool {
+                        tool: ToolResource {
+                            name: name.into(),
+                            verify: ToolVerifyContract {
+                                identity: ToolIdentityVerify::ResolvedCommand {
+                                    command: name.into(),
+                                    expected_path: OneOf {
+                                        one_of: vec![
+                                            "/home/linuxbrew/.linuxbrew/bin/brew".into(),
+                                        ],
+                                    },
+                                },
+                                version: None,
+                            },
+                            observed: ToolObservedFacts {
+                                resolved_path: resolved_path.map(|s| s.into()),
+                                version: None,
+                            },
+                        },
+                    },
+                }],
+            },
+        );
+        s
+    }
+
+    #[test]
+    fn validate_tool_with_absolute_observed_path_ok() {
+        let s = state_with_tool(
+            "core/brew",
+            "tool:brew",
+            "brew",
+            Some("/home/linuxbrew/.linuxbrew/bin/brew"),
+        );
+        validate(&s).unwrap();
+    }
+
+    #[test]
+    fn validate_tool_with_no_observed_path_ok() {
+        let s = state_with_tool("core/brew", "tool:brew", "brew", None);
+        validate(&s).unwrap();
+    }
+
+    #[test]
+    fn validate_tool_relative_observed_path_rejected() {
+        let s = state_with_tool("core/brew", "tool:brew", "brew", Some("relative/path/brew"));
+        let err = validate(&s).unwrap_err();
+        assert!(matches!(err, StateError::InvalidState { .. }));
+        let msg = err.to_string();
+        assert!(msg.contains("resolved_path"), "error must mention resolved_path");
+        assert!(msg.contains("absolute"), "error must mention absolute");
+    }
+
+    #[test]
+    fn validate_tool_empty_name_rejected() {
+        let s = state_with_tool("core/brew", "tool:brew", "", None);
+        let err = validate(&s).unwrap_err();
+        assert!(matches!(err, StateError::InvalidState { .. }));
+        let msg = err.to_string();
+        assert!(msg.contains("tool.name"), "error must mention tool.name");
+    }
+
+    #[test]
+    fn validate_tool_round_trip_via_json() {
+        // Confirm tool resources survive state commit/load round-trip.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let s = state_with_tool(
+            "core/brew",
+            "tool:brew",
+            "brew",
+            Some("/home/linuxbrew/.linuxbrew/bin/brew"),
+        );
+        commit(&path, &s).unwrap();
+        let loaded = load(&path).unwrap();
+        assert_eq!(s, loaded);
     }
 }
