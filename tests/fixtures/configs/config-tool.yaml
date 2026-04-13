@@ -1,0 +1,16 @@
+# Managed-script tool component: dummy-tool marker.
+# Verifies managed_script create/idempotent/destroy flow.
+# Used by: managed-script scenario.
+
+profile:
+  components:
+    local:
+      dummy-tool: {}
+
+strategy:
+  package:
+    default_backend: local/dummy-pkg
+  runtime:
+    default_backend: local/dummy-rt
+  fs:
+    backup: false

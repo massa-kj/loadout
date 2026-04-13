@@ -17,6 +17,7 @@
 //!   version-install  Version recorded in state after install
 //!   version-upgrade  Version mismatch triggers reinstall; state updated
 //!   version-mixed    Versioned and unversioned components coexist correctly
+//!   managed-script   managed_script create/idempotent/destroy with tool resource
 //!   all              Run all scenarios (default)
 //! ```
 //!
@@ -70,10 +71,12 @@ fn dispatch(scenario: &str, ctx: &Context) -> Result<(), String> {
         "version-install" => scenarios::version_install::run(ctx),
         "version-upgrade" => scenarios::version_upgrade::run(ctx),
         "version-mixed" => scenarios::version_mixed::run(ctx),
+        "managed-script" => scenarios::managed_script::run(ctx),
         other => Err(format!(
             "unknown scenario '{other}'. Valid: \
              minimal, idempotent, uninstall, lifecycle, \
-             version-install, version-upgrade, version-mixed, all"
+             version-install, version-upgrade, version-mixed, \
+             managed-script, all"
         )),
     }
 }
@@ -89,6 +92,7 @@ fn run_all(ctx: &Context) -> Result<(), String> {
         ("version-install", scenarios::version_install::run),
         ("version-upgrade", scenarios::version_upgrade::run),
         ("version-mixed", scenarios::version_mixed::run),
+        ("managed-script", scenarios::managed_script::run),
     ];
 
     let mut failed: Vec<(&str, String)> = Vec::new();

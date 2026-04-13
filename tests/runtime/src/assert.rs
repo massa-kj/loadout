@@ -101,17 +101,38 @@ pub fn assert_all_fs_paths_absolute(state: &State) -> Result<(), String> {
     Ok(())
 }
 
+/// Assert that every recorded `tool` resource whose `resolved_path` is set has
+/// an absolute path.
+pub fn assert_all_tool_paths_absolute(state: &State) -> Result<(), String> {
+    for (component_id, component_state) in &state.components {
+        for resource in &component_state.resources {
+            if let ResourceKind::Tool { tool } = &resource.kind {
+                if let Some(p) = &tool.observed.resolved_path {
+                    if !Path::new(p).is_absolute() {
+                        return Err(format!(
+                            "non-absolute tool resolved_path '{}' in component '{}'",
+                            p, component_id
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Run all standard structural assertions in one call.
 ///
 /// Combines [`assert_state_version`], [`assert_components_present`],
-/// [`assert_no_duplicate_resource_ids`], [`assert_no_duplicate_fs_paths`], and
-/// [`assert_all_fs_paths_absolute`].
+/// [`assert_no_duplicate_resource_ids`], [`assert_no_duplicate_fs_paths`],
+/// [`assert_all_fs_paths_absolute`], and [`assert_all_tool_paths_absolute`].
 pub fn assert_state_valid(state: &State) -> Result<(), String> {
     assert_state_version(state)?;
     assert_components_present(state)?;
     assert_no_duplicate_resource_ids(state)?;
     assert_no_duplicate_fs_paths(state)?;
     assert_all_fs_paths_absolute(state)?;
+    assert_all_tool_paths_absolute(state)?;
     Ok(())
 }
 
@@ -218,6 +239,81 @@ pub fn assert_no_packages_in_state(state: &State) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Assert that a tool resource with `tool_name` is present in `component_id`.
+pub fn assert_tool_resource_present(
+    state: &State,
+    component_id: &str,
+    tool_name: &str,
+) -> Result<(), String> {
+    let component = state
+        .components
+        .get(component_id)
+        .ok_or_else(|| format!("component '{}' not found in state", component_id))?;
+
+    let found = component
+        .resources
+        .iter()
+        .any(|r| matches!(&r.kind, ResourceKind::Tool { tool } if tool.name == tool_name));
+
+    if !found {
+        return Err(format!(
+            "tool '{}' not found in component '{}'",
+            tool_name, component_id
+        ));
+    }
+    Ok(())
+}
+
+/// Assert that no tool resource with `tool_name` is present in `component_id`.
+#[allow(dead_code)]
+pub fn assert_tool_resource_absent(
+    state: &State,
+    component_id: &str,
+    tool_name: &str,
+) -> Result<(), String> {
+    if let Some(component) = state.components.get(component_id) {
+        let found = component
+            .resources
+            .iter()
+            .any(|r| matches!(&r.kind, ResourceKind::Tool { tool } if tool.name == tool_name));
+        if found {
+            return Err(format!(
+                "tool '{}' should be absent from component '{}' but is still recorded",
+                tool_name, component_id
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Return the `resolved_path` of the first tool resource in `component_id`.
+///
+/// Returns `Ok(None)` if the tool has no `resolved_path` recorded yet.
+#[allow(dead_code)]
+pub fn get_tool_resolved_path<'a>(
+    state: &'a State,
+    component_id: &str,
+) -> Result<Option<&'a str>, String> {
+    let component = state
+        .components
+        .get(component_id)
+        .ok_or_else(|| format!("component '{}' not found in state", component_id))?;
+
+    let tool = component
+        .resources
+        .iter()
+        .find_map(|r| {
+            if let ResourceKind::Tool { tool } = &r.kind {
+                Some(tool)
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| format!("no tool resource recorded for component '{}'", component_id))?;
+
+    Ok(tool.observed.resolved_path.as_deref())
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

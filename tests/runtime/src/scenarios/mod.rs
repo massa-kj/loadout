@@ -5,6 +5,7 @@
 
 pub mod idempotent;
 pub mod lifecycle;
+pub mod managed_script;
 pub mod minimal;
 pub mod uninstall;
 pub mod version_install;
