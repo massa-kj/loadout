@@ -39,6 +39,7 @@ use model::state::{
     ComponentState, FsDetails, FsEntryType, FsOp, PackageDetails, Resource, ResourceKind,
     RuntimeDetails, State,
 };
+use model::tool::ToolResource;
 use platform::Platform;
 
 // ---------------------------------------------------------------------------
@@ -419,8 +420,24 @@ fn execute_action(
                         .components
                         .insert(id_str.to_string(), ComponentState { resources: vec![] });
                 }
-                // Phase 5/6: managed_script create not yet implemented.
-                ComponentMode::ManagedScript => todo!("managed_script create"),
+                ComponentMode::ManagedScript => {
+                    // 1. Run install script.
+                    component_host::run_install(meta, component_id, ctx.dirs, ctx.platform)
+                        .map_err(ComponentError::from)?;
+
+                    // 2. Verify each declared tool resource and build state resources.
+                    let desired = ctx.graph.components.get(id_str).ok_or_else(|| {
+                        ComponentError::Component {
+                            error: format!("desired resources not found for: {id_str}"),
+                        }
+                    })?;
+
+                    let resources =
+                        verify_tool_resources(id_str, &desired.resources.clone())?;
+                    state
+                        .components
+                        .insert(id_str.to_string(), ComponentState { resources });
+                }
                 ComponentMode::Declarative => {
                     let desired = ctx.graph.components.get(id_str).ok_or_else(|| {
                         ComponentError::Component {
@@ -449,8 +466,29 @@ fn execute_action(
                     component_host::run_uninstall(meta, component_id, ctx.dirs, ctx.platform)
                         .map_err(ComponentError::from)?;
                 }
-                // Phase 5/6: managed_script destroy not yet implemented.
-                ComponentMode::ManagedScript => todo!("managed_script destroy"),
+                ComponentMode::ManagedScript => {
+                    // 1. Run uninstall script.
+                    component_host::run_uninstall(meta, component_id, ctx.dirs, ctx.platform)
+                        .map_err(ComponentError::from)?;
+
+                    // 2. Absence check on all recorded tool resources.
+                    if let Some(comp_state) = state.components.get(id_str) {
+                        for res in &comp_state.resources.clone() {
+                            if let ResourceKind::Tool { tool } = &res.kind {
+                                check_absence(&res.id, &tool.observed).map_err(|e| {
+                                    ComponentError::Resource {
+                                        resource_id: res.id.clone(),
+                                        error: format!(
+                                            "[{id_str}] tool '{}' absence check failed: {e}",
+                                            res.id
+                                        ),
+                                    }
+                                })?;
+                            }
+                        }
+                    }
+                    // state.components.remove(id_str) is called by the outer Destroy block.
+                }
                 ComponentMode::Declarative => {
                     // Remove resources using the backend recorded in state (authoritative).
                     if let Some(comp_state) = state.components.get(id_str) {
@@ -473,8 +511,45 @@ fn execute_action(
                         .components
                         .insert(id_str.to_string(), ComponentState { resources: vec![] });
                 }
-                // Phase 5/6: managed_script replace not yet implemented.
-                ComponentMode::ManagedScript => todo!("managed_script replace"),
+                ComponentMode::ManagedScript => {
+                    // 1. Run uninstall script to remove old installation.
+                    component_host::run_uninstall(meta, component_id, ctx.dirs, ctx.platform)
+                        .map_err(ComponentError::from)?;
+
+                    // 2. Absence check on recorded resources from the old installation.
+                    if let Some(comp_state) = state.components.get(id_str) {
+                        for res in &comp_state.resources.clone() {
+                            if let ResourceKind::Tool { tool } = &res.kind {
+                                check_absence(&res.id, &tool.observed).map_err(|e| {
+                                    ComponentError::Resource {
+                                        resource_id: res.id.clone(),
+                                        error: format!(
+                                            "[{id_str}] tool '{}' absence check failed after uninstall: {e}",
+                                            res.id
+                                        ),
+                                    }
+                                })?;
+                            }
+                        }
+                    }
+
+                    // 3. Run install script for new installation.
+                    component_host::run_install(meta, component_id, ctx.dirs, ctx.platform)
+                        .map_err(ComponentError::from)?;
+
+                    // 4. Verify new tool resources and update state.
+                    let desired = ctx.graph.components.get(id_str).ok_or_else(|| {
+                        ComponentError::Component {
+                            error: format!("desired resources not found for: {id_str}"),
+                        }
+                    })?;
+
+                    let resources =
+                        verify_tool_resources(id_str, &desired.resources.clone())?;
+                    state
+                        .components
+                        .insert(id_str.to_string(), ComponentState { resources });
+                }
                 ComponentMode::Declarative => {
                     if let Some(comp_state) = state.components.get(id_str) {
                         remove_state_resources(ctx, id_str, &comp_state.resources.clone())?;
@@ -592,6 +667,57 @@ fn execute_action(
 // ---------------------------------------------------------------------------
 // Resource-level helpers
 // ---------------------------------------------------------------------------
+
+/// Verify all declared tool resources for a `managed_script` component.
+///
+/// Called after the install script exits successfully. Each desired resource must be
+/// a `Tool` kind (enforced by component-index validation). For each resource, runs
+/// identity + version verify and records the observed facts.
+///
+/// Returns the resulting state resources, or a `ComponentError` on the first failure.
+/// On any failure, NO state resources are returned — the caller must not commit state.
+fn verify_tool_resources(
+    component_id: &str,
+    desired: &[DesiredResource],
+) -> Result<Vec<Resource>, ComponentError> {
+    let mut resources = Vec::with_capacity(desired.len());
+
+    for dr in desired {
+        match &dr.kind {
+            DesiredResourceKind::Tool { name, verify } => {
+                let facts = verify_tool(&dr.id, verify).map_err(|e| ComponentError::Resource {
+                    resource_id: dr.id.clone(),
+                    error: format!(
+                        "[{component_id}] tool '{}' verify failed: {e}",
+                        dr.id
+                    ),
+                })?;
+                resources.push(Resource {
+                    id: dr.id.clone(),
+                    kind: ResourceKind::Tool {
+                        tool: ToolResource {
+                            name: name.clone(),
+                            verify: verify.clone(),
+                            observed: facts,
+                        },
+                    },
+                });
+            }
+            _ => {
+                // managed_script components only allow tool resources (enforced by component-index).
+                // This arm guards against future index inconsistencies.
+                return Err(ComponentError::Component {
+                    error: format!(
+                        "[{component_id}] managed_script resource '{}' has non-tool kind",
+                        dr.id
+                    ),
+                });
+            }
+        }
+    }
+
+    Ok(resources)
+}
 
 /// Apply all desired resources for a declarative component.
 /// Returns the resulting state resources, or a ComponentError on the first failure.
@@ -1125,7 +1251,8 @@ mod tests {
 
     use backend_host::{Backend, BackendError, BackendRegistry};
     use model::component_index::{
-        ComponentIndex, ComponentMeta, ComponentMode, DepSpec, COMPONENT_INDEX_SCHEMA_VERSION,
+        ComponentIndex, ComponentMeta, ComponentMode, DepSpec, ScriptSpec,
+        COMPONENT_INDEX_SCHEMA_VERSION,
     };
     use model::desired_resource_graph::{
         ComponentDesiredResources, DesiredResource, DesiredResourceGraph, DesiredResourceKind,
@@ -1134,6 +1261,7 @@ mod tests {
     use model::id::{CanonicalBackendId, CanonicalComponentId};
     use model::plan::{ActionDetails, PlanAction, PlanSummary, StrengthenDetails};
     use model::state::State;
+    use model::tool::{ToolIdentityVerify, ToolObservedFacts, ToolVerifyContract};
     use platform::Dirs;
 
     use tempfile::TempDir;
@@ -1215,6 +1343,21 @@ mod tests {
             dep: DepSpec::default(),
             spec: None,
             scripts: None,
+        }
+    }
+
+    fn managed_script_meta(source_dir: &str) -> ComponentMeta {
+        ComponentMeta {
+            spec_version: 1,
+            mode: ComponentMode::ManagedScript,
+            description: None,
+            source_dir: source_dir.to_string(),
+            dep: DepSpec::default(),
+            spec: None,
+            scripts: Some(ScriptSpec {
+                install: "install.sh".to_string(),
+                uninstall: "uninstall.sh".to_string(),
+            }),
         }
     }
 
@@ -1731,5 +1874,440 @@ mod tests {
             }
             _ => panic!("expected package"),
         }
+    }
+
+    // ---------------------------------------------------------------------------
+    // managed_script tests
+    // ---------------------------------------------------------------------------
+
+    /// Write a shell (or PowerShell) script that creates the given file path when run.
+    fn write_create_script(script_path: &std::path::Path, create_path: &std::path::Path) {
+        let platform = platform::detect_platform();
+        let content = match platform {
+            Platform::Windows => format!(
+                "New-Item -ItemType File -Force -Path '{}'\n",
+                create_path.display()
+            ),
+            Platform::Linux | Platform::Wsl => format!(
+                "#!/usr/bin/env sh\ntouch '{}'\n",
+                create_path.display()
+            ),
+        };
+        std::fs::write(script_path, &content).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    /// Write a shell (or PowerShell) script that removes the given file path when run.
+    fn write_remove_script(script_path: &std::path::Path, remove_path: &std::path::Path) {
+        let platform = platform::detect_platform();
+        let content = match platform {
+            Platform::Windows => format!(
+                "Remove-Item -Force -Path '{}' -ErrorAction SilentlyContinue\n",
+                remove_path.display()
+            ),
+            Platform::Linux | Platform::Wsl => format!(
+                "#!/usr/bin/env sh\nrm -f '{}'\n",
+                remove_path.display()
+            ),
+        };
+        std::fs::write(script_path, &content).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    /// Write a no-op shell (or PowerShell) script.
+    fn write_noop_script(script_path: &std::path::Path) {
+        let platform = platform::detect_platform();
+        let content = match platform {
+            Platform::Windows => "exit 0\n",
+            Platform::Linux | Platform::Wsl => "#!/usr/bin/env sh\nexit 0\n",
+        };
+        std::fs::write(script_path, content).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    fn script_name(op: &str) -> String {
+        let platform = platform::detect_platform();
+        let ext = match platform {
+            Platform::Windows => "ps1",
+            Platform::Linux | Platform::Wsl => "sh",
+        };
+        format!("{op}.{ext}")
+    }
+
+    fn tool_file_verify(path: &str) -> ToolVerifyContract {
+        ToolVerifyContract {
+            identity: ToolIdentityVerify::File {
+                path: path.to_string(),
+                executable: false,
+            },
+            version: None,
+        }
+    }
+
+    fn tool_resource_desired(id: &str, name: &str, verify: ToolVerifyContract) -> DesiredResource {
+        DesiredResource {
+            id: id.to_string(),
+            kind: DesiredResourceKind::Tool {
+                name: name.to_string(),
+                verify,
+            },
+        }
+    }
+
+    fn tool_resource_state(
+        id: &str,
+        name: &str,
+        verify: ToolVerifyContract,
+        resolved_path: Option<String>,
+    ) -> Resource {
+        Resource {
+            id: id.to_string(),
+            kind: ResourceKind::Tool {
+                tool: ToolResource {
+                    name: name.to_string(),
+                    verify,
+                    observed: ToolObservedFacts {
+                        resolved_path,
+                        version: None,
+                    },
+                },
+            },
+        }
+    }
+
+    /// managed_script create: install script runs, verify succeeds → tool resource recorded.
+    #[test]
+    fn managed_script_create_records_tool_resource_on_verify_success() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state_path = tmp.path().join("state.json");
+        let feat_dir = tmp.path().join("feat");
+        std::fs::create_dir_all(&feat_dir).unwrap();
+
+        let tool_path = tmp.path().join("fake-tool");
+
+        // Install script creates the tool file; uninstall is unused here.
+        write_create_script(
+            &feat_dir.join(script_name("install")),
+            &tool_path,
+        );
+        write_noop_script(&feat_dir.join(script_name("uninstall")));
+
+        let verify = tool_file_verify(tool_path.to_str().unwrap());
+        let plan = make_plan(vec![make_action("tools/fake", Operation::Create)]);
+        let graph = make_graph(vec![(
+            "tools/fake",
+            vec![tool_resource_desired("tool:fake", "fake", verify.clone())],
+        )]);
+        let index = make_index(vec![(
+            "tools/fake",
+            managed_script_meta(feat_dir.to_str().unwrap()),
+        )]);
+        let registry = BackendRegistry::new();
+        let mut state = State::empty();
+        let dirs = make_dirs(&tmp);
+        let platform = platform::detect_platform();
+        let ctx = ExecutionContext {
+            plan: &plan,
+            graph: &graph,
+            index: &index,
+            registry: &registry,
+            dirs: &dirs,
+            platform: &platform,
+            state_path: &state_path,
+            contributors: &ContributorRegistry::new(),
+        };
+
+        let mut events = vec![];
+        let report = execute(&ctx, &mut state, &mut |e| events.push(e)).unwrap();
+
+        assert_eq!(report.executed.len(), 1, "expected one success");
+        assert!(report.failed.is_empty());
+        assert!(state.components.contains_key("tools/fake"));
+        let comp = &state.components["tools/fake"];
+        assert_eq!(comp.resources.len(), 1);
+        match &comp.resources[0].kind {
+            ResourceKind::Tool { tool } => {
+                assert_eq!(tool.name, "fake");
+                assert_eq!(
+                    tool.observed.resolved_path.as_deref(),
+                    Some(tool_path.to_str().unwrap())
+                );
+            }
+            _ => panic!("expected tool resource"),
+        }
+        assert!(state_path.exists(), "state must be committed");
+    }
+
+    /// managed_script create: verify fails (tool not actually created) → state unchanged.
+    #[test]
+    fn managed_script_create_verify_fail_leaves_state_unchanged() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state_path = tmp.path().join("state.json");
+        let feat_dir = tmp.path().join("feat");
+        std::fs::create_dir_all(&feat_dir).unwrap();
+
+        let tool_path = tmp.path().join("nonexistent-tool"); // file never created
+
+        // Install script is a no-op — the tool file will NOT be created.
+        write_noop_script(&feat_dir.join(script_name("install")));
+        write_noop_script(&feat_dir.join(script_name("uninstall")));
+
+        let verify = tool_file_verify(tool_path.to_str().unwrap());
+        let plan = make_plan(vec![make_action("tools/fake", Operation::Create)]);
+        let graph = make_graph(vec![(
+            "tools/fake",
+            vec![tool_resource_desired("tool:fake", "fake", verify.clone())],
+        )]);
+        let index = make_index(vec![(
+            "tools/fake",
+            managed_script_meta(feat_dir.to_str().unwrap()),
+        )]);
+        let registry = BackendRegistry::new();
+        let mut state = State::empty();
+        let dirs = make_dirs(&tmp);
+        let platform = platform::detect_platform();
+        let ctx = ExecutionContext {
+            plan: &plan,
+            graph: &graph,
+            index: &index,
+            registry: &registry,
+            dirs: &dirs,
+            platform: &platform,
+            state_path: &state_path,
+            contributors: &ContributorRegistry::new(),
+        };
+
+        let mut events = vec![];
+        let report = execute(&ctx, &mut state, &mut |e| events.push(e)).unwrap();
+
+        assert!(report.executed.is_empty());
+        assert_eq!(report.failed.len(), 1);
+        assert!(!state.components.contains_key("tools/fake"), "state must not be updated");
+        assert!(!state_path.exists(), "state must not be committed on failure");
+    }
+
+    /// managed_script destroy: uninstall script removes tool → absence check passes → state cleared.
+    #[test]
+    fn managed_script_destroy_removes_component_from_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state_path = tmp.path().join("state.json");
+        let feat_dir = tmp.path().join("feat");
+        std::fs::create_dir_all(&feat_dir).unwrap();
+
+        let tool_path = tmp.path().join("installed-tool");
+        // Tool is "installed" — create the file to represent pre-existing state.
+        std::fs::write(&tool_path, "").unwrap();
+
+        let verify = tool_file_verify(tool_path.to_str().unwrap());
+
+        // Uninstall script removes the tool file.
+        write_remove_script(
+            &feat_dir.join(script_name("uninstall")),
+            &tool_path,
+        );
+        write_noop_script(&feat_dir.join(script_name("install")));
+
+        // Pre-populate state as if created earlier.
+        let mut state = State::empty();
+        state.components.insert(
+            "tools/fake".to_string(),
+            ComponentState {
+                resources: vec![tool_resource_state(
+                    "tool:fake",
+                    "fake",
+                    verify.clone(),
+                    Some(tool_path.to_str().unwrap().to_string()),
+                )],
+            },
+        );
+
+        let plan = make_plan(vec![make_action("tools/fake", Operation::Destroy)]);
+        let graph = make_graph(vec![]);
+        let index = make_index(vec![(
+            "tools/fake",
+            managed_script_meta(feat_dir.to_str().unwrap()),
+        )]);
+        let registry = BackendRegistry::new();
+        let dirs = make_dirs(&tmp);
+        let platform = platform::detect_platform();
+        let ctx = ExecutionContext {
+            plan: &plan,
+            graph: &graph,
+            index: &index,
+            registry: &registry,
+            dirs: &dirs,
+            platform: &platform,
+            state_path: &state_path,
+            contributors: &ContributorRegistry::new(),
+        };
+
+        let mut events = vec![];
+        let report = execute(&ctx, &mut state, &mut |e| events.push(e)).unwrap();
+
+        assert_eq!(report.executed.len(), 1, "expected one success");
+        assert!(report.failed.is_empty());
+        assert!(
+            !state.components.contains_key("tools/fake"),
+            "component must be removed from state"
+        );
+        assert!(!tool_path.exists(), "uninstall script should have removed the file");
+    }
+
+    /// managed_script destroy: absence check fails (tool still present) → state unchanged.
+    #[test]
+    fn managed_script_destroy_absence_check_fail_leaves_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state_path = tmp.path().join("state.json");
+        let feat_dir = tmp.path().join("feat");
+        std::fs::create_dir_all(&feat_dir).unwrap();
+
+        let tool_path = tmp.path().join("stubborn-tool");
+        // Tool is "installed" and won't be removed.
+        std::fs::write(&tool_path, "").unwrap();
+
+        let verify = tool_file_verify(tool_path.to_str().unwrap());
+
+        // Uninstall script is a no-op — file remains after "uninstall".
+        write_noop_script(&feat_dir.join(script_name("uninstall")));
+        write_noop_script(&feat_dir.join(script_name("install")));
+
+        let mut state = State::empty();
+        state.components.insert(
+            "tools/fake".to_string(),
+            ComponentState {
+                resources: vec![tool_resource_state(
+                    "tool:fake",
+                    "fake",
+                    verify.clone(),
+                    Some(tool_path.to_str().unwrap().to_string()),
+                )],
+            },
+        );
+
+        let plan = make_plan(vec![make_action("tools/fake", Operation::Destroy)]);
+        let graph = make_graph(vec![]);
+        let index = make_index(vec![(
+            "tools/fake",
+            managed_script_meta(feat_dir.to_str().unwrap()),
+        )]);
+        let registry = BackendRegistry::new();
+        let dirs = make_dirs(&tmp);
+        let platform = platform::detect_platform();
+        let ctx = ExecutionContext {
+            plan: &plan,
+            graph: &graph,
+            index: &index,
+            registry: &registry,
+            dirs: &dirs,
+            platform: &platform,
+            state_path: &state_path,
+            contributors: &ContributorRegistry::new(),
+        };
+
+        let mut events = vec![];
+        let report = execute(&ctx, &mut state, &mut |e| events.push(e)).unwrap();
+
+        assert!(report.executed.is_empty());
+        assert_eq!(report.failed.len(), 1, "absence check failure must be reported");
+        assert!(
+            state.components.contains_key("tools/fake"),
+            "state must remain when absence check fails"
+        );
+    }
+
+    /// managed_script replace: uninstall + absence check + install + verify → new state.
+    #[test]
+    fn managed_script_replace_reinstalls_and_updates_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state_path = tmp.path().join("state.json");
+        let feat_dir = tmp.path().join("feat");
+        std::fs::create_dir_all(&feat_dir).unwrap();
+
+        let old_tool_path = tmp.path().join("old-tool");
+        let new_tool_path = tmp.path().join("new-tool");
+
+        // Old tool is "installed".
+        std::fs::write(&old_tool_path, "").unwrap();
+
+        let old_verify = tool_file_verify(old_tool_path.to_str().unwrap());
+        let new_verify = tool_file_verify(new_tool_path.to_str().unwrap());
+
+        // Uninstall removes old; install creates new.
+        write_remove_script(
+            &feat_dir.join(script_name("uninstall")),
+            &old_tool_path,
+        );
+        write_create_script(
+            &feat_dir.join(script_name("install")),
+            &new_tool_path,
+        );
+
+        let mut state = State::empty();
+        state.components.insert(
+            "tools/fake".to_string(),
+            ComponentState {
+                resources: vec![tool_resource_state(
+                    "tool:fake",
+                    "fake",
+                    old_verify.clone(),
+                    Some(old_tool_path.to_str().unwrap().to_string()),
+                )],
+            },
+        );
+
+        let plan = make_plan(vec![make_action("tools/fake", Operation::Replace)]);
+        let graph = make_graph(vec![(
+            "tools/fake",
+            vec![tool_resource_desired("tool:fake", "fake", new_verify.clone())],
+        )]);
+        let index = make_index(vec![(
+            "tools/fake",
+            managed_script_meta(feat_dir.to_str().unwrap()),
+        )]);
+        let registry = BackendRegistry::new();
+        let dirs = make_dirs(&tmp);
+        let platform = platform::detect_platform();
+        let ctx = ExecutionContext {
+            plan: &plan,
+            graph: &graph,
+            index: &index,
+            registry: &registry,
+            dirs: &dirs,
+            platform: &platform,
+            state_path: &state_path,
+            contributors: &ContributorRegistry::new(),
+        };
+
+        let mut events = vec![];
+        let report = execute(&ctx, &mut state, &mut |e| events.push(e)).unwrap();
+
+        assert_eq!(report.executed.len(), 1, "expected one success");
+        assert!(report.failed.is_empty());
+        assert!(state.components.contains_key("tools/fake"));
+        let comp = &state.components["tools/fake"];
+        assert_eq!(comp.resources.len(), 1);
+        match &comp.resources[0].kind {
+            ResourceKind::Tool { tool } => {
+                assert_eq!(
+                    tool.observed.resolved_path.as_deref(),
+                    Some(new_tool_path.to_str().unwrap())
+                );
+            }
+            _ => panic!("expected tool resource"),
+        }
+        assert!(!old_tool_path.exists(), "old tool must be removed");
+        assert!(new_tool_path.exists(), "new tool must be created");
     }
 }
