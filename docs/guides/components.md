@@ -58,7 +58,8 @@ provides:
 
 `mode` determines how the component is executed:
 * `declarative` — resources are compiled by ComponentCompiler from the `resources:` section and applied by the executor without scripts. **This is the default.** Prefer declarative unless scripts are unavoidable.
-* `script` — run `install.sh` / `uninstall.sh`. Must be declared explicitly. Use only when install logic cannot be expressed as resources.
+* `managed_script` — run `install.sh` / `uninstall.sh`, but resource verification and state updates are owned by the executor. Requires a `resources:` section with at least one `tool` resource. Safer than `script`, but still **danger** because arbitrary script execution remains.
+* `script` — run `install.sh` / `uninstall.sh`. Must be declared explicitly. Use only when install logic cannot be expressed as resources and tool verification is not feasible.
 
 The `dep` block (`depends`, `requires`, `provides`) is for **ordering only**.
 No version constraints, no conditional logic, no commands.
@@ -91,6 +92,14 @@ as implicit dependencies. If no provider is in the profile, apply aborts.
 > **Note:** `depends`, `requires`, `provides` are top-level keys in `component.yaml`.
 > The Component Index Builder normalizes these into the `dep.*` structure used internally
 > by the resolver. Developers write the flat form shown above.
+
+**Choosing the right mode:**
+
+| Mode | Use when |
+|---|---|
+| `declarative` | All resources are packages, runtimes, or files — first choice |
+| `managed_script` | Tool must be installed via a script, but its installed location can be verified reliably |
+| `script` | Install logic is fully imperative and cannot be reduced to a verifiable resource |
 
 ## Declarative Components
 
@@ -204,6 +213,140 @@ resources:
   - kind: package
     id: package:fd
     name: fd-find          # apt name differs from brew name
+```
+
+## Managed Script Components
+
+Managed script components use `mode: managed_script`.
+
+The component provides `install.sh` / `uninstall.sh` scripts for imperative installation,
+and declares `tool` resources that the executor verifies and records in state.
+
+**This mode is still `danger`** — the scripts execute arbitrary code. But unlike `mode: script`,
+the executor owns verification and state: the tool must be present and identifiable after install,
+and absent after uninstall, or the operation fails and state is unchanged.
+
+**When to use `managed_script`:**
+- Install must use an external script (curl-pipe, vendor install script, single-file binary placement)
+- The resulting tool has a stable, verifiable location (absolute path or resolved command)
+- Package semantics (`kind: package`) do not apply (no package manager backend is involved)
+
+**Current restriction:** `managed_script` components may only declare `kind: tool` resources.
+Mixing `package`, `runtime`, or `fs` resources in the same component is prohibited.
+
+### `managed_script` `component.yaml` schema
+
+```yaml
+spec_version: 1
+mode: managed_script
+description: Brief description
+
+provides:
+  - name: package_manager   # optional capability export
+
+scripts:
+  install: install.sh       # required
+  uninstall: uninstall.sh   # required
+
+resources:
+  - kind: tool
+    id: tool:<name>         # stable identifier; must not change
+    name: <name>            # tool name (for display and state)
+    verify:
+      identity:             # required: must use a concrete identity type
+        type: file          # file | resolved_command | directory | symlink_target
+        path: /abs/path/to/tool
+        executable: true    # (file type only)
+      version:              # optional: only checked for planner compatibility
+        command: <tool>
+        args: ["--version"]
+        parse:
+          first_line_regex: "^([0-9]+\\.[0-9]+\\.[0-9]+)"
+        constraint: ">=1.0.0"
+```
+
+### `tool` resource kind
+
+`tool` resources represent tools installed by a `managed_script` component's scripts.
+They differ from `package` resources in that no backend is involved; the script performs installation,
+and the executor performs verification.
+
+**`verify.identity`** is **required** for every `tool` resource. Supported identity types:
+
+| type | Description |
+|---|---|
+| `file` | An absolute file path must exist (optionally: must be executable) |
+| `directory` | An absolute directory path must exist |
+| `resolved_command` | A command name resolved via PATH must match one of the `expected_path.one_of` entries |
+| `symlink_target` | A symlink at a given path must resolve to the expected target |
+
+`versioned_command` (version check without path verification) may NOT be used as the primary identity.
+Every `tool` resource must have a concrete identity type (`file`, `resolved_command`, `directory`, or `symlink_target`).
+
+**`verify.version`** is optional. When declared, it is used by the planner as a compatibility signal:
+if the version constraint changes, the component is classified as `replace`. It has no effect at runtime
+if it was not declared in the original desired state.
+
+### Executor protocol for `managed_script`
+
+**Install (create / replace-install):**
+
+1. Run `install.sh` (must exit 0).
+2. Verify all declared `tool` resources using their `verify.identity` contract.
+3. If all verify passes: record observed facts (`resolved_path`, `version`) in state and commit atomically.
+4. If any verify fails: the operation is a failure; state is unchanged.
+
+**Uninstall (destroy / replace-uninstall):**
+
+1. Run `uninstall.sh` (must exit 0).
+2. Perform absence check: `tool.observed.resolved_path` must not exist.
+3. If all absence checks pass: remove the component's resources from state and commit atomically.
+4. If any absence check fails: the operation is a failure; state is unchanged.
+
+`strengthen` is never generated for `managed_script` components.
+Adding a `tool` resource to an existing component always triggers `replace`.
+
+### Example
+
+```yaml
+# component.yaml
+spec_version: 1
+mode: managed_script
+description: Install Homebrew
+
+provides:
+  - name: package_manager
+
+scripts:
+  install: install.sh
+  uninstall: uninstall.sh
+
+resources:
+  - kind: tool
+    id: tool:brew
+    name: brew
+    verify:
+      identity:
+        type: resolved_command
+        command: brew
+        expected_path:
+          one_of:
+            - /home/linuxbrew/.linuxbrew/bin/brew
+            - /opt/homebrew/bin/brew
+```
+
+```bash
+# install.sh
+#!/usr/bin/env bash
+set -euo pipefail
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+```bash
+# uninstall.sh
+#!/usr/bin/env bash
+set -euo pipefail
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
 ```
 
 ## Script Component Constraints

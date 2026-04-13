@@ -73,9 +73,9 @@ All bare names (legacy v2 state) must be prefixed with `core/` when migrating to
 
 ### Resource kinds
 
-State records three kinds of resources: `package`, `runtime`, and `fs`.
+State records four kinds of resources: `package`, `runtime`, `fs`, and `tool`.
 
-For detailed field definitions and types, see `crates/model/src/state.rs` (rustdoc).
+For detailed field definitions and types, see `crates/model/src/state.rs` and `crates/model/src/tool.rs` (rustdoc).
 
 **`package` — Managed artifacts installed by package managers**
 
@@ -126,11 +126,38 @@ For detailed field definitions and types, see `crates/model/src/state.rs` (rustd
 - `path` must be absolute
 - `logical_id` must be stable within a component (used for diff matching)
 
+**`tool` — Tools installed by `managed_script` components**
+
+```json
+{
+  "kind": "tool",
+  "id": "tool:<name>",
+  "tool": {
+    "name": "<string>",
+    "verify": {
+      "identity": { ... }
+    },
+    "observed": {
+      "resolved_path": "<absolute_path|null>",
+      "version": "<string|null>"
+    }
+  }
+}
+```
+
+**Meaning:**
+- No `backend` field: tool installation is performed by the component's install script, not a backend
+- `verify.identity` records the identity contract used during install-time verification; required for state validity
+- `observed.resolved_path` is the actual path observed at install time; must be absolute when present
+- `observed.version` is the version string observed at install time; null if no version verify was declared
+- `tool` resources may only appear in components with `mode: managed_script`
+
 ## Identity Rules
 
 Within a single component: `resource.id` must be unique.
 Across components: the pair `(component_id, resource.id)` must be unique.
 The same `fs.path` must NOT be recorded by multiple components.
+`tool` resources are component-owned: no uniqueness constraint across components on `tool.name` or `tool.observed.resolved_path`.
 
 ## Invariants
 
@@ -143,7 +170,8 @@ Core must validate all invariants before execution. If any fails, execution must
 5. Within a component: no duplicate `resource.id`.
 6. Across all components: no duplicate `fs.path`.
 7. All `fs.path` values must be absolute.
-8. State must reflect only successfully completed operations.
+8. All `tool.observed.resolved_path` values (when non-null) must be absolute.
+9. State must reflect only successfully completed operations.
 
 ## State Transition Rules
 
@@ -179,6 +207,11 @@ For `package`/`runtime` removal: use the recorded `backend`. If the backend cann
 
 For `fs` removal: remove only the exact tracked `fs.path`. Must not remove parent directories
 unless the parent is itself explicitly tracked as a `fs` resource with `entry_type: dir`.
+
+For `tool` removal: after the component's uninstall script exits 0, verify absence using only
+`tool.observed.resolved_path`. Must NOT check all `verify.identity.expected_path.one_of` candidates —
+only the single previously observed path. If the observed path still exists, the operation fails and
+state is not modified.
 
 **Destructive path guards** — The fs module must refuse removal of dangerous paths even if recorded:
 

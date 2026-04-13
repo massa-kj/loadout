@@ -151,13 +151,84 @@ See `docs/specs/data/profile.md` for the full `component.yaml` schema.
 | Mode | Mechanism | Idempotency | Use Case |
 |---|---|---|---|
 | **Declarative** (default) | Resource graph → backends | Guaranteed | Packages, runtimes, files |
+| **Managed Script** | Script + core verify + core state | Verified | Tools installed via install scripts |
 | **Script** | Arbitrary shell script | Best-effort | System settings, templates, conditional logic |
 
 Use **declarative mode** when possible (better error handling, atomic state, backend-agnostic).
 
+Use **managed script mode** when:
+- Tool installation requires an external script (curl-pipe installer, vendor script, single-binary setup)
+- The installed tool has a stable, verifiable path
+
 Use **script mode** when:
 - The operation cannot be expressed as resources (e.g., writing to `/etc/sudoers`)
 - Significant conditional logic is required
+- Tool verification after install is not feasible
+
+## Managed Script Mode
+
+`mode: managed_script` components combine imperative install/uninstall scripts with executor-owned
+verification and state management.
+
+### What the executor does
+
+**On install (create or replace-install):**
+1. Executes `install.sh`.
+2. If exit code is 0: verifies all declared `tool` resources using their `verify.identity` contract.
+3. If all verifications pass: records observed facts (`resolved_path`, `version`) in state and commits atomically.
+4. If verification fails: operation is a failure; state is not modified.
+
+**On uninstall (destroy or replace-uninstall):**
+1. Executes `uninstall.sh`.
+2. If exit code is 0: performs absence check — `tool.observed.resolved_path` must not exist on disk.
+3. If all absence checks pass: removes the component's resources from state and commits atomically.
+4. If any path still exists: operation is a failure; state is not modified.
+
+### Constraints
+
+Scripts for `managed_script` components are subject to the same isolation rules as `script` mode:
+
+- Must NOT read or write `state.json` directly
+- Must NOT remove files belonging to other components
+- Must use `set -euo pipefail` (recommended)
+- Must exit 0 on success, non-0 on failure
+
+Additionally, for `managed_script` components:
+
+- The `resources:` section is **required** and must contain at least one `kind: tool` entry
+- Each `tool` resource **must** declare `verify.identity` (identity verification is mandatory)
+- `scriptsinstall` and `scripts.uninstall` keys are required in `component.yaml`
+- Only `kind: tool` resources are permitted; mixing `package`, `runtime`, or `fs` is prohibited
+
+### Example: `component.yaml`
+
+```yaml
+spec_version: 1
+mode: managed_script
+description: Install Homebrew
+
+provides:
+  - name: package_manager
+
+scripts:
+  install: install.sh
+  uninstall: uninstall.sh
+
+resources:
+  - kind: tool
+    id: tool:brew
+    name: brew
+    verify:
+      identity:
+        type: resolved_command
+        command: brew
+        expected_path:
+          one_of:
+            - /home/linuxbrew/.linuxbrew/bin/brew
+            - /opt/homebrew/bin/brew
+```
+
+See `docs/guides/components.md` for the full `tool` resource reference and more examples.
 
 ## Example: Script-Mode Component
 

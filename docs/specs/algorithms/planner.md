@@ -77,9 +77,9 @@ Each component is classified into exactly one of:
 |---|---|
 | `create` | In desired, not in state |
 | `destroy` | In state, not in desired |
-| `replace` | In both; any desired resource is incompatible with recorded state resource (kind change, fs path/entry_type/op change, or destructive semantics change) |
+| `replace` | In both; any desired resource is incompatible with recorded state resource (kind change, fs path/entry_type/op change, tool identity/version-constraint change, or destructive semantics change) |
 | `replace_backend` | In both; backend mismatch on any existing resource |
-| `strengthen` | In both; all conditions below are satisfied: (1) every resource id recorded in state exists in desired, (2) every shared resource is compatible, (3) desired contains at least one resource id not present in state, (4) no backend mismatch, version mismatch, or blocked condition applies |
+| `strengthen` | In both; all conditions below are satisfied: (1) every resource id recorded in state exists in desired, (2) every shared resource is compatible, (3) desired contains at least one resource id not present in state, (4) no backend mismatch, version mismatch, or blocked condition applies — **`strengthen` is never generated for `managed_script` components** |
 | `noop` | In both; desired resources and state resources are identical and all compatible |
 | `blocked` | Unknown resource kind (`kind` not in supported set) or invariant violation recorded in state |
 
@@ -87,6 +87,13 @@ Compatibility rules for shared resources:
 * `package`: name and backend must match; version difference → `replace`
 * `runtime`: name, version, and backend must match; any difference → `replace`
 * `fs`: `path`, `entry_type`, and `op` must all match; any difference → `replace`
+* `tool`: `verify.identity` contract must match; if `verify.version.constraint` is declared, it must also match; any difference → `replace`
+
+**`managed_script` components and `strengthen`:**
+`strengthen` is never generated for `managed_script` components. If a `managed_script` component
+has resources in desired that are not in state (e.g., a new `tool` resource was added), it is classified
+as `replace` rather than `strengthen`. Reason: `managed_script` install/uninstall scripts operate at
+component granularity and cannot add individual resources without executing the full install flow.
 
 When in doubt between `strengthen` and `replace`, classify as `replace`.
 
