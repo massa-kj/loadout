@@ -10,6 +10,8 @@ backend-host = { path = "../backend-host" }
 component-host = { path = "../component-host" }
 platform = { path = "../platform" }
 thiserror = "2"
+semver = "1"
+regex = "1"
 
 [dev-dependencies]
 tempfile = "3"

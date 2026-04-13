@@ -22,6 +22,9 @@
 pub mod activate;
 pub use activate::{generate_activation, ShellKind};
 
+pub mod tool_verify;
+pub use tool_verify::{check_absence, verify_tool, ToolVerifyError};
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
