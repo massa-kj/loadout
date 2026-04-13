@@ -648,9 +648,7 @@ mod tests {
                                 identity: ToolIdentityVerify::ResolvedCommand {
                                     command: name.into(),
                                     expected_path: OneOf {
-                                        one_of: vec![
-                                            "/home/linuxbrew/.linuxbrew/bin/brew".into(),
-                                        ],
+                                        one_of: vec!["/home/linuxbrew/.linuxbrew/bin/brew".into()],
                                     },
                                 },
                                 version: None,
@@ -690,7 +688,10 @@ mod tests {
         let err = validate(&s).unwrap_err();
         assert!(matches!(err, StateError::InvalidState { .. }));
         let msg = err.to_string();
-        assert!(msg.contains("resolved_path"), "error must mention resolved_path");
+        assert!(
+            msg.contains("resolved_path"),
+            "error must mention resolved_path"
+        );
         assert!(msg.contains("absolute"), "error must mention absolute");
     }
 

@@ -14,9 +14,7 @@
 
 use std::path::Path;
 
-use model::tool::{
-    ToolIdentityVerify, ToolObservedFacts, ToolVerifyContract, ToolVersionVerify,
-};
+use model::tool::{ToolIdentityVerify, ToolObservedFacts, ToolVerifyContract, ToolVersionVerify};
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -40,9 +38,7 @@ pub enum ToolVerifyError {
     },
 
     /// The version constraint declared in the verify contract is not satisfied.
-    #[error(
-        "tool '{resource_id}' version constraint '{constraint}' not met: found '{found}'"
-    )]
+    #[error("tool '{resource_id}' version constraint '{constraint}' not met: found '{found}'")]
     VersionConstraintNotMet {
         resource_id: String,
         found: String,
@@ -142,10 +138,11 @@ fn verify_identity(
             command,
             expected_path,
         } => {
-            let resolved = resolve_command(command).ok_or_else(|| ToolVerifyError::IdentityNotFound {
-                resource_id: resource_id.to_string(),
-                reason: format!("command '{}' not found in PATH", command),
-            })?;
+            let resolved =
+                resolve_command(command).ok_or_else(|| ToolVerifyError::IdentityNotFound {
+                    resource_id: resource_id.to_string(),
+                    reason: format!("command '{}' not found in PATH", command),
+                })?;
 
             let resolved_str = resolved
                 .to_str()
@@ -247,11 +244,8 @@ fn verify_version(
         })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let version_str = parse_version_output(
-        resource_id,
-        &stdout,
-        &version_verify.parse.first_line_regex,
-    )?;
+    let version_str =
+        parse_version_output(resource_id, &stdout, &version_verify.parse.first_line_regex)?;
 
     // Evaluate the constraint if one was declared.
     if let Some(constraint_str) = &version_verify.constraint {
@@ -311,10 +305,7 @@ fn check_version_constraint(
 
     let req = semver::VersionReq::parse(constraint_str).map_err(|e| ToolVerifyError::IoError {
         resource_id: resource_id.to_string(),
-        reason: format!(
-            "invalid semver constraint '{}': {}",
-            constraint_str, e
-        ),
+        reason: format!("invalid semver constraint '{}': {}", constraint_str, e),
     })?;
 
     if !req.matches(&version) {
@@ -399,8 +390,7 @@ fn resolve_command_windows(command: &str) -> Option<std::path::PathBuf> {
     }
 
     let path_var = std::env::var("PATH").unwrap_or_default();
-    let pathext = std::env::var("PATHEXT")
-        .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+    let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
     let extensions: Vec<&str> = pathext.split(';').collect();
 
     for dir in std::env::split_paths(&path_var) {
@@ -412,9 +402,9 @@ fn resolve_command_windows(command: &str) -> Option<std::path::PathBuf> {
         // Try appending each PATHEXT extension (case-insensitive on Windows).
         let command_upper = command.to_uppercase();
         // Only append extension if command doesn't already have one.
-        let has_ext = extensions.iter().any(|ext| {
-            command_upper.ends_with(&ext.to_uppercase())
-        });
+        let has_ext = extensions
+            .iter()
+            .any(|ext| command_upper.ends_with(&ext.to_uppercase()));
         if !has_ext {
             for ext in &extensions {
                 let candidate = dir.join(format!("{}{}", command, ext));
@@ -482,11 +472,7 @@ mod tests {
 
     #[test]
     fn parse_version_plain_semver() {
-        let result = parse_version_output(
-            "test:deno",
-            "2.1.4\n",
-            r"^([0-9]+\.[0-9]+\.[0-9]+)",
-        );
+        let result = parse_version_output("test:deno", "2.1.4\n", r"^([0-9]+\.[0-9]+\.[0-9]+)");
         assert_eq!(result.unwrap(), "2.1.4");
     }
 
@@ -497,7 +483,10 @@ mod tests {
             "unexpected output\n",
             r"^Homebrew\s+([0-9]+\.[0-9]+\.[0-9]+)",
         );
-        assert!(matches!(result, Err(ToolVerifyError::VersionParseFailed { .. })));
+        assert!(matches!(
+            result,
+            Err(ToolVerifyError::VersionParseFailed { .. })
+        ));
     }
 
     #[test]
@@ -596,7 +585,10 @@ mod tests {
             executable: false,
         };
         let result = verify_identity("test:tool", &identity);
-        assert!(matches!(result, Err(ToolVerifyError::IdentityNotFound { .. })));
+        assert!(matches!(
+            result,
+            Err(ToolVerifyError::IdentityNotFound { .. })
+        ));
     }
 
     #[test]
@@ -620,7 +612,9 @@ mod tests {
     fn directory_identity_succeeds_for_existing_dir() {
         let tmp = tempfile::TempDir::new().unwrap();
         let path_str = tmp.path().to_str().unwrap().to_string();
-        let identity = ToolIdentityVerify::Directory { path: path_str.clone() };
+        let identity = ToolIdentityVerify::Directory {
+            path: path_str.clone(),
+        };
         let result = verify_identity("test:tool", &identity);
         assert_eq!(result.unwrap(), Some(path_str));
     }
@@ -631,7 +625,10 @@ mod tests {
             path: "/tmp/__loadout_nonexistent_dir__".to_string(),
         };
         let result = verify_identity("test:tool", &identity);
-        assert!(matches!(result, Err(ToolVerifyError::IdentityNotFound { .. })));
+        assert!(matches!(
+            result,
+            Err(ToolVerifyError::IdentityNotFound { .. })
+        ));
     }
 
     // -----------------------------------------------------------------------
@@ -669,7 +666,10 @@ mod tests {
             expected_target: "/wrong/path".to_string(),
         };
         let result = verify_identity("test:tool", &identity);
-        assert!(matches!(result, Err(ToolVerifyError::IdentityNotFound { .. })));
+        assert!(matches!(
+            result,
+            Err(ToolVerifyError::IdentityNotFound { .. })
+        ));
     }
 
     // -----------------------------------------------------------------------
@@ -690,7 +690,8 @@ mod tests {
         // Either IdentityNotFound (if env not in PATH) or PathNotInExpectedSet.
         assert!(matches!(
             result,
-            Err(ToolVerifyError::PathNotInExpectedSet { .. }) | Err(ToolVerifyError::IdentityNotFound { .. })
+            Err(ToolVerifyError::PathNotInExpectedSet { .. })
+                | Err(ToolVerifyError::IdentityNotFound { .. })
         ));
     }
 

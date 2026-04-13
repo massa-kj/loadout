@@ -358,7 +358,9 @@ mod tests {
 
     #[test]
     fn tool_serialized_kind_tag_is_tool() {
-        use crate::tool::{OneOf, ToolIdentityVerify, ToolObservedFacts, ToolResource, ToolVerifyContract};
+        use crate::tool::{
+            OneOf, ToolIdentityVerify, ToolObservedFacts, ToolResource, ToolVerifyContract,
+        };
         let s = State {
             version: STATE_VERSION,
             components: {
@@ -375,10 +377,8 @@ mod tests {
                                         identity: ToolIdentityVerify::ResolvedCommand {
                                             command: "brew".to_string(),
                                             expected_path: OneOf {
-                                                one_of: vec![
-                                                    "/home/linuxbrew/.linuxbrew/bin/brew"
-                                                        .to_string(),
-                                                ],
+                                                one_of: vec!["/home/linuxbrew/.linuxbrew/bin/brew"
+                                                    .to_string()],
                                             },
                                         },
                                         version: None,

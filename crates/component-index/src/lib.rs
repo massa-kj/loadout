@@ -77,6 +77,15 @@ pub enum ComponentIndexError {
     ScriptsMissing { component_id: String, mode: String },
 
     /// A `tool` resource has no identity verify (only `versioned_command`-only verify is invalid).
+    /// A `tool` resource declares no identity verify contract.
+    ///
+    /// NOTE: This variant is currently unreachable in practice. The `identity` field of
+    /// `ToolVerifyContract` is non-optional, so a component.yaml that omits `verify.identity`
+    /// fails at serde deserialization before this validation runs. `ToolIdentityVerify` contains
+    /// no `versioned_command` variant, making version-only identity structurally impossible.
+    /// This variant is reserved for future use if a `versioned_command`-only identity type is
+    /// added to `ToolIdentityVerify`.
+    #[allow(dead_code)]
     #[error(
         "component '{component_id}': tool resource '{resource_id}' \
          must declare an identity verify (resolved_command, file, symlink_target, or directory). \

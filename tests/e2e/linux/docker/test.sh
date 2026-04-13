@@ -67,6 +67,7 @@ Scenario commands (use the test image)
   version-install   Run version install scenario
   version-upgrade   Run version upgrade scenario
   version-mixed     Run version mixed scenario
+  managed-script    Run managed-script scenario
   all               Run all scenarios
 
 Maintenance
@@ -200,6 +201,7 @@ case "$COMMAND" in
     version-install) build_test_image && run_scenario "version-install" ;;
     version-upgrade) build_test_image && run_scenario "version-upgrade" ;;
     version-mixed)   build_test_image && run_scenario "version-mixed" ;;
+    managed-script)  build_test_image && run_scenario "managed-script" ;;
 
     all)
         build_test_image

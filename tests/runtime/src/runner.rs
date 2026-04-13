@@ -95,4 +95,3 @@ pub fn loadout_apply_yes_expect_fail(ctx: &Context, config: &Path) -> Result<(),
         Ok(())
     }
 }
-

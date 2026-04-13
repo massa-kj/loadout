@@ -432,8 +432,7 @@ fn execute_action(
                         }
                     })?;
 
-                    let resources =
-                        verify_tool_resources(id_str, &desired.resources.clone())?;
+                    let resources = verify_tool_resources(id_str, &desired.resources.clone())?;
                     state
                         .components
                         .insert(id_str.to_string(), ComponentState { resources });
@@ -544,8 +543,7 @@ fn execute_action(
                         }
                     })?;
 
-                    let resources =
-                        verify_tool_resources(id_str, &desired.resources.clone())?;
+                    let resources = verify_tool_resources(id_str, &desired.resources.clone())?;
                     state
                         .components
                         .insert(id_str.to_string(), ComponentState { resources });
@@ -585,36 +583,58 @@ fn execute_action(
                 state
                     .components
                     .insert(id_str.to_string(), ComponentState { resources: vec![] });
-            } else {
-                if let Some(comp_state) = state.components.get(id_str) {
-                    remove_state_resources(ctx, id_str, &comp_state.resources.clone())?;
-                }
-                let desired =
-                    ctx.graph
-                        .components
-                        .get(id_str)
-                        .ok_or_else(|| ComponentError::Component {
-                            error: format!("desired resources not found for: {id_str}"),
-                        })?;
-                let resources = apply_resources(
-                    ctx,
-                    id_str,
-                    &desired.resources,
-                    env_ctx,
-                    artifacts,
-                    on_event,
-                )?;
-                state
-                    .components
-                    .insert(id_str.to_string(), ComponentState { resources });
+                return Ok(());
             }
+            // ManagedScript: ReplaceBackend is structurally impossible because tool resources
+            // carry no backend field — check_compatibility never returns BackendMismatch for
+            // Tool/Tool pairs. If this arm is ever reached, it is an invariant violation.
+            if meta.mode == ComponentMode::ManagedScript {
+                return Err(ComponentError::Component {
+                    error: format!(
+                        "invariant violation: replace_backend must not be generated for \
+                         managed_script component '{id_str}'"
+                    ),
+                });
+            }
+            if let Some(comp_state) = state.components.get(id_str) {
+                remove_state_resources(ctx, id_str, &comp_state.resources.clone())?;
+            }
+            let desired =
+                ctx.graph
+                    .components
+                    .get(id_str)
+                    .ok_or_else(|| ComponentError::Component {
+                        error: format!("desired resources not found for: {id_str}"),
+                    })?;
+            let resources = apply_resources(
+                ctx,
+                id_str,
+                &desired.resources,
+                env_ctx,
+                artifacts,
+                on_event,
+            )?;
+            state
+                .components
+                .insert(id_str.to_string(), ComponentState { resources });
         }
 
         Operation::Strengthen => {
             // Apply only the add_resources listed in the plan details.
-            // Script components do not have strengthen; treat as noop with warning.
+            // Script components do not have strengthen; treat as noop.
+            // ManagedScript components do not support strengthen (the planner normalises any
+            // superset diff into replace for managed_script). If a strengthen action is ever
+            // generated for a managed_script component it is an invariant violation.
             if meta.mode == ComponentMode::Script {
                 return Ok(());
+            }
+            if meta.mode == ComponentMode::ManagedScript {
+                return Err(ComponentError::Component {
+                    error: format!(
+                        "invariant violation: strengthen must not be generated for \
+                         managed_script component '{id_str}'"
+                    ),
+                });
             }
 
             let add = match details {
@@ -687,10 +707,7 @@ fn verify_tool_resources(
             DesiredResourceKind::Tool { name, verify } => {
                 let facts = verify_tool(&dr.id, verify).map_err(|e| ComponentError::Resource {
                     resource_id: dr.id.clone(),
-                    error: format!(
-                        "[{component_id}] tool '{}' verify failed: {e}",
-                        dr.id
-                    ),
+                    error: format!("[{component_id}] tool '{}' verify failed: {e}", dr.id),
                 })?;
                 resources.push(Resource {
                     id: dr.id.clone(),
@@ -1888,10 +1905,9 @@ mod tests {
                 "New-Item -ItemType File -Force -Path '{}'\n",
                 create_path.display()
             ),
-            Platform::Linux | Platform::Wsl => format!(
-                "#!/usr/bin/env sh\ntouch '{}'\n",
-                create_path.display()
-            ),
+            Platform::Linux | Platform::Wsl => {
+                format!("#!/usr/bin/env sh\ntouch '{}'\n", create_path.display())
+            }
         };
         std::fs::write(script_path, &content).unwrap();
         #[cfg(unix)]
@@ -1909,10 +1925,9 @@ mod tests {
                 "Remove-Item -Force -Path '{}' -ErrorAction SilentlyContinue\n",
                 remove_path.display()
             ),
-            Platform::Linux | Platform::Wsl => format!(
-                "#!/usr/bin/env sh\nrm -f '{}'\n",
-                remove_path.display()
-            ),
+            Platform::Linux | Platform::Wsl => {
+                format!("#!/usr/bin/env sh\nrm -f '{}'\n", remove_path.display())
+            }
         };
         std::fs::write(script_path, &content).unwrap();
         #[cfg(unix)]
@@ -1998,10 +2013,7 @@ mod tests {
         let tool_path = tmp.path().join("fake-tool");
 
         // Install script creates the tool file; uninstall is unused here.
-        write_create_script(
-            &feat_dir.join(script_name("install")),
-            &tool_path,
-        );
+        write_create_script(&feat_dir.join(script_name("install")), &tool_path);
         write_noop_script(&feat_dir.join(script_name("uninstall")));
 
         let verify = tool_file_verify(tool_path.to_str().unwrap());
@@ -2094,8 +2106,14 @@ mod tests {
 
         assert!(report.executed.is_empty());
         assert_eq!(report.failed.len(), 1);
-        assert!(!state.components.contains_key("tools/fake"), "state must not be updated");
-        assert!(!state_path.exists(), "state must not be committed on failure");
+        assert!(
+            !state.components.contains_key("tools/fake"),
+            "state must not be updated"
+        );
+        assert!(
+            !state_path.exists(),
+            "state must not be committed on failure"
+        );
     }
 
     /// managed_script destroy: uninstall script removes tool → absence check passes → state cleared.
@@ -2113,10 +2131,7 @@ mod tests {
         let verify = tool_file_verify(tool_path.to_str().unwrap());
 
         // Uninstall script removes the tool file.
-        write_remove_script(
-            &feat_dir.join(script_name("uninstall")),
-            &tool_path,
-        );
+        write_remove_script(&feat_dir.join(script_name("uninstall")), &tool_path);
         write_noop_script(&feat_dir.join(script_name("install")));
 
         // Pre-populate state as if created earlier.
@@ -2162,7 +2177,10 @@ mod tests {
             !state.components.contains_key("tools/fake"),
             "component must be removed from state"
         );
-        assert!(!tool_path.exists(), "uninstall script should have removed the file");
+        assert!(
+            !tool_path.exists(),
+            "uninstall script should have removed the file"
+        );
     }
 
     /// managed_script destroy: absence check fails (tool still present) → state unchanged.
@@ -2220,7 +2238,11 @@ mod tests {
         let report = execute(&ctx, &mut state, &mut |e| events.push(e)).unwrap();
 
         assert!(report.executed.is_empty());
-        assert_eq!(report.failed.len(), 1, "absence check failure must be reported");
+        assert_eq!(
+            report.failed.len(),
+            1,
+            "absence check failure must be reported"
+        );
         assert!(
             state.components.contains_key("tools/fake"),
             "state must remain when absence check fails"
@@ -2245,14 +2267,8 @@ mod tests {
         let new_verify = tool_file_verify(new_tool_path.to_str().unwrap());
 
         // Uninstall removes old; install creates new.
-        write_remove_script(
-            &feat_dir.join(script_name("uninstall")),
-            &old_tool_path,
-        );
-        write_create_script(
-            &feat_dir.join(script_name("install")),
-            &new_tool_path,
-        );
+        write_remove_script(&feat_dir.join(script_name("uninstall")), &old_tool_path);
+        write_create_script(&feat_dir.join(script_name("install")), &new_tool_path);
 
         let mut state = State::empty();
         state.components.insert(
@@ -2270,7 +2286,11 @@ mod tests {
         let plan = make_plan(vec![make_action("tools/fake", Operation::Replace)]);
         let graph = make_graph(vec![(
             "tools/fake",
-            vec![tool_resource_desired("tool:fake", "fake", new_verify.clone())],
+            vec![tool_resource_desired(
+                "tool:fake",
+                "fake",
+                new_verify.clone(),
+            )],
         )]);
         let index = make_index(vec![(
             "tools/fake",

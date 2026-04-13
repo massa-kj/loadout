@@ -305,7 +305,10 @@ fn classify_existing(
         // resource-level addition cannot be isolated, so strengthen must be replace.
         // We detect this by checking whether any desired resource (including shared ones)
         // is a Tool kind: if so, the component is managed_script and strengthen is invalid.
-        let has_tool_resource = desired_comp.resources.iter().any(|r| matches!(r.kind, DesiredResourceKind::Tool { .. }));
+        let has_tool_resource = desired_comp
+            .resources
+            .iter()
+            .any(|r| matches!(r.kind, DesiredResourceKind::Tool { .. }));
         if has_tool_resource {
             return Classification::Replace {
                 from_version: None,
@@ -423,9 +426,7 @@ fn check_compatibility(
             Compatibility::Compatible
         }
         // Tool resources: delegate to check_tool_compatibility.
-        (D::Tool { verify: dv, .. }, S::Tool { tool: st }) => {
-            check_tool_compatibility(dv, st)
-        }
+        (D::Tool { verify: dv, .. }, S::Tool { tool: st }) => check_tool_compatibility(dv, st),
         // Kind mismatch (e.g. package in desired, runtime in state) → replace.
         _ => Compatibility::Incompatible {
             from_version: None,
@@ -453,8 +454,15 @@ fn check_tool_compatibility(
     }
 
     // Version constraint change (including add/remove) → replace.
-    let desired_constraint = desired_verify.version.as_ref().and_then(|v| v.constraint.as_deref());
-    let recorded_constraint = recorded.verify.version.as_ref().and_then(|v| v.constraint.as_deref());
+    let desired_constraint = desired_verify
+        .version
+        .as_ref()
+        .and_then(|v| v.constraint.as_deref());
+    let recorded_constraint = recorded
+        .verify
+        .version
+        .as_ref()
+        .and_then(|v| v.constraint.as_deref());
     if desired_constraint != recorded_constraint {
         return Compatibility::Incompatible {
             from_version: recorded_constraint.map(str::to_owned),
@@ -813,8 +821,14 @@ mod tests {
 
     // ── tool resource helpers ─────────────────────────────────────────────────
 
-    fn make_tool_verify(command: &str, path: &str, constraint: Option<&str>) -> model::tool::ToolVerifyContract {
-        use model::tool::{OneOf, ToolIdentityVerify, ToolVerifyContract, ToolVersionVerify, VersionParseRule};
+    fn make_tool_verify(
+        command: &str,
+        path: &str,
+        constraint: Option<&str>,
+    ) -> model::tool::ToolVerifyContract {
+        use model::tool::{
+            OneOf, ToolIdentityVerify, ToolVerifyContract, ToolVersionVerify, VersionParseRule,
+        };
         ToolVerifyContract {
             identity: ToolIdentityVerify::ResolvedCommand {
                 command: command.to_string(),
@@ -947,7 +961,11 @@ mod tests {
     fn tool_replace_on_version_constraint_added() {
         // No constraint → with constraint: replace.
         let old_verify = make_tool_verify("brew", "/home/linuxbrew/.linuxbrew/bin/brew", None);
-        let new_verify = make_tool_verify("brew", "/home/linuxbrew/.linuxbrew/bin/brew", Some(">=4.0.0"));
+        let new_verify = make_tool_verify(
+            "brew",
+            "/home/linuxbrew/.linuxbrew/bin/brew",
+            Some(">=4.0.0"),
+        );
         let desired = desired_with_tool("core/brew", "tool:brew", "brew", new_verify);
         let state = state_with_tool("core/brew", "tool:brew", "brew", old_verify);
         let order = vec![cid("core/brew")];
@@ -958,7 +976,11 @@ mod tests {
     #[test]
     fn tool_replace_on_version_constraint_removed() {
         // With constraint → no constraint: replace.
-        let old_verify = make_tool_verify("brew", "/home/linuxbrew/.linuxbrew/bin/brew", Some(">=4.0.0"));
+        let old_verify = make_tool_verify(
+            "brew",
+            "/home/linuxbrew/.linuxbrew/bin/brew",
+            Some(">=4.0.0"),
+        );
         let new_verify = make_tool_verify("brew", "/home/linuxbrew/.linuxbrew/bin/brew", None);
         let desired = desired_with_tool("core/brew", "tool:brew", "brew", new_verify);
         let state = state_with_tool("core/brew", "tool:brew", "brew", old_verify);
@@ -970,8 +992,16 @@ mod tests {
     #[test]
     fn tool_replace_on_version_constraint_changed() {
         // Constraint value change: replace with from/to version info.
-        let old_verify = make_tool_verify("brew", "/home/linuxbrew/.linuxbrew/bin/brew", Some(">=4.0.0"));
-        let new_verify = make_tool_verify("brew", "/home/linuxbrew/.linuxbrew/bin/brew", Some(">=5.0.0"));
+        let old_verify = make_tool_verify(
+            "brew",
+            "/home/linuxbrew/.linuxbrew/bin/brew",
+            Some(">=4.0.0"),
+        );
+        let new_verify = make_tool_verify(
+            "brew",
+            "/home/linuxbrew/.linuxbrew/bin/brew",
+            Some(">=5.0.0"),
+        );
         let desired = desired_with_tool("core/brew", "tool:brew", "brew", new_verify);
         let state = state_with_tool("core/brew", "tool:brew", "brew", old_verify);
         let order = vec![cid("core/brew")];
@@ -990,7 +1020,9 @@ mod tests {
     #[test]
     fn tool_noop_when_only_version_command_differs() {
         // Only version.command/args/parse changes; constraint is the same → noop.
-        use model::tool::{OneOf, ToolIdentityVerify, ToolVerifyContract, ToolVersionVerify, VersionParseRule};
+        use model::tool::{
+            OneOf, ToolIdentityVerify, ToolVerifyContract, ToolVersionVerify, VersionParseRule,
+        };
         let base_identity = ToolIdentityVerify::ResolvedCommand {
             command: "brew".to_string(),
             expected_path: OneOf {
@@ -1002,7 +1034,9 @@ mod tests {
             version: Some(ToolVersionVerify {
                 command: "brew".to_string(),
                 args: vec!["--version".to_string()],
-                parse: VersionParseRule { first_line_regex: "^old (.+)".to_string() },
+                parse: VersionParseRule {
+                    first_line_regex: "^old (.+)".to_string(),
+                },
                 constraint: Some(">=4.0.0".to_string()),
             }),
         };
@@ -1011,7 +1045,9 @@ mod tests {
             version: Some(ToolVersionVerify {
                 command: "brew".to_string(),
                 args: vec!["--version".to_string()],
-                parse: VersionParseRule { first_line_regex: "^Homebrew (.+)".to_string() },
+                parse: VersionParseRule {
+                    first_line_regex: "^Homebrew (.+)".to_string(),
+                },
                 constraint: Some(">=4.0.0".to_string()), // same constraint, different regex
             }),
         };
