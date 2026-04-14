@@ -454,7 +454,9 @@ fn check_executable(resource_id: &str, path: &Path) -> Result<(), ToolVerifyErro
 #[cfg(test)]
 mod tests {
     use super::*;
-    use model::tool::{OneOf, ToolIdentityVerify, ToolVerifyContract};
+    #[cfg(unix)]
+    use model::tool::OneOf;
+    use model::tool::{ToolIdentityVerify, ToolVerifyContract};
 
     // -----------------------------------------------------------------------
     // parse_version_output
