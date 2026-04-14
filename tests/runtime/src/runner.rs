@@ -8,6 +8,11 @@ use crate::context::Context;
 /// Invoke `loadout apply --config <config>` in `ctx.repo_root` and wait for
 /// completion.  Returns an error string if the process fails to spawn or exits
 /// with a non-zero status.
+///
+/// This function intentionally omits `--yes` to preserve the interactive
+/// confirmation prompt. It is kept for future use (e.g. testing TTY behaviour)
+/// and is not called in the current non-interactive Docker/CI scenarios.
+#[allow(dead_code)]
 pub fn loadout_apply(ctx: &Context, config: &Path) -> Result<(), String> {
     let status = Command::new(&ctx.loadout_bin)
         .arg("apply")

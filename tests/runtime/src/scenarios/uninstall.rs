@@ -15,7 +15,7 @@ use crate::assert::{
     collect_fs_paths, load_state,
 };
 use crate::context::Context;
-use crate::runner::loadout_apply;
+use crate::runner::loadout_apply_yes;
 
 pub fn run(ctx: &Context) -> Result<(), String> {
     println!("==> Uninstall scenario");
@@ -26,7 +26,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
 
     // ── Phase 1: install full profile ────────────────────────────────────────
     println!("==> Phase 1: installing full profile");
-    loadout_apply(ctx, &config_full)?;
+    loadout_apply_yes(ctx, &config_full)?;
 
     let state = load_state(&ctx.state_file)?;
     assert_state_valid(&state)?;
@@ -44,7 +44,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
 
     // ── Test 1: partial uninstall ─────────────────────────────────────────────
     println!("==> Test 1: partial uninstall (full → base)");
-    loadout_apply(ctx, &config_partial)?;
+    loadout_apply_yes(ctx, &config_partial)?;
 
     let state = load_state(&ctx.state_file)?;
     assert_component_present(&state, "core/bash")?;
@@ -67,7 +67,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
 
     // ── Test 2: full uninstall ────────────────────────────────────────────────
     println!("==> Test 2: full uninstall (base → empty)");
-    loadout_apply(ctx, &config_empty)?;
+    loadout_apply_yes(ctx, &config_empty)?;
 
     let state = load_state(&ctx.state_file)?;
     assert_state_valid(&state)?;
@@ -83,7 +83,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
 
     // ── Test 3: idempotent uninstall ──────────────────────────────────────────
     println!("==> Test 3: idempotent uninstall (empty → empty)");
-    loadout_apply(ctx, &config_empty)?;
+    loadout_apply_yes(ctx, &config_empty)?;
 
     let state = load_state(&ctx.state_file)?;
     assert_components_empty(&state)?;

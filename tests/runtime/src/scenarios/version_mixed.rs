@@ -7,7 +7,7 @@
 
 use crate::assert::{assert_no_runtime, assert_state_valid, get_runtime_version, load_state};
 use crate::context::Context;
-use crate::runner::loadout_apply;
+use crate::runner::loadout_apply_yes;
 
 pub fn run(ctx: &Context) -> Result<(), String> {
     println!("==> Version mixed scenario");
@@ -15,7 +15,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
     let config = ctx.config("config-version-mixed.yaml");
 
     println!("==> Running apply with mixed components");
-    loadout_apply(ctx, &config)?;
+    loadout_apply_yes(ctx, &config)?;
 
     println!("==> Checking state file existence");
     if !ctx.state_file.exists() {

@@ -7,7 +7,7 @@ use crate::assert::{
     assert_state_valid, load_state, load_state_raw,
 };
 use crate::context::Context;
-use crate::runner::loadout_apply;
+use crate::runner::loadout_apply_yes;
 
 pub fn run(ctx: &Context) -> Result<(), String> {
     println!("==> Idempotent scenario");
@@ -15,7 +15,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
     let config = ctx.config("config-base.yaml");
 
     println!("==> First apply");
-    loadout_apply(ctx, &config)?;
+    loadout_apply_yes(ctx, &config)?;
     let state = load_state(&ctx.state_file)?;
     assert_state_valid(&state)?;
 
@@ -23,7 +23,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
     let snapshot = load_state_raw(&ctx.state_file)?;
 
     println!("==> Second apply");
-    loadout_apply(ctx, &config)?;
+    loadout_apply_yes(ctx, &config)?;
 
     println!("==> Comparing state");
     let after = load_state_raw(&ctx.state_file)?;

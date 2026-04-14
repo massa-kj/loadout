@@ -6,7 +6,7 @@ use crate::assert::{
     assert_component_present, assert_state_valid, get_runtime_version, load_state,
 };
 use crate::context::Context;
-use crate::runner::loadout_apply;
+use crate::runner::loadout_apply_yes;
 
 pub fn run(ctx: &Context) -> Result<(), String> {
     println!("==> Version install scenario");
@@ -14,7 +14,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
     let config = ctx.config("config-version-v20.yaml");
 
     println!("==> Running apply with version-specified components");
-    loadout_apply(ctx, &config)?;
+    loadout_apply_yes(ctx, &config)?;
 
     println!("==> Checking state file existence");
     if !ctx.state_file.exists() {

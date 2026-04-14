@@ -4,7 +4,7 @@
 
 use crate::assert::{assert_state_valid, get_runtime_version, load_state};
 use crate::context::Context;
-use crate::runner::loadout_apply;
+use crate::runner::loadout_apply_yes;
 
 pub fn run(ctx: &Context) -> Result<(), String> {
     println!("==> Version upgrade scenario");
@@ -14,7 +14,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
 
     // ── Phase 1: install dummy-rt@20 ─────────────────────────────────────────
     println!("==> First apply (dummy-rt@20)");
-    loadout_apply(ctx, &config_v20)?;
+    loadout_apply_yes(ctx, &config_v20)?;
 
     let state = load_state(&ctx.state_file)?;
     assert_state_valid(&state)?;
@@ -29,7 +29,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
 
     // ── Phase 2: upgrade to dummy-rt@22 ──────────────────────────────────────
     println!("==> Second apply (dummy-rt@22 — should trigger reinstall)");
-    loadout_apply(ctx, &config_v22)?;
+    loadout_apply_yes(ctx, &config_v22)?;
 
     let state = load_state(&ctx.state_file)?;
     assert_state_valid(&state)?;

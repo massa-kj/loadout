@@ -7,7 +7,7 @@ use crate::assert::{
     assert_no_duplicate_resource_ids, assert_state_version, load_state,
 };
 use crate::context::Context;
-use crate::runner::loadout_apply;
+use crate::runner::loadout_apply_yes;
 
 pub fn run(ctx: &Context) -> Result<(), String> {
     println!("==> Minimal scenario");
@@ -15,7 +15,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
     let config = ctx.config("config-base.yaml");
 
     println!("==> Running apply");
-    loadout_apply(ctx, &config)?;
+    loadout_apply_yes(ctx, &config)?;
 
     println!("==> Checking state file existence");
     if !ctx.state_file.exists() {

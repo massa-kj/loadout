@@ -10,7 +10,7 @@ use crate::assert::{
     collect_fs_paths, load_state, load_state_raw,
 };
 use crate::context::Context;
-use crate::runner::loadout_apply;
+use crate::runner::loadout_apply_yes;
 
 pub fn run(ctx: &Context) -> Result<(), String> {
     println!("==> Lifecycle scenario");
@@ -21,7 +21,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
 
     // ── Phase 1: base apply ───────────────────────────────────────────────────
     println!("==> Phase 1: base apply");
-    loadout_apply(ctx, &config_base)?;
+    loadout_apply_yes(ctx, &config_base)?;
 
     let state = load_state(&ctx.state_file)?;
     assert_state_valid(&state)?;
@@ -30,7 +30,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
 
     // ── Phase 2: expand to full profile ──────────────────────────────────────
     println!("==> Phase 2: expand to full profile");
-    loadout_apply(ctx, &config_full)?;
+    loadout_apply_yes(ctx, &config_full)?;
 
     let state = load_state(&ctx.state_file)?;
     assert_state_valid(&state)?;
@@ -42,7 +42,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
 
     // ── Phase 3: re-apply full profile (idempotency) ─────────────────────────
     println!("==> Phase 3: re-apply full profile (idempotency check)");
-    loadout_apply(ctx, &config_full)?;
+    loadout_apply_yes(ctx, &config_full)?;
 
     let after_reapply = load_state_raw(&ctx.state_file)?;
     assert_state_unchanged(&snapshot_full, &after_reapply, "full-profile second apply")?;
@@ -58,7 +58,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
 
     // ── Phase 4: shrink back to base ─────────────────────────────────────────
     println!("==> Phase 4: shrink back to base profile");
-    loadout_apply(ctx, &config_base)?;
+    loadout_apply_yes(ctx, &config_base)?;
 
     let state = load_state(&ctx.state_file)?;
     assert_state_valid(&state)?;
@@ -82,7 +82,7 @@ pub fn run(ctx: &Context) -> Result<(), String> {
 
     // ── Phase 5: full uninstall ───────────────────────────────────────────────
     println!("==> Phase 5: full uninstall");
-    loadout_apply(ctx, &config_empty)?;
+    loadout_apply_yes(ctx, &config_empty)?;
 
     let state = load_state(&ctx.state_file)?;
     assert_state_valid(&state)?;
