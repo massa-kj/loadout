@@ -933,10 +933,10 @@ fn apply_one_resource(
             })
         }
         DesiredResourceKind::Fs {
+            source,
             path,
             entry_type,
             op,
-            ..
         } => {
             // Phase 4: Fs operations are handled directly by the executor.
             // Phase 5 will extract this into a builtin `core/fs` backend.
@@ -947,7 +947,26 @@ fn apply_one_resource(
             // `remove_fs` later receives an absolute path from state.
             let expanded = expand_home(path);
             let expanded_str = expanded.to_string_lossy().into_owned();
-            apply_fs(path, entry_type, op)?;
+
+            // Resolve the absolute source path from the component's source_dir.
+            let meta = ctx
+                .index
+                .components
+                .get(component_id)
+                .ok_or_else(|| format!("component '{}' not found in index", component_id))?;
+            let comp_dir = std::path::Path::new(&meta.source_dir);
+            let source_path = match source {
+                Some(rel) => comp_dir.join(rel),
+                None => {
+                    // Default: files/<basename(target_path)>
+                    let basename = expanded
+                        .file_name()
+                        .ok_or_else(|| format!("cannot determine basename of path '{}'", path))?;
+                    comp_dir.join("files").join(basename)
+                }
+            };
+
+            apply_fs(path, &source_path, entry_type, op)?;
             Ok(Resource {
                 id: dr.id.clone(),
                 kind: ResourceKind::Fs {
@@ -1171,7 +1190,13 @@ use model::desired_resource_graph::{FsEntryType as DesiredFsEntryType, FsOp as D
 /// Perform a filesystem apply operation (link or copy).
 ///
 /// `path` supports `~` prefix which is expanded to `$HOME`.
-fn apply_fs(path: &str, entry_type: &DesiredFsEntryType, op: &DesiredFsOp) -> Result<(), String> {
+/// `source` must be an absolute path to the source file or directory inside the component.
+fn apply_fs(
+    path: &str,
+    source: &std::path::Path,
+    entry_type: &DesiredFsEntryType,
+    op: &DesiredFsOp,
+) -> Result<(), String> {
     let target = expand_home(path);
 
     // Ensure parent directory exists.
@@ -1181,7 +1206,7 @@ fn apply_fs(path: &str, entry_type: &DesiredFsEntryType, op: &DesiredFsOp) -> Re
 
     match op {
         DesiredFsOp::Link => {
-            // Remove any existing entry at target before linking.
+            // Remove any existing entry at target before (re-)linking.
             if target.exists() || target.symlink_metadata().is_ok() {
                 std::fs::remove_file(&target)
                     .or_else(|_| std::fs::remove_dir_all(&target))
@@ -1189,23 +1214,60 @@ fn apply_fs(path: &str, entry_type: &DesiredFsEntryType, op: &DesiredFsOp) -> Re
             }
             #[cfg(unix)]
             {
-                // Source for symlink is not available here; the caller (script) sets it up.
-                // Executor only records the operation; actual symlink creation would need source.
-                // Phase 4 placeholder: we mark success without actually symlinking.
-                // TODO Phase 5: pass source path and create symlink properly.
-                let _ = (entry_type, &target);
+                std::os::unix::fs::symlink(source, &target)
+                    .map_err(|e| format!("symlink {:?} -> {:?}: {e}", target, source))?;
             }
-            #[cfg(not(unix))]
+            #[cfg(windows)]
             {
-                // Windows junction / symlink support deferred to Phase 5.
+                match entry_type {
+                    DesiredFsEntryType::File => {
+                        std::os::windows::fs::symlink_file(source, &target).map_err(|e| {
+                            format!("symlink_file {:?} -> {:?}: {e}", target, source)
+                        })?;
+                    }
+                    DesiredFsEntryType::Dir => {
+                        std::os::windows::fs::symlink_dir(source, &target).map_err(|e| {
+                            format!("symlink_dir {:?} -> {:?}: {e}", target, source)
+                        })?;
+                    }
+                }
+            }
+            #[cfg(not(any(unix, windows)))]
+            {
+                return Err(format!("symlink not supported on this platform"));
             }
         }
-        DesiredFsOp::Copy => {
-            // Phase 4 placeholder: actual copy logic deferred to Phase 5 builtin backend.
-            let _ = (entry_type, &target);
-        }
+        DesiredFsOp::Copy => match entry_type {
+            DesiredFsEntryType::File => {
+                std::fs::copy(source, &target)
+                    .map_err(|e| format!("copy {:?} -> {:?}: {e}", source, target))?;
+            }
+            DesiredFsEntryType::Dir => {
+                copy_dir_fs(source, &target)?;
+            }
+        },
     }
 
+    Ok(())
+}
+
+/// Recursively copy a directory from `src` to `dst`.
+fn copy_dir_fs(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
+    std::fs::create_dir_all(dst).map_err(|e| format!("create_dir_all {:?}: {e}", dst))?;
+    for entry in std::fs::read_dir(src).map_err(|e| format!("read_dir {:?}: {e}", src))? {
+        let entry = entry.map_err(|e| format!("read_dir entry in {:?}: {e}", src))?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        let file_type = entry
+            .file_type()
+            .map_err(|e| format!("file_type {:?}: {e}", src_path))?;
+        if file_type.is_dir() {
+            copy_dir_fs(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)
+                .map_err(|e| format!("copy {:?} -> {:?}: {e}", src_path, dst_path))?;
+        }
+    }
     Ok(())
 }
 
@@ -1216,8 +1278,24 @@ fn remove_fs(path: &str, entry_type: &FsEntryType) -> Result<(), String> {
         return Ok(()); // Already absent; idempotent.
     }
     match entry_type {
-        FsEntryType::File | FsEntryType::Symlink | FsEntryType::Junction => {
+        FsEntryType::File => {
             std::fs::remove_file(&target).map_err(|e| format!("remove file {:?}: {e}", target))?;
+        }
+        FsEntryType::Symlink => {
+            // On Unix, both file and directory symlinks are removed by remove_file (unlink).
+            // On Windows, file symlinks use DeleteFileW (remove_file), but directory
+            // symlinks require RemoveDirectoryW (remove_dir). Fall back to remove_dir
+            // to handle both cases on all platforms.
+            std::fs::remove_file(&target)
+                .or_else(|_| std::fs::remove_dir(&target))
+                .map_err(|e| format!("remove symlink {:?}: {e}", target))?;
+        }
+        FsEntryType::Junction => {
+            // Junctions are NTFS directory reparse points. On Windows, DeleteFileW fails
+            // on directory reparse points; RemoveDirectoryW (remove_dir) must be used.
+            // On Unix, junctions do not exist but remove_dir is a safe fallback.
+            std::fs::remove_dir(&target)
+                .map_err(|e| format!("remove junction {:?}: {e}", target))?;
         }
         FsEntryType::Dir => {
             std::fs::remove_dir_all(&target)

@@ -7,8 +7,14 @@ depends: []
 
 resources:
   - kind: fs
-    id: fs:dummy-fs-marker
+    id: fs:copy-fs-marker
     source: files/marker
-    path: ~/.config/loadout/dummy-fs-marker
+    path: ~/.config/loadout/copy-fs-marker
     entry_type: file
     op: copy
+  - kind: fs
+    id: fs:link-fs-marker
+    source: files/marker
+    path: ~/.config/loadout/link-fs-marker
+    entry_type: file
+    op: link
