@@ -626,6 +626,11 @@ mod tests {
 
     // ── tool resource invariants ──────────────────────────────────────────────
 
+    #[cfg(windows)]
+    const ABS_TOOL_PATH: &str = r"C:\ProgramData\brew\bin\brew.exe";
+    #[cfg(not(windows))]
+    const ABS_TOOL_PATH: &str = "/home/linuxbrew/.linuxbrew/bin/brew";
+
     fn state_with_tool(
         component: &str,
         res_id: &str,
@@ -648,7 +653,7 @@ mod tests {
                                 identity: ToolIdentityVerify::ResolvedCommand {
                                     command: name.into(),
                                     expected_path: OneOf {
-                                        one_of: vec!["/home/linuxbrew/.linuxbrew/bin/brew".into()],
+                                        one_of: vec![ABS_TOOL_PATH.into()],
                                     },
                                 },
                                 version: None,
@@ -667,12 +672,7 @@ mod tests {
 
     #[test]
     fn validate_tool_with_absolute_observed_path_ok() {
-        let s = state_with_tool(
-            "core/brew",
-            "tool:brew",
-            "brew",
-            Some("/home/linuxbrew/.linuxbrew/bin/brew"),
-        );
+        let s = state_with_tool("core/brew", "tool:brew", "brew", Some(ABS_TOOL_PATH));
         validate(&s).unwrap();
     }
 
@@ -709,12 +709,7 @@ mod tests {
         // Confirm tool resources survive state commit/load round-trip.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state.json");
-        let s = state_with_tool(
-            "core/brew",
-            "tool:brew",
-            "brew",
-            Some("/home/linuxbrew/.linuxbrew/bin/brew"),
-        );
+        let s = state_with_tool("core/brew", "tool:brew", "brew", Some(ABS_TOOL_PATH));
         commit(&path, &s).unwrap();
         let loaded = load(&path).unwrap();
         assert_eq!(s, loaded);
