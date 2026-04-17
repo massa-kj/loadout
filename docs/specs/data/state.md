@@ -134,6 +134,13 @@ For detailed field definitions and types, see `crates/model/src/state.rs` and `c
 - `source` records the structured source reference used at install time; optional for backward compatibility with legacy state
 - `source_fingerprint` records the SHA-256 content hash of the source file at install time; optional (only present for `component_relative + copy + file`)
 
+**Note on `source` and `source_fingerprint` vs state authority:** These fields do not violate the
+"state contains effects only, no desired state" principle. They are **applied references** —
+records of *what source was applied* by the executor, not a copy of desired state.
+The planner uses `source.resolved` and `source_fingerprint` to determine whether the current
+desired source differs from what was previously applied, enabling correct noop and replace decisions.
+This is analogous to how `package.version` records what version was installed, not what version was requested.
+
 **`tool` — Tools installed by `managed_script` components**
 
 ```json

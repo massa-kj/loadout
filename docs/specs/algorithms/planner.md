@@ -96,9 +96,13 @@ The planner compares desired `(entry_type, op)` against state `entry_type` using
 | Desired `entry_type` | Desired `op` | Compatible state `entry_type` values |
 |---|---|---|
 | `file` | `link` | `symlink` |
-| `dir` | `link` | `symlink`, `junction` |
+| `dir` | `link` | `symlink` (Unix), `symlink` or `junction` (Windows) |
 | `file` | `copy` | `file` |
 | `dir` | `copy` | `dir` |
+
+Note: `junction` is a Windows-only NTFS reparse point. On Unix, `dir + link` only produces `symlink`.
+The planner accepts both `symlink` and `junction` as compatible to avoid forced replace when
+the same component is applied across platforms.
 
 If desired `(entry_type, op)` is not in this table, classification is `replace`.
 If state `entry_type` is not in the compatible set, classification is `replace`.
@@ -110,6 +114,17 @@ If state has no `source` recorded (legacy state), source comparison is skipped.
 are `Some`, the planner compares them. A mismatch → `replace`. If either is `None`, comparison is skipped
 (no replace triggered). This enables noop detection for `copy` operations without forcing replace on
 legacy state entries or non-eligible source types.
+
+**Summary — compare targets by operation:**
+
+| `op` | Compared fields |
+|---|---|
+| `link` | `path`, `source.resolved`, `entry_type + op` (via correspondence table) |
+| `copy` | `path`, `source.resolved`, `entry_type + op` (via correspondence table), `source_fingerprint` (when both present) |
+
+The distinction exists because `copy` resources benefit from fingerprint-based noop detection
+(avoiding unnecessary re-copy when source content is unchanged), while `link` resources only
+need structural field equality.
 
 **`managed_script` components and `strengthen`:**
 `strengthen` is never generated for `managed_script` components. If a `managed_script` component

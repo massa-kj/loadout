@@ -203,6 +203,13 @@ to the component directory before compilation. The resolved `source` is stored a
 - Home-relative paths (starting with `~/`) — resolved to the user's home directory.
 - Absolute paths (starting with `/` or drive letter) — used as-is.
 
+**`..` escape prevention:** Component-relative paths that would escape the component root
+(e.g. `../other-component/files/secret`) are rejected at two layers:
+
+1. **Materializer** (compile time) — rejects the path before building the DesiredResourceGraph.
+2. **Executor** (apply time) — performs a defensive re-check on the already-resolved absolute path
+   to guard against any inconsistency between materialized data and the running component directory.
+
 **Fingerprint:** For `component_relative + copy + file` resources, the materializer computes a SHA-256
 fingerprint of the source file. The planner uses this to detect unchanged files and skip re-copy (noop).
 
