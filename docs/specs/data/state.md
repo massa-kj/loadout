@@ -116,7 +116,12 @@ For detailed field definitions and types, see `crates/model/src/state.rs` and `c
   "fs": {
     "path": "<absolute_path>",
     "entry_type": "file|dir|symlink|junction",
-    "op": "copy|link"
+    "op": "copy|link",
+    "source": {
+      "kind": "component_relative|home_relative|absolute",
+      "resolved": "<absolute_path>"
+    },
+    "source_fingerprint": "sha256:<hex>"
   }
 }
 ```
@@ -125,6 +130,9 @@ For detailed field definitions and types, see `crates/model/src/state.rs` and `c
 - No `backend` field (fs operations are backend-independent)
 - `path` must be absolute
 - `logical_id` must be stable within a component (used for diff matching)
+- `entry_type` includes `junction` to record Windows junction point created for `dir + link`
+- `source` records the structured source reference used at install time; optional for backward compatibility with legacy state
+- `source_fingerprint` records the SHA-256 content hash of the source file at install time; optional (only present for `component_relative + copy + file`)
 
 **`tool` — Tools installed by `managed_script` components**
 

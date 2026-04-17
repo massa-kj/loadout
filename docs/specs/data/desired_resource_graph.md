@@ -113,16 +113,26 @@ For detailed field definitions and types, see `crates/model/src/desired_resource
 {
   "id": "fs:gitconfig",
   "kind": "fs",
-  "source": "files/gitconfig",
+  "source": {
+    "kind": "component_relative",
+    "resolved": "/home/user/.local/share/loadout/sources/core/git/files/gitconfig"
+  },
+  "source_fingerprint": "sha256:abc123...",
   "path": "~/.gitconfig",
   "entry_type": "file",
-  "op": "link"
+  "op": "copy"
 }
 ```
 
 **Meaning:**
 - No `desired_backend` (fs operations are backend-independent)
-- `source` defaults to `files/<basename(path)>` if omitted
+- `source` is a structured `ConcreteFsSource` with `kind` and `resolved` path (required field)
+  - `kind` values: `component_relative`, `home_relative`, `absolute`
+  - `resolved` is the fully resolved absolute path to the source
+  - Default resolution: when `source` is omitted in `component.yaml`, the materializer resolves it to `files/<basename(path)>` relative to the component directory
+- `source_fingerprint` is an optional SHA-256 hash of the source file content
+  - Only computed for `component_relative + op=copy + entry_type=file`
+  - Used by planner for noop detection (skip re-copy when content unchanged)
 - `op` values: `link` (symlink) or `copy`
 
 ## Backend Resolution
@@ -146,7 +156,10 @@ the Planner must classify the owning component as `blocked`.
 |---|---|
 | `package` | `name` and `desired_backend` match |
 | `runtime` | `name`, `version`, and `desired_backend` all match |
-| `fs` | `path`, `source`, `entry_type`, and `op` all match |
+| `fs` | `path`, `entry_type`, and `op` match per correspondence table; `source.resolved` matches; fingerprint matches (if both present) |
+
+For `fs` resources, the planner uses a correspondence table to compare desired `entry_type + op` against
+state `entry_type`. See `specs/algorithms/planner.md` for the full table and fingerprint comparison rules.
 
 Any field difference in the above set implies incompatibility → `replace`.
 
@@ -167,6 +180,10 @@ Any field difference in the above set implies incompatibility → `replace`.
         {
           "id": "fs:gitconfig",
           "kind": "fs",
+          "source": {
+            "kind": "component_relative",
+            "resolved": "/home/user/.local/share/loadout/sources/core/git/files/gitconfig"
+          },
           "path": "~/.gitconfig",
           "entry_type": "file",
           "op": "link"

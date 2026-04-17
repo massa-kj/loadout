@@ -86,8 +86,30 @@ Each component is classified into exactly one of:
 Compatibility rules for shared resources:
 * `package`: name and backend must match; version difference → `replace`
 * `runtime`: name, version, and backend must match; any difference → `replace`
-* `fs`: `path`, `entry_type`, and `op` must all match; any difference → `replace`
+* `fs`: uses correspondence table for `entry_type`+`op` compatibility (see below); `path` and `source.resolved` must match; `source_fingerprint` compared when both present; any incompatibility → `replace`
 * `tool`: `verify.identity` contract must match; if `verify.version.constraint` is declared, it must also match; any difference → `replace`
+
+### fs Compatibility Correspondence Table
+
+The planner compares desired `(entry_type, op)` against state `entry_type` using this table:
+
+| Desired `entry_type` | Desired `op` | Compatible state `entry_type` values |
+|---|---|---|
+| `file` | `link` | `symlink` |
+| `dir` | `link` | `symlink`, `junction` |
+| `file` | `copy` | `file` |
+| `dir` | `copy` | `dir` |
+
+If desired `(entry_type, op)` is not in this table, classification is `replace`.
+If state `entry_type` is not in the compatible set, classification is `replace`.
+
+**Source comparison:** The planner compares `source.resolved` (desired) against `source.resolved` (state).
+If state has no `source` recorded (legacy state), source comparison is skipped.
+
+**Fingerprint comparison:** When both desired `source_fingerprint` and state `source_fingerprint`
+are `Some`, the planner compares them. A mismatch → `replace`. If either is `None`, comparison is skipped
+(no replace triggered). This enables noop detection for `copy` operations without forcing replace on
+legacy state entries or non-eligible source types.
 
 **`managed_script` components and `strengthen`:**
 `strengthen` is never generated for `managed_script` components. If a `managed_script` component

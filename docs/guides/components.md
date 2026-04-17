@@ -194,12 +194,17 @@ Deploys a file or directory from the component's `files/` directory.
   op: link                # link (symlink/junction) | copy
 ```
 
-`source` is optional. If omitted, the executor looks for `files/<basename(path)>`.  
-For example, if `path: ~/.gitconfig` and `source` is omitted, the executor uses `files/.gitconfig`.
+`source` is optional. If omitted, the materializer resolves it to `files/<basename(path)>` relative
+to the component directory before compilation. The resolved `source` is stored as a structured
+`ConcreteFsSource` in the DesiredResourceGraph.
 
-**Note:** The deployed `path` is recorded in state, but the `source` path is not stored.
-If the source file changes, currently, the planner cannot detect it. Use `loadout apply` with `--replace` to force redeployment.
-See `docs/specs/data/state.md` Known Limitations.
+**Source path rules:**
+- Component-relative paths (e.g. `files/.gitconfig`) — resolved relative to the component directory. Must not contain `..` segments that escape the component root.
+- Home-relative paths (starting with `~/`) — resolved to the user's home directory.
+- Absolute paths (starting with `/` or drive letter) — used as-is.
+
+**Fingerprint:** For `component_relative + copy + file` resources, the materializer computes a SHA-256
+fingerprint of the source file. The planner uses this to detect unchanged files and skip re-copy (noop).
 
 ### Platform-specific resources
 
