@@ -7,6 +7,7 @@ pub mod component_index;
 pub mod desired_resource_graph;
 pub mod env;
 pub mod error;
+pub mod fs;
 pub mod id;
 pub mod plan;
 pub mod profile;

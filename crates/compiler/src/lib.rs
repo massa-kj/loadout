@@ -1,8 +1,11 @@
 //! Component compiler: resolves backends and produces DesiredResourceGraph.
 //!
-//! The compiler takes a ComponentIndex, Strategy, and ResolvedComponentOrder and produces
-//! a DesiredResourceGraph with all `desired_backend` fields resolved. This is the
-//! only place where backend resolution happens; Planner must not re-resolve backends.
+//! The compiler takes a ComponentIndex, Strategy, ResolvedComponentOrder, and
+//! pre-materialized fs sources, then produces a DesiredResourceGraph with all
+//! `desired_backend` fields resolved and fs sources concretized.
+//!
+//! Backend resolution is the only place it happens; Planner must not re-resolve backends.
+//! Fs source resolution is handled by the materializer before compilation.
 //!
 //! See: `docs/specs/algorithms/compiler.md`
 
@@ -14,6 +17,7 @@ use model::desired_resource_graph::{
     ComponentDesiredResources, DesiredResource, DesiredResourceGraph, DesiredResourceKind,
     FsEntryType, FsOp, DESIRED_RESOURCE_GRAPH_SCHEMA_VERSION,
 };
+use model::fs::ConcreteFsSource;
 use model::id::{CanonicalBackendId, ResolvedComponentOrder};
 use model::strategy::{BackendStrategy, Strategy};
 
@@ -46,17 +50,45 @@ pub enum CompilerError {
         resource_id: String,
         kind: String,
     },
+
+    /// An fs resource is missing its materialized source entry.
+    /// This indicates a programming error: the materializer must produce an entry
+    /// for every fs resource before compilation.
+    #[error(
+        "missing materialized source for fs resource '{resource_id}' in component '{component_id}'"
+    )]
+    MissingMaterializedSource {
+        component_id: String,
+        resource_id: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
+/// Materialized fs source data keyed by `(component_id, resource_id)`.
+pub type MaterializedSources = HashMap<(String, String), MaterializedFsResource>;
+
+/// Materialized data for a single fs resource, produced by the materializer.
+pub struct MaterializedFsResource {
+    /// Fully resolved source reference.
+    pub source: ConcreteFsSource,
+    /// Content fingerprint if eligible and computed.
+    pub source_fingerprint: Option<String>,
+    /// Target path with `~` expanded to absolute form.
+    pub expanded_path: String,
+}
+
 /// Compile a ComponentIndex into a DesiredResourceGraph.
 ///
 /// Processes components in `resolved_order`. Script-mode components are excluded from
 /// the output (they have no resources to compile). For declarative-mode components,
 /// each resource's `desired_backend` is resolved via `strategy`.
+///
+/// `materialized_sources` provides pre-resolved fs source references produced by
+/// the materialize stage. The compiler looks up materialized data for each fs resource
+/// by `(component_id, resource_id)`.
 ///
 /// # Errors
 ///
@@ -67,6 +99,7 @@ pub fn compile(
     component_index: &ComponentIndex,
     strategy: &Strategy,
     resolved_order: &ResolvedComponentOrder,
+    materialized_sources: &MaterializedSources,
 ) -> Result<DesiredResourceGraph, CompilerError> {
     let mut components: HashMap<String, ComponentDesiredResources> = HashMap::new();
 
@@ -108,7 +141,7 @@ pub fn compile(
 
         let mut resources: Vec<DesiredResource> = Vec::new();
         for resource in &spec.resources {
-            let kind = compile_resource(resource, strategy, id_str)?;
+            let kind = compile_resource(resource, strategy, id_str, materialized_sources)?;
             resources.push(DesiredResource {
                 id: resource.id.clone(),
                 kind,
@@ -133,6 +166,7 @@ fn compile_resource(
     resource: &model::component_index::SpecResource,
     strategy: &Strategy,
     component_id: &str,
+    materialized_sources: &MaterializedSources,
 ) -> Result<DesiredResourceKind, CompilerError> {
     match &resource.kind {
         SpecResourceKind::Package { name } => {
@@ -165,16 +199,26 @@ fn compile_resource(
         }
 
         SpecResourceKind::Fs {
-            source,
             path,
             entry_type,
             op,
-        } => Ok(DesiredResourceKind::Fs {
-            source: source.clone(),
-            path: path.clone(),
-            entry_type: map_entry_type(entry_type.clone()),
-            op: map_fs_op(op.clone()),
-        }),
+            ..
+        } => {
+            let key = (component_id.to_string(), resource.id.clone());
+            let materialized = materialized_sources.get(&key).ok_or_else(|| {
+                CompilerError::MissingMaterializedSource {
+                    component_id: component_id.to_string(),
+                    resource_id: resource.id.clone(),
+                }
+            })?;
+            Ok(DesiredResourceKind::Fs {
+                source: materialized.source.clone(),
+                path: materialized.expanded_path.clone(),
+                entry_type: map_entry_type(entry_type.clone()),
+                op: map_fs_op(op.clone()),
+                source_fingerprint: materialized.source_fingerprint.clone(),
+            })
+        }
 
         // Tool resources have no backend; identity verify and observed facts are core-managed.
         SpecResourceKind::Tool { name, verify } => Ok(DesiredResourceKind::Tool {
@@ -238,9 +282,11 @@ mod tests {
         ComponentMeta, ComponentMode, ComponentSpec, DepSpec, SpecFsEntryType, SpecResource,
         SpecResourceKind, COMPONENT_INDEX_SCHEMA_VERSION,
     };
+    use model::fs::ConcreteFsSource;
     use model::id::CanonicalComponentId;
     use model::strategy::{BackendOverride, BackendStrategy, Strategy};
     use std::collections::HashMap;
+    use std::path::PathBuf;
 
     // --- Builder helpers ----------------------------------------------------
 
@@ -256,6 +302,26 @@ mod tests {
                 .map(|(k, v)| (k.to_string(), v))
                 .collect(),
         }
+    }
+
+    fn empty_ms() -> MaterializedSources {
+        HashMap::new()
+    }
+
+    fn make_ms(entries: Vec<(&str, &str, ConcreteFsSource, &str)>) -> MaterializedSources {
+        entries
+            .into_iter()
+            .map(|(comp, res, source, expanded_path)| {
+                (
+                    (comp.to_string(), res.to_string()),
+                    MaterializedFsResource {
+                        source,
+                        source_fingerprint: None,
+                        expanded_path: expanded_path.to_string(),
+                    },
+                )
+            })
+            .collect()
     }
 
     fn script_meta() -> ComponentMeta {
@@ -348,7 +414,7 @@ mod tests {
         let strategy = Strategy::default();
         let order = vec![make_component_id("core/bash")];
 
-        let graph = compile(&index, &strategy, &order).unwrap();
+        let graph = compile(&index, &strategy, &order, &empty_ms()).unwrap();
         assert_eq!(graph.components.len(), 1);
         assert!(graph.components["core/bash"].resources.is_empty());
     }
@@ -366,7 +432,7 @@ mod tests {
         };
         let order = vec![make_component_id("core/git")];
 
-        let graph = compile(&index, &strategy, &order).unwrap();
+        let graph = compile(&index, &strategy, &order, &empty_ms()).unwrap();
         let resources = &graph.components["core/git"].resources;
         assert_eq!(resources.len(), 1);
         match &resources[0].kind {
@@ -398,7 +464,7 @@ mod tests {
         };
         let order = vec![make_component_id("core/ripgrep")];
 
-        let graph = compile(&index, &strategy, &order).unwrap();
+        let graph = compile(&index, &strategy, &order, &empty_ms()).unwrap();
         match &graph.components["core/ripgrep"].resources[0].kind {
             DesiredResourceKind::Package {
                 desired_backend, ..
@@ -422,7 +488,7 @@ mod tests {
         };
         let order = vec![make_component_id("core/node")];
 
-        let graph = compile(&index, &strategy, &order).unwrap();
+        let graph = compile(&index, &strategy, &order, &empty_ms()).unwrap();
         match &graph.components["core/node"].resources[0].kind {
             DesiredResourceKind::Runtime {
                 name,
@@ -454,7 +520,7 @@ mod tests {
         };
         let order = vec![make_component_id("core/python")];
 
-        let graph = compile(&index, &strategy, &order).unwrap();
+        let graph = compile(&index, &strategy, &order, &empty_ms()).unwrap();
         match &graph.components["core/python"].resources[0].kind {
             DesiredResourceKind::Runtime {
                 desired_backend, ..
@@ -465,9 +531,9 @@ mod tests {
         }
     }
 
-    /// Fs resource is passed through without backend resolution (File + Link).
+    /// Fs resource uses materialized source (File + Link).
     #[test]
-    fn fs_resource_file_link_no_backend() {
+    fn fs_resource_file_link_uses_materialized_source() {
         let index = make_index(vec![(
             "core/git",
             declarative_meta(vec![fs_resource(
@@ -479,19 +545,26 @@ mod tests {
         )]);
         let strategy = Strategy::default();
         let order = vec![make_component_id("core/git")];
+        let ms = make_ms(vec![(
+            "core/git",
+            "fs:gitconfig",
+            ConcreteFsSource::component_relative(PathBuf::from("/tmp/feat/files/.gitconfig")),
+            "/root/.gitconfig",
+        )]);
 
-        let graph = compile(&index, &strategy, &order).unwrap();
+        let graph = compile(&index, &strategy, &order, &ms).unwrap();
         match &graph.components["core/git"].resources[0].kind {
             DesiredResourceKind::Fs {
+                source,
                 path,
                 entry_type,
                 op,
-                source,
+                ..
             } => {
-                assert_eq!(path, "~/.gitconfig");
+                assert_eq!(source.resolved, PathBuf::from("/tmp/feat/files/.gitconfig"));
+                assert_eq!(path, "/root/.gitconfig");
                 assert_eq!(*entry_type, FsEntryType::File);
                 assert_eq!(*op, FsOp::Link);
-                assert!(source.is_none());
             }
             _ => panic!("expected Fs"),
         }
@@ -511,8 +584,14 @@ mod tests {
         )]);
         let strategy = Strategy::default();
         let order = vec![make_component_id("core/nvim")];
+        let ms = make_ms(vec![(
+            "core/nvim",
+            "fs:nvim-config",
+            ConcreteFsSource::component_relative(PathBuf::from("/tmp/feat/files/nvim")),
+            "/root/.config/nvim",
+        )]);
 
-        let graph = compile(&index, &strategy, &order).unwrap();
+        let graph = compile(&index, &strategy, &order, &ms).unwrap();
         match &graph.components["core/nvim"].resources[0].kind {
             DesiredResourceKind::Fs { entry_type, op, .. } => {
                 assert_eq!(*entry_type, FsEntryType::Dir);
@@ -538,7 +617,7 @@ mod tests {
         };
         let order = vec![make_component_id("core/git")];
 
-        let err = compile(&index, &strategy, &order).unwrap_err();
+        let err = compile(&index, &strategy, &order, &empty_ms()).unwrap_err();
         assert!(matches!(err, CompilerError::NoBackend { .. }));
     }
 
@@ -556,7 +635,7 @@ mod tests {
         };
         let order = vec![make_component_id("core/node")];
 
-        let err = compile(&index, &strategy, &order).unwrap_err();
+        let err = compile(&index, &strategy, &order, &empty_ms()).unwrap_err();
         assert!(matches!(err, CompilerError::NoBackend { .. }));
     }
 
@@ -567,7 +646,7 @@ mod tests {
         let strategy = Strategy::default();
         let order = vec![make_component_id("core/missing")];
 
-        let err = compile(&index, &strategy, &order).unwrap_err();
+        let err = compile(&index, &strategy, &order, &empty_ms()).unwrap_err();
         assert!(matches!(err, CompilerError::ComponentNotFound { id } if id == "core/missing"));
     }
 
@@ -596,7 +675,7 @@ mod tests {
             make_component_id("core/node"),
         ];
 
-        let graph = compile(&index, &strategy, &order).unwrap();
+        let graph = compile(&index, &strategy, &order, &empty_ms()).unwrap();
         // bash is now included with empty resources; git and node have resources
         assert_eq!(graph.components.len(), 3);
         assert!(graph.components.contains_key("core/git"));
@@ -611,7 +690,7 @@ mod tests {
         let strategy = Strategy::default();
         let order = vec![make_component_id("core/bash")];
 
-        let graph = compile(&index, &strategy, &order).unwrap();
+        let graph = compile(&index, &strategy, &order, &empty_ms()).unwrap();
         assert_eq!(graph.schema_version, DESIRED_RESOURCE_GRAPH_SCHEMA_VERSION);
     }
 }

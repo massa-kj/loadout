@@ -347,6 +347,7 @@ fn check_compatibility(
     recorded: &model::state::Resource,
 ) -> Compatibility {
     use model::desired_resource_graph::DesiredResourceKind as D;
+    use model::desired_resource_graph::{FsEntryType as DFsEntryType, FsOp as DFsOp};
     use model::state::{FsEntryType, FsOp, ResourceKind as S};
 
     match (&desired.kind, &recorded.kind) {
@@ -395,34 +396,60 @@ fn check_compatibility(
         }
         (
             D::Fs {
+                source: ds,
                 path: dp,
                 entry_type: det,
                 op: dop,
-                ..
+                source_fingerprint: dfp,
             },
             S::Fs { fs: sf },
         ) => {
-            let et_match = matches!(
-                (det, &sf.entry_type),
-                (
-                    model::desired_resource_graph::FsEntryType::File,
-                    FsEntryType::File
-                ) | (
-                    model::desired_resource_graph::FsEntryType::Dir,
-                    FsEntryType::Dir
-                )
-            );
+            // Compatibility table: desired (entry_type + op) → allowed state entry_type.
+            //
+            // | desired entry_type | desired op | state entry_type (compatible)         |
+            // |--------------------|------------|---------------------------------------|
+            // | file               | link       | symlink                               |
+            // | dir                | link       | symlink (Unix) / junction or symlink   |
+            // | file               | copy       | file                                  |
+            // | dir                | copy       | dir                                   |
+            let et_compatible = match (det, dop) {
+                (DFsEntryType::File, DFsOp::Link) => sf.entry_type == FsEntryType::Symlink,
+                (DFsEntryType::Dir, DFsOp::Link) => {
+                    matches!(sf.entry_type, FsEntryType::Symlink | FsEntryType::Junction)
+                }
+                (DFsEntryType::File, DFsOp::Copy) => sf.entry_type == FsEntryType::File,
+                (DFsEntryType::Dir, DFsOp::Copy) => sf.entry_type == FsEntryType::Dir,
+            };
+
             let op_match = matches!(
                 (dop, &sf.op),
-                (model::desired_resource_graph::FsOp::Link, FsOp::Link)
-                    | (model::desired_resource_graph::FsOp::Copy, FsOp::Copy)
+                (DFsOp::Link, FsOp::Link) | (DFsOp::Copy, FsOp::Copy)
             );
-            if dp != &sf.path || !et_match || !op_match {
+
+            // Source comparison: if state has recorded source, compare resolved paths.
+            let source_match = match &sf.source {
+                Some(state_src) => ds.resolved == state_src.resolved,
+                None => true, // Legacy state without source: skip source comparison.
+            };
+
+            if dp != &sf.path || !et_compatible || !op_match || !source_match {
                 return Compatibility::Incompatible {
                     from_version: None,
                     to_version: None,
                 };
             }
+
+            // Fingerprint comparison for copy resources.
+            // Both must be Some for comparison; if either is None, skip (compatible).
+            if let (Some(dfp_val), Some(sfp_val)) = (dfp, &sf.source_fingerprint) {
+                if dfp_val != sfp_val {
+                    return Compatibility::Incompatible {
+                        from_version: None,
+                        to_version: None,
+                    };
+                }
+            }
+
             Compatibility::Compatible
         }
         // Tool resources: delegate to check_tool_compatibility.
@@ -490,12 +517,15 @@ fn kind_str(kind: &DesiredResourceKind) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
     use model::{
         desired_resource_graph::{
             ComponentDesiredResources, DesiredResource, DesiredResourceGraph, DesiredResourceKind,
             FsEntryType, FsOp,
         },
+        fs::ConcreteFsSource,
         plan::Operation,
         state::{
             ComponentState, FsDetails, FsEntryType as SFsEntryType, FsOp as SFsOp, PackageDetails,
@@ -510,6 +540,11 @@ mod tests {
 
     fn cid(s: &str) -> CanonicalComponentId {
         CanonicalComponentId::new(s).unwrap()
+    }
+
+    /// Create a dummy ConcreteFsSource for tests.
+    fn dummy_source(path: &str) -> ConcreteFsSource {
+        ConcreteFsSource::component_relative(PathBuf::from(path))
     }
 
     fn empty_desired(ids: &[&str]) -> DesiredResourceGraph {
@@ -701,7 +736,8 @@ mod tests {
             .push(DesiredResource {
                 id: "fs:gitconfig".to_string(),
                 kind: DesiredResourceKind::Fs {
-                    source: None,
+                    source: dummy_source("/tmp/test/files/.gitconfig"),
+                    source_fingerprint: None,
                     path: "~/.gitconfig".to_string(),
                     entry_type: FsEntryType::File,
                     op: FsOp::Link,
@@ -734,7 +770,8 @@ mod tests {
             .push(DesiredResource {
                 id: "fs:gitconfig".to_string(),
                 kind: DesiredResourceKind::Fs {
-                    source: None,
+                    source: dummy_source("/tmp/test/files/.gitconfig"),
+                    source_fingerprint: None,
                     path: "~/.gitconfig_new".to_string(),
                     entry_type: FsEntryType::File,
                     op: FsOp::Link,
@@ -751,6 +788,8 @@ mod tests {
                             path: "~/.gitconfig".to_string(),
                             entry_type: SFsEntryType::Symlink,
                             op: SFsOp::Link,
+                            source: None,
+                            source_fingerprint: None,
                         },
                     },
                 }],
@@ -1118,7 +1157,8 @@ mod tests {
             .push(DesiredResource {
                 id: "fs:gitconfig".to_string(),
                 kind: DesiredResourceKind::Fs {
-                    source: None,
+                    source: dummy_source("/tmp/test/files/.gitconfig"),
+                    source_fingerprint: None,
                     path: "~/.gitconfig".to_string(),
                     entry_type: FsEntryType::File,
                     op: FsOp::Link,

@@ -509,12 +509,14 @@ fn build_command_with_env(
             path,
             entry_type,
             op,
+            ..
         } => {
             cmd.env("LOADOUT_RESOURCE_KIND", "Fs");
             cmd.env("LOADOUT_FS_PATH", path);
-            if let Some(src) = source {
-                cmd.env("LOADOUT_FS_SOURCE", src);
-            }
+            cmd.env(
+                "LOADOUT_FS_SOURCE",
+                source.resolved.to_string_lossy().as_ref(),
+            );
             cmd.env("LOADOUT_FS_ENTRY_TYPE", format!("{:?}", entry_type));
             cmd.env("LOADOUT_FS_OP", format!("{:?}", op));
         }

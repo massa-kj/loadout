@@ -937,9 +937,9 @@ fn apply_one_resource(
             path,
             entry_type,
             op,
+            source_fingerprint,
         } => {
-            // Phase 4: Fs operations are handled directly by the executor.
-            // Phase 5 will extract this into a builtin `core/fs` backend.
+            // Fs operations are handled directly by the executor.
             //
             // Expand `~` before executing AND before storing in state.
             // Storing the expanded (absolute) path is required for the state
@@ -948,25 +948,23 @@ fn apply_one_resource(
             let expanded = expand_home(path);
             let expanded_str = expanded.to_string_lossy().into_owned();
 
-            // Resolve the absolute source path from the component's source_dir.
-            let meta = ctx
-                .index
-                .components
-                .get(component_id)
-                .ok_or_else(|| format!("component '{}' not found in index", component_id))?;
-            let comp_dir = std::path::Path::new(&meta.source_dir);
-            let source_path = match source {
-                Some(rel) => comp_dir.join(rel),
-                None => {
-                    // Default: files/<basename(target_path)>
-                    let basename = expanded
-                        .file_name()
-                        .ok_or_else(|| format!("cannot determine basename of path '{}'", path))?;
-                    comp_dir.join("files").join(basename)
-                }
-            };
+            // Source is pre-resolved by the materializer. Use the concrete absolute path
+            // directly. Defensive check: verify component-relative sources stay within bounds.
+            let source_path = &source.resolved;
+            if source.kind == model::fs::FsSourceKind::ComponentRelative {
+                let meta =
+                    ctx.index.components.get(component_id).ok_or_else(|| {
+                        format!("component '{}' not found in index", component_id)
+                    })?;
+                let comp_dir = std::path::Path::new(&meta.source_dir);
+                model::fs::validate_component_relative_source(
+                    &source_path.to_string_lossy(),
+                    comp_dir,
+                )
+                .map_err(|e| format!("[{component_id}] defensive source check: {e}"))?;
+            }
 
-            apply_fs(path, &source_path, entry_type, op)?;
+            apply_fs(path, source_path, entry_type, op)?;
             Ok(Resource {
                 id: dr.id.clone(),
                 kind: ResourceKind::Fs {
@@ -974,6 +972,8 @@ fn apply_one_resource(
                         path: expanded_str,
                         entry_type: map_fs_entry_type(entry_type, op),
                         op: map_fs_op(op),
+                        source: Some(source.clone()),
+                        source_fingerprint: source_fingerprint.clone(),
                     },
                 },
             })

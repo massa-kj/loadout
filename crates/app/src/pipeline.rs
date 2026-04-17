@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use crate::context::{AppContext, AppError};
+use crate::materializer;
 
 /// Outputs from the common read-only pipeline stages.
 pub(crate) struct PipelineOutput {
@@ -25,8 +26,9 @@ pub(crate) struct PipelineOutput {
 ///   4. Build `ComponentIndex` from source roots.
 ///   5. Map profile components to `CanonicalComponentId`s (skip unknown).
 ///   6. Resolve dependency order.
-///   7. Compile: `ComponentIndex + Strategy + order` → `DesiredResourceGraph`.
-///   8. Load (or initialise) state.
+///   7. Materialize fs sources (resolve defaults, validate, compute fingerprints).
+///   8. Compile: `ComponentIndex + Strategy + order + materialized` → `DesiredResourceGraph`.
+///   9. Load (or initialise) state.
 pub(crate) fn run_pipeline(
     ctx: &AppContext,
     config_path: &Path,
@@ -57,10 +59,15 @@ pub(crate) fn run_pipeline(
     // Step 6: resolve dependency order (topological sort).
     let order = resolver::resolve(&index, &desired_ids)?;
 
-    // Step 7: compile desired resource graph.
-    let graph = compiler::compile(&index, &strategy, &order)?;
+    // Step 7: materialize fs sources (impure: resolves defaults, validates paths,
+    // computes fingerprints for eligible sources).
+    let materialized = materializer::materialize_fs_sources(&index)?;
 
-    // Step 8: load state (state::load returns empty state if file absent).
+    // Step 8: compile desired resource graph (pure: uses materialized sources).
+    let compiler_ms = to_compiler_materialized(&materialized);
+    let graph = compiler::compile(&index, &strategy, &order, &compiler_ms)?;
+
+    // Step 9: load state (state::load returns empty state if file absent).
     let state = state::load(&ctx.state_path())?;
 
     Ok(PipelineOutput {
@@ -71,6 +78,25 @@ pub(crate) fn run_pipeline(
         graph,
         state,
     })
+}
+
+/// Convert app-level materialized sources into compiler-level materialized sources.
+fn to_compiler_materialized(
+    app_ms: &materializer::MaterializedSources,
+) -> compiler::MaterializedSources {
+    app_ms
+        .iter()
+        .map(|(key, val)| {
+            (
+                key.clone(),
+                compiler::MaterializedFsResource {
+                    source: val.source.clone(),
+                    source_fingerprint: val.source_fingerprint.clone(),
+                    expanded_path: val.expanded_path.clone(),
+                },
+            )
+        })
+        .collect()
 }
 
 /// Map `platform::Platform` → `component_index::Platform`.

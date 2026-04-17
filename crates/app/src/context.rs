@@ -29,6 +29,10 @@ pub enum AppError {
     #[error("compiler error: {0}")]
     Compiler(#[from] compiler::CompilerError),
 
+    /// Materializer failed to resolve fs sources.
+    #[error("materialize error: {0}")]
+    Materialize(#[from] crate::materializer::MaterializeError),
+
     /// Planner could not produce a plan.
     #[error("planner error: {0}")]
     Planner(#[from] planner::PlannerError),

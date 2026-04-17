@@ -24,6 +24,7 @@
 mod activate;
 mod apply;
 mod context;
+mod materializer;
 mod mutate;
 mod pipeline;
 mod plan;

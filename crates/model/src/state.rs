@@ -5,6 +5,7 @@
 //!
 //! See: `docs/specs/data/state.md`
 
+use crate::fs::ConcreteFsSource;
 use crate::id::CanonicalBackendId;
 use crate::tool::ToolResource;
 use serde::{Deserialize, Serialize};
@@ -143,6 +144,15 @@ pub struct FsDetails {
     pub entry_type: FsEntryType,
     /// Operation that was performed.
     pub op: FsOp,
+    /// Source reference that was applied (applied reference, not desired copy).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<ConcreteFsSource>,
+    /// Content fingerprint of the source at apply time.
+    ///
+    /// Present only for `component_relative + copy + file` sources.
+    /// Used by planner for noop detection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_fingerprint: Option<String>,
 }
 
 /// Type of filesystem entry recorded in state.

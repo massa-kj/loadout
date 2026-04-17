@@ -6,6 +6,7 @@
 //!
 //! See: `docs/specs/data/desired_resource_graph.md`
 
+use crate::fs::ConcreteFsSource;
 use crate::id::CanonicalBackendId;
 use crate::tool::ToolVerifyContract;
 use serde::{Deserialize, Serialize};
@@ -86,17 +87,23 @@ pub enum DesiredResourceKind {
     ///
     /// Handled directly by the `fs` module without backend involvement.
     Fs {
-        /// Path to source file/dir relative to the component directory.
+        /// Fully resolved source reference (kind + absolute path).
         ///
-        /// Defaults to `files/<basename(path)>` if omitted in the component spec.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        source: Option<String>,
+        /// Required. Produced by the materialize stage; compiler and executor
+        /// must not re-resolve this value.
+        source: ConcreteFsSource,
         /// Target path where the file/dir should exist (absolute or `~`-relative).
         path: String,
         /// Type of filesystem entry to create (`file` or `dir`).
         entry_type: FsEntryType,
         /// Operation to perform (`link` for symlink, `copy` for copy).
         op: FsOp,
+        /// Content fingerprint of the source (sha256 hash), if computed.
+        ///
+        /// Present only for `component_relative + copy + file` sources (Phase 1).
+        /// `None` means fingerprint comparison is skipped by the planner.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_fingerprint: Option<String>,
     },
 
     /// An external tool to be introduced via a `managed_script` component.
@@ -144,6 +151,7 @@ pub enum FsOp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn round_trip() {
@@ -161,6 +169,10 @@ mod tests {
                         {
                             "id": "fs:gitconfig",
                             "kind": "fs",
+                            "source": {
+                                "kind": "component_relative",
+                                "resolved": "/home/user/loadout/components/git/files/.gitconfig"
+                            },
                             "path": "~/.gitconfig",
                             "entry_type": "file",
                             "op": "link"
@@ -197,11 +209,16 @@ mod tests {
         }
         match &git.resources[1].kind {
             DesiredResourceKind::Fs {
+                source,
                 path,
                 entry_type,
                 op,
                 ..
             } => {
+                assert_eq!(
+                    source.resolved,
+                    PathBuf::from("/home/user/loadout/components/git/files/.gitconfig")
+                );
                 assert_eq!(path, "~/.gitconfig");
                 assert_eq!(*entry_type, FsEntryType::File);
                 assert_eq!(*op, FsOp::Link);
