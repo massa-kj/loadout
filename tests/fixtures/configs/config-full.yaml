@@ -6,7 +6,8 @@ profile:
   components:
     local:
       dummy-pkg: {}
-      dummy-fs: {}
+      dummy-fs-copy: {}
+      dummy-fs-link: {}
       dummy-rt: {}
 
 strategy:
