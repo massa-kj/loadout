@@ -1226,9 +1226,10 @@ fn apply_fs(
                         })?;
                     }
                     DesiredFsEntryType::Dir => {
-                        std::os::windows::fs::symlink_dir(source, &target).map_err(|e| {
-                            format!("symlink_dir {:?} -> {:?}: {e}", target, source)
-                        })?;
+                        // Prefer junctions over symlinks for directories on Windows.
+                        // Junctions work without Developer Mode or elevated privileges.
+                        junction::create(source, &target)
+                            .map_err(|e| format!("junction {:?} -> {:?}: {e}", target, source))?;
                     }
                 }
             }
@@ -1321,7 +1322,14 @@ fn expand_home(path: &str) -> PathBuf {
 
 fn map_fs_entry_type(et: &DesiredFsEntryType, op: &DesiredFsOp) -> FsEntryType {
     match op {
-        DesiredFsOp::Link => FsEntryType::Symlink,
+        DesiredFsOp::Link => {
+            // On Windows, Dir + Link creates a junction; record that in state.
+            #[cfg(windows)]
+            if matches!(et, DesiredFsEntryType::Dir) {
+                return FsEntryType::Junction;
+            }
+            FsEntryType::Symlink
+        }
         DesiredFsOp::Copy => match et {
             DesiredFsEntryType::File => FsEntryType::File,
             DesiredFsEntryType::Dir => FsEntryType::Dir,

@@ -198,12 +198,7 @@ fn compile_resource(
             })
         }
 
-        SpecResourceKind::Fs {
-            path,
-            entry_type,
-            op,
-            ..
-        } => {
+        SpecResourceKind::Fs { entry_type, op, .. } => {
             let key = (component_id.to_string(), resource.id.clone());
             let materialized = materialized_sources.get(&key).ok_or_else(|| {
                 CompilerError::MissingMaterializedSource {
