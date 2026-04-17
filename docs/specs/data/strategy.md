@@ -36,7 +36,18 @@ strategy:      # optional section
   fs:
     backup: true | false
     backup_dir: "<path>"
+    fingerprint_policy: managed_only | all_copy | none   # default: all_copy
 ```
+
+### `fingerprint_policy`
+
+Controls which `copy` sources the materializer fingerprints for noop detection.
+
+| Value | Behaviour |
+|---|---|
+| `all_copy` (default) | Fingerprint every source kind when `op = copy`. |
+| `managed_only` | Only `component_relative` sources are fingerprinted. |
+| `none` | Disable fingerprinting entirely; `copy` always produces `replace`. |
 
 ## File Location
 

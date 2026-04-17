@@ -13,6 +13,7 @@
 
 use model::component_index::{ComponentIndex, FsOp, SpecFsEntryType, SpecResourceKind};
 use model::fs::{validate_component_relative_source, ConcreteFsSource, FsSourceKind};
+use model::strategy::FingerprintPolicy;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -61,9 +62,10 @@ pub enum MaterializeError {
 /// 1. Resolve source default if omitted (`files/<basename(path)>`)
 /// 2. Classify source kind and resolve to absolute path
 /// 3. Validate component-relative paths
-/// 4. Compute content fingerprint if eligible (Phase 1C)
+/// 4. Compute content fingerprint according to `fingerprint_policy`
 pub(crate) fn materialize_fs_sources(
     index: &ComponentIndex,
+    fingerprint_policy: FingerprintPolicy,
 ) -> Result<MaterializedSources, MaterializeError> {
     let mut result = MaterializedSources::new();
 
@@ -104,8 +106,9 @@ pub(crate) fn materialize_fs_sources(
             // Step 2: classify source kind and resolve to absolute path.
             let concrete = classify_and_resolve(&raw_source, comp_dir, component_id, &resource.id)?;
 
-            // Step 3: compute fingerprint for eligible sources (Phase 1C).
-            let source_fingerprint = compute_fingerprint_if_eligible(&concrete, entry_type, op);
+            // Step 3: compute fingerprint according to policy.
+            let source_fingerprint =
+                compute_fingerprint_if_eligible(&concrete, entry_type, op, fingerprint_policy);
 
             // Step 4: expand `~` in the target path so DesiredResourceGraph holds absolute paths.
             let expanded_path = expand_home(path).to_string_lossy().into_owned();
@@ -157,20 +160,25 @@ fn classify_and_resolve(
 
 /// Compute a content fingerprint for eligible sources.
 ///
-/// Eligible combinations (Phase 1C / Phase 2):
-/// - `component_relative + copy + file` → SHA-256 of file contents
-/// - `component_relative + copy + dir`  → deterministic tree hash (Phase 2)
+/// Eligibility depends on `fingerprint_policy`:
+/// - `AllCopy` — all source kinds when `op = copy`.
+/// - `ManagedOnly` — only `component_relative` sources when `op = copy`.
+/// - `None` — always returns `None`.
 ///
-/// Returns `None` for all other combinations or if the source cannot be read.
+/// Returns `None` for non-copy operations or if the source cannot be read.
 fn compute_fingerprint_if_eligible(
     source: &ConcreteFsSource,
     entry_type: &SpecFsEntryType,
     op: &FsOp,
+    policy: FingerprintPolicy,
 ) -> Option<String> {
-    if source.kind != FsSourceKind::ComponentRelative {
+    if policy == FingerprintPolicy::None {
         return None;
     }
     if *op != FsOp::Copy {
+        return None;
+    }
+    if policy == FingerprintPolicy::ManagedOnly && source.kind != FsSourceKind::ComponentRelative {
         return None;
     }
     match entry_type {
@@ -324,7 +332,7 @@ mod tests {
             }],
         );
 
-        let result = materialize_fs_sources(&index).unwrap();
+        let result = materialize_fs_sources(&index, FingerprintPolicy::default()).unwrap();
         let key = ("core/git".to_string(), "fs:gitconfig".to_string());
         let mat = result.get(&key).unwrap();
         assert_eq!(mat.source.kind, FsSourceKind::ComponentRelative);
@@ -350,7 +358,7 @@ mod tests {
             }],
         );
 
-        let result = materialize_fs_sources(&index).unwrap();
+        let result = materialize_fs_sources(&index, FingerprintPolicy::default()).unwrap();
         let key = ("core/git".to_string(), "fs:gitconfig".to_string());
         let mat = result.get(&key).unwrap();
         assert_eq!(mat.source.kind, FsSourceKind::ComponentRelative);
@@ -376,7 +384,7 @@ mod tests {
             }],
         );
 
-        let result = materialize_fs_sources(&index).unwrap();
+        let result = materialize_fs_sources(&index, FingerprintPolicy::default()).unwrap();
         let key = ("core/git".to_string(), "fs:gitconfig".to_string());
         let mat = result.get(&key).unwrap();
         assert_eq!(mat.source.kind, FsSourceKind::HomeRelative);
@@ -398,7 +406,7 @@ mod tests {
             }],
         );
 
-        let result = materialize_fs_sources(&index).unwrap();
+        let result = materialize_fs_sources(&index, FingerprintPolicy::default()).unwrap();
         let key = ("core/git".to_string(), "fs:gitconfig".to_string());
         let mat = result.get(&key).unwrap();
         assert_eq!(mat.source.kind, FsSourceKind::Absolute);
@@ -421,7 +429,7 @@ mod tests {
             }],
         );
 
-        let result = materialize_fs_sources(&index);
+        let result = materialize_fs_sources(&index, FingerprintPolicy::default());
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("escapes component directory"), "{}", err);
@@ -440,7 +448,7 @@ mod tests {
             }],
         );
 
-        let result = materialize_fs_sources(&index).unwrap();
+        let result = materialize_fs_sources(&index, FingerprintPolicy::default()).unwrap();
         assert!(result.is_empty());
     }
 
@@ -471,7 +479,7 @@ mod tests {
             components,
         };
 
-        let result = materialize_fs_sources(&index).unwrap();
+        let result = materialize_fs_sources(&index, FingerprintPolicy::default()).unwrap();
         assert!(result.is_empty());
     }
 
@@ -564,7 +572,12 @@ mod tests {
         std::fs::write(dir.path().join("file.txt"), b"content").unwrap();
 
         let source = ConcreteFsSource::component_relative(dir.path().to_path_buf());
-        let fp = compute_fingerprint_if_eligible(&source, &SpecFsEntryType::Dir, &FsOp::Copy);
+        let fp = compute_fingerprint_if_eligible(
+            &source,
+            &SpecFsEntryType::Dir,
+            &FsOp::Copy,
+            FingerprintPolicy::default(),
+        );
         assert!(fp.is_some());
         assert!(fp.unwrap().starts_with("sha256:"));
     }
@@ -574,7 +587,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let source = ConcreteFsSource::component_relative(dir.path().to_path_buf());
         // link operations are not fingerprinted.
-        let fp = compute_fingerprint_if_eligible(&source, &SpecFsEntryType::Dir, &FsOp::Link);
+        let fp = compute_fingerprint_if_eligible(
+            &source,
+            &SpecFsEntryType::Dir,
+            &FsOp::Link,
+            FingerprintPolicy::default(),
+        );
         assert!(fp.is_none());
     }
 
@@ -582,8 +600,65 @@ mod tests {
     fn compute_fingerprint_dir_home_relative_is_none() {
         let dir = tempfile::tempdir().unwrap();
         let source = ConcreteFsSource::home_relative(dir.path().to_path_buf());
-        // home_relative sources are not fingerprinted.
-        let fp = compute_fingerprint_if_eligible(&source, &SpecFsEntryType::Dir, &FsOp::Copy);
+        // home_relative sources are not fingerprinted under managed_only policy.
+        let fp = compute_fingerprint_if_eligible(
+            &source,
+            &SpecFsEntryType::Dir,
+            &FsOp::Copy,
+            FingerprintPolicy::ManagedOnly,
+        );
+        assert!(fp.is_none());
+    }
+
+    #[test]
+    fn fingerprint_policy_all_copy_enables_home_relative() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("f.txt"), b"data").unwrap();
+        let source = ConcreteFsSource::home_relative(dir.path().to_path_buf());
+        let fp = compute_fingerprint_if_eligible(
+            &source,
+            &SpecFsEntryType::Dir,
+            &FsOp::Copy,
+            FingerprintPolicy::AllCopy,
+        );
+        assert!(fp.is_some());
+    }
+
+    #[test]
+    fn fingerprint_policy_all_copy_enables_absolute() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("f.txt"), b"data").unwrap();
+        let source = ConcreteFsSource::absolute(dir.path().to_path_buf());
+        let fp = compute_fingerprint_if_eligible(
+            &source,
+            &SpecFsEntryType::File,
+            &FsOp::Copy,
+            FingerprintPolicy::AllCopy,
+        );
+        // absolute + all_copy reads the tempdir itself which is a dir, not a file.
+        // Use the file directly instead.
+        let file = dir.path().join("f.txt");
+        let source_file = ConcreteFsSource::absolute(file);
+        let fp2 = compute_fingerprint_if_eligible(
+            &source_file,
+            &SpecFsEntryType::File,
+            &FsOp::Copy,
+            FingerprintPolicy::AllCopy,
+        );
+        assert!(fp2.is_some());
+    }
+
+    #[test]
+    fn fingerprint_policy_none_disables_all() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("f.txt"), b"data").unwrap();
+        let source = ConcreteFsSource::component_relative(dir.path().to_path_buf());
+        let fp = compute_fingerprint_if_eligible(
+            &source,
+            &SpecFsEntryType::Dir,
+            &FsOp::Copy,
+            FingerprintPolicy::None,
+        );
         assert!(fp.is_none());
     }
 }

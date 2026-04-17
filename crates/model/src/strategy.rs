@@ -60,6 +60,32 @@ pub struct FsStrategy {
     /// Directory where backups are stored.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backup_dir: Option<String>,
+
+    /// Controls which `copy` sources are fingerprinted for noop detection.
+    ///
+    /// - `managed_only` — only `component_relative` sources (loadout-managed assets).
+    /// - `all_copy` (default) — all source kinds when `op = copy`.
+    /// - `none` — disable fingerprinting entirely.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fingerprint_policy: Option<FingerprintPolicy>,
+}
+
+/// Policy controlling which `copy` sources the materializer fingerprints.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FingerprintPolicy {
+    /// Fingerprint only `component_relative` sources.
+    ManagedOnly,
+    /// Fingerprint all source kinds when `op = copy` (default).
+    AllCopy,
+    /// Disable fingerprinting entirely.
+    None,
+}
+
+impl Default for FingerprintPolicy {
+    fn default() -> Self {
+        Self::AllCopy
+    }
 }
 
 #[cfg(test)]
@@ -96,5 +122,30 @@ mod tests {
         let json = r#"{}"#;
         let p: Strategy = serde_json::from_str(json).unwrap();
         assert!(p.package.is_none());
+    }
+
+    #[test]
+    fn fingerprint_policy_serde() {
+        let json = r#"{"fs": {"fingerprint_policy": "managed_only"}}"#;
+        let s: Strategy = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            s.fs.unwrap().fingerprint_policy,
+            Some(FingerprintPolicy::ManagedOnly)
+        );
+    }
+
+    #[test]
+    fn fingerprint_policy_default_is_all_copy() {
+        assert_eq!(FingerprintPolicy::default(), FingerprintPolicy::AllCopy);
+    }
+
+    #[test]
+    fn fingerprint_policy_none_serde() {
+        let json = r#"{"fs": {"fingerprint_policy": "none"}}"#;
+        let s: Strategy = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            s.fs.unwrap().fingerprint_policy,
+            Some(FingerprintPolicy::None)
+        );
     }
 }

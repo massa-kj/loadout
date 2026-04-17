@@ -210,7 +210,7 @@ to the component directory before compilation. The resolved `source` is stored a
 2. **Executor** (apply time) — performs a defensive re-check on the already-resolved absolute path
    to guard against any inconsistency between materialized data and the running component directory.
 
-**Fingerprint:** For `component_relative + copy` resources, the materializer computes a SHA-256
+**Fingerprint:** For `copy` resources, the materializer computes a SHA-256
 fingerprint of the source. The planner uses this to detect unchanged sources and skip re-copy (noop).
 
 - `entry_type: file` — SHA-256 of the file's byte content.
@@ -218,7 +218,9 @@ fingerprint of the source. The planner uses this to detect unchanged sources and
   each empty directory as `dir:<rel-path>`, sorted lexicographically, then SHA-256 hashed.
   Symlinks inside the source directory are skipped.
 
-`home_relative` and `absolute` sources are not fingerprinted.
+The scope of fingerprinting is controlled by `strategy.fs.fingerprint_policy` (see `specs/data/strategy.md`).
+With the default `all_copy`, all source kinds (`component_relative`, `home_relative`, `absolute`) are
+fingerprinted. Set to `managed_only` to limit to `component_relative` only, or `none` to disable.
 
 ### Platform-specific resources
 

@@ -60,8 +60,13 @@ pub(crate) fn run_pipeline(
     let order = resolver::resolve(&index, &desired_ids)?;
 
     // Step 7: materialize fs sources (impure: resolves defaults, validates paths,
-    // computes fingerprints for eligible sources).
-    let materialized = materializer::materialize_fs_sources(&index)?;
+    // computes fingerprints according to fingerprint_policy).
+    let fingerprint_policy = strategy
+        .fs
+        .as_ref()
+        .and_then(|fs| fs.fingerprint_policy)
+        .unwrap_or_default();
+    let materialized = materializer::materialize_fs_sources(&index, fingerprint_policy)?;
 
     // Step 8: compile desired resource graph (pure: uses materialized sources).
     let compiler_ms = to_compiler_materialized(&materialized);
