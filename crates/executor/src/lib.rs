@@ -949,7 +949,9 @@ fn apply_one_resource(
             let expanded_str = expanded.to_string_lossy().into_owned();
 
             // Source is pre-resolved by the materializer. Use the concrete absolute path
-            // directly. Defensive check: verify component-relative sources stay within bounds.
+            // directly. Defensive check: verify component-relative sources are still within
+            // the component directory bounds by checking that the resolved absolute path
+            // starts with the normalized component directory.
             let source_path = &source.resolved;
             if source.kind == model::fs::FsSourceKind::ComponentRelative {
                 let meta =
@@ -957,11 +959,15 @@ fn apply_one_resource(
                         format!("component '{}' not found in index", component_id)
                     })?;
                 let comp_dir = std::path::Path::new(&meta.source_dir);
-                model::fs::validate_component_relative_source(
-                    &source_path.to_string_lossy(),
-                    comp_dir,
-                )
-                .map_err(|e| format!("[{component_id}] defensive source check: {e}"))?;
+                let normalized_source = model::fs::normalize_path_pub(source_path);
+                let normalized_root = model::fs::normalize_path_pub(comp_dir);
+                if !normalized_source.starts_with(&normalized_root) {
+                    return Err(format!(
+                        "[{component_id}] defensive source check: resolved path '{}' escapes component directory '{}'",
+                        source_path.display(),
+                        comp_dir.display(),
+                    ));
+                }
             }
 
             apply_fs(path, source_path, entry_type, op)?;

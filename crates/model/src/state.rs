@@ -367,6 +367,85 @@ mod tests {
     }
 
     #[test]
+    fn round_trip_fs_with_source_and_fingerprint() {
+        // Verify that FsDetails with source + source_fingerprint serializes and deserializes
+        // correctly. This is the new state format produced by Phase 1C.
+        use crate::fs::{ConcreteFsSource, FsSourceKind};
+        use std::path::PathBuf;
+
+        let fs = FsDetails {
+            path: "/home/user/.config/marker".to_string(),
+            entry_type: FsEntryType::File,
+            op: FsOp::Copy,
+            source: Some(ConcreteFsSource::component_relative(PathBuf::from(
+                "/data/comps/dummy-fs/files/marker",
+            ))),
+            source_fingerprint: Some("sha256:abc123def456".to_string()),
+        };
+        let json = serde_json::to_string(&fs).unwrap();
+
+        // Round-trip: deserialize back.
+        let restored: FsDetails = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.path, fs.path);
+        assert_eq!(restored.entry_type, fs.entry_type);
+        assert_eq!(restored.op, fs.op);
+        assert_eq!(
+            restored.source_fingerprint.as_deref(),
+            Some("sha256:abc123def456")
+        );
+
+        let src = restored.source.unwrap();
+        assert_eq!(src.kind, FsSourceKind::ComponentRelative);
+        assert_eq!(
+            src.resolved,
+            PathBuf::from("/data/comps/dummy-fs/files/marker")
+        );
+    }
+
+    #[test]
+    fn round_trip_fs_legacy_without_source() {
+        // Existing state without source/source_fingerprint must still deserialize correctly
+        // with both fields defaulting to None.
+        let json = r#"{
+            "path": "/home/user/.gitconfig",
+            "entry_type": "symlink",
+            "op": "link"
+        }"#;
+        let fs: FsDetails = serde_json::from_str(json).unwrap();
+        assert_eq!(fs.path, "/home/user/.gitconfig");
+        assert!(
+            fs.source.is_none(),
+            "legacy state: source must default to None"
+        );
+        assert!(
+            fs.source_fingerprint.is_none(),
+            "legacy state: source_fingerprint must default to None"
+        );
+    }
+
+    #[test]
+    fn fs_with_source_serialized_omits_null_fingerprint() {
+        // When source_fingerprint is None, it must be omitted from JSON (skip_serializing_if).
+        use crate::fs::ConcreteFsSource;
+        use std::path::PathBuf;
+
+        let fs = FsDetails {
+            path: "/home/user/.gitconfig".to_string(),
+            entry_type: FsEntryType::Symlink,
+            op: FsOp::Link,
+            source: Some(ConcreteFsSource::component_relative(PathBuf::from(
+                "/data/comps/git/files/.gitconfig",
+            ))),
+            source_fingerprint: None,
+        };
+        let json = serde_json::to_string(&fs).unwrap();
+        assert!(
+            !json.contains("source_fingerprint"),
+            "source_fingerprint: None must not appear in JSON, got: {json}"
+        );
+    }
+
+    #[test]
     fn tool_serialized_kind_tag_is_tool() {
         use crate::tool::{
             OneOf, ToolIdentityVerify, ToolObservedFacts, ToolResource, ToolVerifyContract,

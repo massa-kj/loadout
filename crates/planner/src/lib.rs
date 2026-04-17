@@ -1169,4 +1169,364 @@ mod tests {
         let p = plan(&desired, &state, &order).unwrap();
         assert_eq!(p.actions[0].operation, Operation::Strengthen);
     }
+
+    // ---------------------------------------------------------------------------
+    // fs compatibility: correspondence table, source comparison, fingerprint
+    // ---------------------------------------------------------------------------
+
+    /// Helper: build a desired graph with a single fs resource.
+    fn desired_with_fs(
+        path: &str,
+        source: ConcreteFsSource,
+        entry_type: FsEntryType,
+        op: FsOp,
+        fingerprint: Option<String>,
+    ) -> DesiredResourceGraph {
+        let mut g = empty_desired(&["core/git"]);
+        g.components
+            .get_mut("core/git")
+            .unwrap()
+            .resources
+            .push(DesiredResource {
+                id: "fs:test".to_string(),
+                kind: DesiredResourceKind::Fs {
+                    source,
+                    source_fingerprint: fingerprint,
+                    path: path.to_string(),
+                    entry_type,
+                    op,
+                },
+            });
+        g
+    }
+
+    /// Helper: build a state with a single fs resource.
+    fn state_with_fs(
+        path: &str,
+        entry_type: SFsEntryType,
+        op: SFsOp,
+        source: Option<ConcreteFsSource>,
+        fingerprint: Option<String>,
+    ) -> State {
+        let mut s = State::empty();
+        s.components.insert(
+            "core/git".to_string(),
+            ComponentState {
+                resources: vec![Resource {
+                    id: "fs:test".to_string(),
+                    kind: ResourceKind::Fs {
+                        fs: FsDetails {
+                            path: path.to_string(),
+                            entry_type,
+                            op,
+                            source,
+                            source_fingerprint: fingerprint,
+                        },
+                    },
+                }],
+            },
+        );
+        s
+    }
+
+    // --- correspondence table ---
+
+    #[test]
+    fn fs_noop_file_link_symlink() {
+        // desired: file+link, state: symlink → compatible
+        let src = dummy_source("/tmp/files/config");
+        let desired = desired_with_fs(
+            "/home/user/.config",
+            src.clone(),
+            FsEntryType::File,
+            FsOp::Link,
+            None,
+        );
+        let state = state_with_fs(
+            "/home/user/.config",
+            SFsEntryType::Symlink,
+            SFsOp::Link,
+            Some(src),
+            None,
+        );
+        let order = vec![cid("core/git")];
+        let p = plan(&desired, &state, &order).unwrap();
+        assert!(p.actions.is_empty(), "expected noop, got {:?}", p.actions);
+        assert_eq!(p.noops.len(), 1);
+    }
+
+    #[test]
+    fn fs_replace_file_link_vs_file() {
+        // desired: file+link, state: file → incompatible (file was copied, now want symlink)
+        let src = dummy_source("/tmp/files/config");
+        let desired = desired_with_fs(
+            "/home/user/.config",
+            src.clone(),
+            FsEntryType::File,
+            FsOp::Link,
+            None,
+        );
+        let state = state_with_fs(
+            "/home/user/.config",
+            SFsEntryType::File,
+            SFsOp::Copy,
+            Some(src),
+            None,
+        );
+        let order = vec![cid("core/git")];
+        let p = plan(&desired, &state, &order).unwrap();
+        assert_eq!(p.actions[0].operation, Operation::Replace);
+    }
+
+    #[test]
+    fn fs_noop_dir_link_junction() {
+        // desired: dir+link, state: junction → compatible (Windows)
+        let src = dummy_source("/tmp/files/nvim");
+        let desired = desired_with_fs(
+            "/home/user/.config/nvim",
+            src.clone(),
+            FsEntryType::Dir,
+            FsOp::Link,
+            None,
+        );
+        let state = state_with_fs(
+            "/home/user/.config/nvim",
+            SFsEntryType::Junction,
+            SFsOp::Link,
+            Some(src),
+            None,
+        );
+        let order = vec![cid("core/git")];
+        let p = plan(&desired, &state, &order).unwrap();
+        assert!(p.actions.is_empty(), "dir+link vs junction should be noop");
+        assert_eq!(p.noops.len(), 1);
+    }
+
+    #[test]
+    fn fs_replace_dir_link_vs_dir() {
+        // desired: dir+link, state: dir → incompatible (was copied, now want link/junction)
+        let src = dummy_source("/tmp/files/nvim");
+        let desired = desired_with_fs(
+            "/home/user/.config/nvim",
+            src.clone(),
+            FsEntryType::Dir,
+            FsOp::Link,
+            None,
+        );
+        let state = state_with_fs(
+            "/home/user/.config/nvim",
+            SFsEntryType::Dir,
+            SFsOp::Copy,
+            Some(src),
+            None,
+        );
+        let order = vec![cid("core/git")];
+        let p = plan(&desired, &state, &order).unwrap();
+        assert_eq!(p.actions[0].operation, Operation::Replace);
+    }
+
+    #[test]
+    fn fs_noop_file_copy() {
+        // desired: file+copy, state: file → compatible
+        let src = dummy_source("/tmp/files/config");
+        let desired = desired_with_fs(
+            "/home/user/.config",
+            src.clone(),
+            FsEntryType::File,
+            FsOp::Copy,
+            None,
+        );
+        let state = state_with_fs(
+            "/home/user/.config",
+            SFsEntryType::File,
+            SFsOp::Copy,
+            Some(src),
+            None,
+        );
+        let order = vec![cid("core/git")];
+        let p = plan(&desired, &state, &order).unwrap();
+        assert!(p.actions.is_empty(), "file+copy vs file should be noop");
+        assert_eq!(p.noops.len(), 1);
+    }
+
+    #[test]
+    fn fs_noop_dir_copy() {
+        // desired: dir+copy, state: dir → compatible
+        let src = dummy_source("/tmp/files/nvim");
+        let desired = desired_with_fs(
+            "/home/user/.config/nvim",
+            src.clone(),
+            FsEntryType::Dir,
+            FsOp::Copy,
+            None,
+        );
+        let state = state_with_fs(
+            "/home/user/.config/nvim",
+            SFsEntryType::Dir,
+            SFsOp::Copy,
+            Some(src),
+            None,
+        );
+        let order = vec![cid("core/git")];
+        let p = plan(&desired, &state, &order).unwrap();
+        assert!(p.actions.is_empty(), "dir+copy vs dir should be noop");
+        assert_eq!(p.noops.len(), 1);
+    }
+
+    // --- source comparison ---
+
+    #[test]
+    fn fs_replace_on_source_path_change() {
+        // Same target path and entry_type/op, but source.resolved changed → replace.
+        let desired = desired_with_fs(
+            "/home/user/.gitconfig",
+            ConcreteFsSource::component_relative(PathBuf::from("/tmp/compA/files/.gitconfig")),
+            FsEntryType::File,
+            FsOp::Link,
+            None,
+        );
+        let state = state_with_fs(
+            "/home/user/.gitconfig",
+            SFsEntryType::Symlink,
+            SFsOp::Link,
+            Some(ConcreteFsSource::component_relative(PathBuf::from(
+                "/tmp/compB/files/.gitconfig",
+            ))),
+            None,
+        );
+        let order = vec![cid("core/git")];
+        let p = plan(&desired, &state, &order).unwrap();
+        assert_eq!(p.actions[0].operation, Operation::Replace);
+    }
+
+    #[test]
+    fn fs_noop_legacy_state_no_source() {
+        // State has no source recorded (legacy). Source comparison is skipped → noop.
+        let src = dummy_source("/tmp/files/.gitconfig");
+        let desired = desired_with_fs(
+            "/home/user/.gitconfig",
+            src,
+            FsEntryType::File,
+            FsOp::Link,
+            None,
+        );
+        let state = state_with_fs(
+            "/home/user/.gitconfig",
+            SFsEntryType::Symlink,
+            SFsOp::Link,
+            None, // legacy: no source recorded
+            None,
+        );
+        let order = vec![cid("core/git")];
+        let p = plan(&desired, &state, &order).unwrap();
+        assert!(
+            p.actions.is_empty(),
+            "legacy state without source should not force replace"
+        );
+    }
+
+    // --- fingerprint comparison ---
+
+    #[test]
+    fn fs_noop_fingerprint_match() {
+        // Both fingerprints present and equal → noop.
+        let src = ConcreteFsSource::component_relative(PathBuf::from("/tmp/files/marker"));
+        let fp = Some("sha256:abc123".to_string());
+        let desired = desired_with_fs(
+            "/home/user/.marker",
+            src.clone(),
+            FsEntryType::File,
+            FsOp::Copy,
+            fp.clone(),
+        );
+        let state = state_with_fs(
+            "/home/user/.marker",
+            SFsEntryType::File,
+            SFsOp::Copy,
+            Some(src),
+            fp,
+        );
+        let order = vec![cid("core/git")];
+        let p = plan(&desired, &state, &order).unwrap();
+        assert!(
+            p.actions.is_empty(),
+            "matching fingerprints should produce noop"
+        );
+        assert_eq!(p.noops.len(), 1);
+    }
+
+    #[test]
+    fn fs_replace_fingerprint_mismatch() {
+        // Both fingerprints present but different → replace.
+        let src = ConcreteFsSource::component_relative(PathBuf::from("/tmp/files/marker"));
+        let desired = desired_with_fs(
+            "/home/user/.marker",
+            src.clone(),
+            FsEntryType::File,
+            FsOp::Copy,
+            Some("sha256:aaaaaa".to_string()),
+        );
+        let state = state_with_fs(
+            "/home/user/.marker",
+            SFsEntryType::File,
+            SFsOp::Copy,
+            Some(src),
+            Some("sha256:bbbbbb".to_string()),
+        );
+        let order = vec![cid("core/git")];
+        let p = plan(&desired, &state, &order).unwrap();
+        assert_eq!(p.actions[0].operation, Operation::Replace);
+    }
+
+    #[test]
+    fn fs_noop_fingerprint_desired_none() {
+        // Desired has no fingerprint (e.g., home_relative source) → skip comparison → noop.
+        let src = ConcreteFsSource::home_relative(PathBuf::from("/home/user/external.conf"));
+        let desired = desired_with_fs(
+            "/home/user/.config",
+            src.clone(),
+            FsEntryType::File,
+            FsOp::Copy,
+            None,
+        );
+        let state = state_with_fs(
+            "/home/user/.config",
+            SFsEntryType::File,
+            SFsOp::Copy,
+            Some(src),
+            Some("sha256:recorded".to_string()),
+        );
+        let order = vec![cid("core/git")];
+        let p = plan(&desired, &state, &order).unwrap();
+        assert!(
+            p.actions.is_empty(),
+            "None desired fingerprint must not force replace"
+        );
+    }
+
+    #[test]
+    fn fs_noop_fingerprint_state_none() {
+        // State has no fingerprint (legacy state for copy resource) → skip → noop.
+        let src = ConcreteFsSource::component_relative(PathBuf::from("/tmp/files/marker"));
+        let desired = desired_with_fs(
+            "/home/user/.marker",
+            src.clone(),
+            FsEntryType::File,
+            FsOp::Copy,
+            Some("sha256:current".to_string()),
+        );
+        let state = state_with_fs(
+            "/home/user/.marker",
+            SFsEntryType::File,
+            SFsOp::Copy,
+            Some(src),
+            None,
+        );
+        let order = vec![cid("core/git")];
+        let p = plan(&desired, &state, &order).unwrap();
+        assert!(
+            p.actions.is_empty(),
+            "None state fingerprint must not force replace"
+        );
+    }
 }

@@ -101,6 +101,12 @@ pub fn validate_component_relative_source(
 /// Simple path normalization that resolves `.` and `..` without touching the filesystem.
 ///
 /// This is a logical normalization only; it does not follow symlinks.
+/// Exposed publicly so that the executor can perform the same normalization
+/// for its defensive boundary check on already-resolved absolute paths.
+pub fn normalize_path_pub(path: &Path) -> PathBuf {
+    normalize_path(path)
+}
+
 fn normalize_path(path: &Path) -> PathBuf {
     let mut components = Vec::new();
     for component in path.components() {
