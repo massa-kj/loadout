@@ -115,6 +115,13 @@ are `Some`, the planner compares them. A mismatch → `replace`. If either is `N
 (no replace triggered). This enables noop detection for `copy` operations without forcing replace on
 legacy state entries or non-eligible source types.
 
+Fingerprints are produced by the materializer for `component_relative + copy` sources:
+
+- `entry_type: file` — SHA-256 of file byte content.
+- `entry_type: dir` — deterministic tree hash (sorted `file:` / `dir:` records, SHA-256 of the joined list).
+
+`home_relative` and `absolute` sources produce no fingerprint; their `source_fingerprint` is always `None`.
+
 **Summary — compare targets by operation:**
 
 | `op` | Compared fields |

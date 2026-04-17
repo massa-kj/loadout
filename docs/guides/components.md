@@ -210,8 +210,15 @@ to the component directory before compilation. The resolved `source` is stored a
 2. **Executor** (apply time) — performs a defensive re-check on the already-resolved absolute path
    to guard against any inconsistency between materialized data and the running component directory.
 
-**Fingerprint:** For `component_relative + copy + file` resources, the materializer computes a SHA-256
-fingerprint of the source file. The planner uses this to detect unchanged files and skip re-copy (noop).
+**Fingerprint:** For `component_relative + copy` resources, the materializer computes a SHA-256
+fingerprint of the source. The planner uses this to detect unchanged sources and skip re-copy (noop).
+
+- `entry_type: file` — SHA-256 of the file's byte content.
+- `entry_type: dir` — deterministic tree hash: each file is recorded as `file:<rel-path>:<sha256>`,
+  each empty directory as `dir:<rel-path>`, sorted lexicographically, then SHA-256 hashed.
+  Symlinks inside the source directory are skipped.
+
+`home_relative` and `absolute` sources are not fingerprinted.
 
 ### Platform-specific resources
 

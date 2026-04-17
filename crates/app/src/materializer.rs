@@ -4,7 +4,7 @@
 //! - Resolves `source` field defaults (`files/<basename(path)>`)
 //! - Classifies source kind (`component_relative`, `home_relative`, `absolute`)
 //! - Validates component-relative paths do not escape the component directory
-//! - Computes content fingerprints for eligible sources (Phase 1C)
+//! - Computes content fingerprints for eligible sources (Phase 1C: file, Phase 2: dir)
 //!
 //! After materialization, all `ConcreteFsSource` values are fully resolved and
 //! ready for consumption by the pure compiler stage.
@@ -137,8 +137,9 @@ fn classify_and_resolve(
         return Ok(ConcreteFsSource::home_relative(resolved));
     }
 
-    // Absolute path
-    if Path::new(raw_source).is_absolute() {
+    // Absolute path (use has_root() to also handle Unix-style paths on Windows,
+    // where `/foo` is rooted but not considered absolute by the OS).
+    if Path::new(raw_source).has_root() {
         return Ok(ConcreteFsSource::absolute(PathBuf::from(raw_source)));
     }
 
@@ -156,8 +157,11 @@ fn classify_and_resolve(
 
 /// Compute a content fingerprint for eligible sources.
 ///
-/// Phase 1C: only `component_relative + copy + file` sources are fingerprinted.
-/// Returns `None` for all other combinations or if the file cannot be read.
+/// Eligible combinations (Phase 1C / Phase 2):
+/// - `component_relative + copy + file` → SHA-256 of file contents
+/// - `component_relative + copy + dir`  → deterministic tree hash (Phase 2)
+///
+/// Returns `None` for all other combinations or if the source cannot be read.
 fn compute_fingerprint_if_eligible(
     source: &ConcreteFsSource,
     entry_type: &SpecFsEntryType,
@@ -169,11 +173,10 @@ fn compute_fingerprint_if_eligible(
     if *op != FsOp::Copy {
         return None;
     }
-    if *entry_type != SpecFsEntryType::File {
-        return None;
+    match entry_type {
+        SpecFsEntryType::File => compute_file_fingerprint(&source.resolved),
+        SpecFsEntryType::Dir => compute_dir_fingerprint(&source.resolved),
     }
-
-    compute_file_fingerprint(&source.resolved)
 }
 
 /// Compute the SHA-256 fingerprint of a file's contents.
@@ -185,6 +188,75 @@ fn compute_file_fingerprint(path: &Path) -> Option<String> {
     let content = std::fs::read(path).ok()?;
     let hash = Sha256::digest(&content);
     Some(format!("sha256:{:x}", hash))
+}
+
+/// Compute a deterministic tree hash for a directory.
+///
+/// Algorithm:
+/// 1. Recursively walk the directory, skipping symlinks.
+/// 2. Collect records:
+///    - Files: `file:<forward-slash-rel-path>:<sha256-of-content>`
+///    - Empty directories: `dir:<forward-slash-rel-path>`
+/// 3. Sort records lexicographically.
+/// 4. SHA-256 hash the newline-joined records.
+///
+/// A completely empty root directory produces a single `dir:` sentinel record.
+///
+/// Returns `None` if the directory cannot be read, or if any file cannot be hashed.
+fn compute_dir_fingerprint(dir_path: &Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+
+    let mut records: Vec<String> = Vec::new();
+    collect_dir_records(dir_path, dir_path, &mut records)?;
+    records.sort();
+
+    // Represent a completely empty directory with a sentinel so different empty dirs
+    // and non-empty dirs do not collide in hash space.
+    if records.is_empty() {
+        records.push("dir:".to_string());
+    }
+
+    let combined = records.join("\n");
+    let hash = Sha256::digest(combined.as_bytes());
+    Some(format!("sha256:{:x}", hash))
+}
+
+/// Recursively collect file and empty-directory records relative to `root`.
+///
+/// Symlinks are skipped to avoid infinite loops and non-determinism.
+/// Returns `None` if any directory entry or file read fails.
+fn collect_dir_records(root: &Path, dir: &Path, records: &mut Vec<String>) -> Option<()> {
+    let mut rd_entries: Vec<_> = std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .collect();
+    // Sort by filename instead of relying on OS order.
+    rd_entries.sort_by_key(|e| e.file_name());
+
+    for entry in rd_entries {
+        let file_type = entry.file_type().ok()?;
+        // Skip symlinks — they introduce platform variance and potential cycles.
+        if file_type.is_symlink() {
+            continue;
+        }
+        let abs_path = entry.path();
+        let rel_path = abs_path.strip_prefix(root).ok()?;
+        // Normalise path separator to `/` for cross-platform hash stability.
+        let rel_str = rel_path.to_string_lossy().replace('\\', "/");
+
+        if file_type.is_file() {
+            let fingerprint = compute_file_fingerprint(&abs_path)?;
+            records.push(format!("file:{}:{}", rel_str, fingerprint));
+        } else if file_type.is_dir() {
+            let before = records.len();
+            collect_dir_records(root, &abs_path, records)?;
+            if records.len() == before {
+                // Subdirectory produced no records: it is empty (or contains only symlinks).
+                records.push(format!("dir:{}", rel_str));
+            }
+        }
+    }
+    Some(())
 }
 
 /// Expand `~` prefix to the user's home directory.
@@ -401,5 +473,117 @@ mod tests {
 
         let result = materialize_fs_sources(&index).unwrap();
         assert!(result.is_empty());
+    }
+
+    // --- compute_dir_fingerprint unit tests ---
+
+    #[test]
+    fn dir_fingerprint_stable_across_calls() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"hello").unwrap();
+        std::fs::write(dir.path().join("b.txt"), b"world").unwrap();
+
+        let fp1 = compute_dir_fingerprint(dir.path()).unwrap();
+        let fp2 = compute_dir_fingerprint(dir.path()).unwrap();
+        assert_eq!(fp1, fp2);
+        assert!(fp1.starts_with("sha256:"), "{}", fp1);
+    }
+
+    #[test]
+    fn dir_fingerprint_changes_on_content_change() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("file.txt"), b"original").unwrap();
+        let fp1 = compute_dir_fingerprint(dir.path()).unwrap();
+
+        std::fs::write(dir.path().join("file.txt"), b"modified").unwrap();
+        let fp2 = compute_dir_fingerprint(dir.path()).unwrap();
+        assert_ne!(fp1, fp2);
+    }
+
+    #[test]
+    fn dir_fingerprint_changes_on_added_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"existing").unwrap();
+        let fp1 = compute_dir_fingerprint(dir.path()).unwrap();
+
+        std::fs::write(dir.path().join("new.txt"), b"new").unwrap();
+        let fp2 = compute_dir_fingerprint(dir.path()).unwrap();
+        assert_ne!(fp1, fp2);
+    }
+
+    #[test]
+    fn dir_fingerprint_empty_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        // An empty directory should still return a fingerprint (not None).
+        let fp = compute_dir_fingerprint(dir.path()).unwrap();
+        assert!(fp.starts_with("sha256:"), "{}", fp);
+    }
+
+    #[test]
+    fn dir_fingerprint_empty_subdir_represented() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("subdir")).unwrap();
+        let fp_with_empty_subdir = compute_dir_fingerprint(dir.path()).unwrap();
+
+        // Removing the subdir should change the fingerprint.
+        std::fs::remove_dir(dir.path().join("subdir")).unwrap();
+        let fp_without_subdir = compute_dir_fingerprint(dir.path()).unwrap();
+        assert_ne!(fp_with_empty_subdir, fp_without_subdir);
+    }
+
+    #[test]
+    fn dir_fingerprint_nested_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("deep.txt"), b"deep content").unwrap();
+        std::fs::write(dir.path().join("root.txt"), b"root content").unwrap();
+
+        let fp = compute_dir_fingerprint(dir.path()).unwrap();
+        assert!(fp.starts_with("sha256:"), "{}", fp);
+
+        // Changing a nested file should alter the fingerprint.
+        std::fs::write(sub.join("deep.txt"), b"different").unwrap();
+        let fp2 = compute_dir_fingerprint(dir.path()).unwrap();
+        assert_ne!(fp, fp2);
+    }
+
+    #[test]
+    fn dir_fingerprint_two_empty_dirs_identical() {
+        let dir1 = tempfile::tempdir().unwrap();
+        let dir2 = tempfile::tempdir().unwrap();
+        assert_eq!(
+            compute_dir_fingerprint(dir1.path()),
+            compute_dir_fingerprint(dir2.path()),
+        );
+    }
+
+    #[test]
+    fn compute_fingerprint_dir_copy_component_relative() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("file.txt"), b"content").unwrap();
+
+        let source = ConcreteFsSource::component_relative(dir.path().to_path_buf());
+        let fp = compute_fingerprint_if_eligible(&source, &SpecFsEntryType::Dir, &FsOp::Copy);
+        assert!(fp.is_some());
+        assert!(fp.unwrap().starts_with("sha256:"));
+    }
+
+    #[test]
+    fn compute_fingerprint_dir_link_is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = ConcreteFsSource::component_relative(dir.path().to_path_buf());
+        // link operations are not fingerprinted.
+        let fp = compute_fingerprint_if_eligible(&source, &SpecFsEntryType::Dir, &FsOp::Link);
+        assert!(fp.is_none());
+    }
+
+    #[test]
+    fn compute_fingerprint_dir_home_relative_is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = ConcreteFsSource::home_relative(dir.path().to_path_buf());
+        // home_relative sources are not fingerprinted.
+        let fp = compute_fingerprint_if_eligible(&source, &SpecFsEntryType::Dir, &FsOp::Copy);
+        assert!(fp.is_none());
     }
 }
