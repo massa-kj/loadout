@@ -328,6 +328,7 @@ mod tests {
             dep: DepSpec::default(),
             spec: None,
             scripts: None,
+            params_schema: None,
         }
     }
 
@@ -340,6 +341,7 @@ mod tests {
             dep: DepSpec::default(),
             spec: Some(ComponentSpec { resources }),
             scripts: None,
+            params_schema: None,
         }
     }
 

@@ -66,7 +66,8 @@ struct ConfigShowOutput {
 #[derive(Serialize)]
 struct ComponentEntry {
     id: String,
-    version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    params: Option<std::collections::HashMap<String, model::params::ParamValue>>,
 }
 
 fn show(args: ConfigShowArgs) {
@@ -97,7 +98,7 @@ fn show(args: ConfigShowArgs) {
                 .iter()
                 .map(|(id, cfg)| ComponentEntry {
                     id: id.clone(),
-                    version: cfg.version.clone(),
+                    params: cfg.params.clone(),
                 })
                 .collect();
             components.sort_by(|a, b| a.id.cmp(&b.id));
@@ -122,8 +123,10 @@ fn show(args: ConfigShowArgs) {
             components.sort_by_key(|(id, _)| id.as_str());
 
             for (id, cfg) in &components {
-                if let Some(ver) = &cfg.version {
-                    println!("  {id}  (version: {ver})");
+                if let Some(params) = &cfg.params {
+                    let pairs: Vec<String> =
+                        params.iter().map(|(k, v)| format!("{k}={v:?}")).collect();
+                    println!("  {id}  ({})", pairs.join(", "));
                 } else {
                     println!("  {id}");
                 }

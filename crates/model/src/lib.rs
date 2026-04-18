@@ -9,6 +9,7 @@ pub mod env;
 pub mod error;
 pub mod fs;
 pub mod id;
+pub mod params;
 pub mod plan;
 pub mod profile;
 pub mod sources;

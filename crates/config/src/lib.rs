@@ -100,7 +100,7 @@ pub enum ConfigError {
 #[derive(Deserialize, Default, Clone)]
 struct RawComponentConfig {
     #[serde(default)]
-    version: Option<String>,
+    params: Option<HashMap<String, serde_yaml::Value>>,
 }
 
 /// Grouped component map: `source_id → (component_name → config)`.
@@ -175,13 +175,90 @@ fn expand_grouped_components(
             out.insert(
                 canonical,
                 ProfileComponentConfig {
-                    version: cfg.version,
+                    params: convert_raw_params(cfg.params)?,
                 },
             );
         }
     }
 
     Ok(out)
+}
+
+/// Convert raw YAML param values into typed `ParamValue` map.
+///
+/// String values → `ParamValue::String`.
+/// Mapping values with `kind` + `path` → `ParamValue::Source`.
+fn convert_raw_params(
+    raw: Option<HashMap<String, serde_yaml::Value>>,
+) -> Result<Option<HashMap<String, model::params::ParamValue>>, ConfigError> {
+    let raw = match raw {
+        Some(r) if !r.is_empty() => r,
+        _ => return Ok(None),
+    };
+
+    let mut out = HashMap::new();
+    for (key, value) in raw {
+        let pv = convert_one_param_value(&key, value)?;
+        out.insert(key, pv);
+    }
+    Ok(Some(out))
+}
+
+/// Convert a single raw YAML value into a typed `ParamValue`.
+fn convert_one_param_value(
+    key: &str,
+    value: serde_yaml::Value,
+) -> Result<model::params::ParamValue, ConfigError> {
+    use model::params::{ParamValue, SourceParamValue};
+
+    match value {
+        serde_yaml::Value::String(s) => Ok(ParamValue::String(s)),
+        serde_yaml::Value::Number(n) => {
+            // Numeric values are coerced to string (e.g., version: 20 → "20").
+            Ok(ParamValue::String(n.to_string()))
+        }
+        serde_yaml::Value::Mapping(map) => {
+            // Expect structured source: { kind: ..., path: ... }
+            let kind_val = map
+                .get(serde_yaml::Value::String("kind".into()))
+                .ok_or_else(|| ConfigError::InvalidProfile {
+                    reason: format!("param '{key}': object value must have 'kind' field"),
+                })?;
+            let path_val = map
+                .get(serde_yaml::Value::String("path".into()))
+                .ok_or_else(|| ConfigError::InvalidProfile {
+                    reason: format!("param '{key}': object value must have 'path' field"),
+                })?;
+
+            let kind_str = kind_val
+                .as_str()
+                .ok_or_else(|| ConfigError::InvalidProfile {
+                    reason: format!("param '{key}': 'kind' must be a string"),
+                })?;
+
+            let kind: model::fs::FsSourceKind = serde_yaml::from_value(serde_yaml::Value::String(
+                kind_str.to_string(),
+            ))
+            .map_err(|_| ConfigError::InvalidProfile {
+                reason: format!(
+                    "param '{key}': invalid source kind '{kind_str}'; \
+                             expected one of: home_relative, component_relative, absolute"
+                ),
+            })?;
+
+            let path = path_val
+                .as_str()
+                .ok_or_else(|| ConfigError::InvalidProfile {
+                    reason: format!("param '{key}': 'path' must be a string"),
+                })?
+                .to_string();
+
+            Ok(ParamValue::Source(SourceParamValue { kind, path }))
+        }
+        _ => Err(ConfigError::InvalidProfile {
+            reason: format!("param '{key}': unsupported value type; expected string or object"),
+        }),
+    }
 }
 
 /// Merge bundles in `use` list order (last entry wins), then overlay profile components.
@@ -660,13 +737,17 @@ mod tests {
     }
 
     #[test]
-    fn profile_version_forwarded_through_grouping() {
+    fn profile_params_forwarded_through_grouping() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = "components:\n  local:\n    node:\n      version: \"20\"\n";
+        let yaml = "components:\n  local:\n    node:\n      params:\n        version: \"20\"\n";
         let p = write_yaml_file(dir.path(), "profile.yaml", yaml);
         let profile = load_profile(&p).unwrap();
         let cfg = profile.components.get("local/node").unwrap();
-        assert_eq!(cfg.version.as_deref(), Some("20"));
+        let params = cfg.params.as_ref().unwrap();
+        assert_eq!(
+            params["version"],
+            model::params::ParamValue::String("20".to_string())
+        );
     }
 
     #[test]
@@ -939,13 +1020,17 @@ strategy:
     }
 
     #[test]
-    fn config_version_config_forwarded() {
+    fn config_params_config_forwarded() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = "profile:\n  components:\n    local:\n      node:\n        version: \"20\"\n";
+        let yaml = "profile:\n  components:\n    local:\n      node:\n        params:\n          version: \"20\"\n";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let (profile, _) = load_config(&p).unwrap();
         let cfg = profile.components.get("local/node").unwrap();
-        assert_eq!(cfg.version.as_deref(), Some("20"));
+        let params = cfg.params.as_ref().unwrap();
+        assert_eq!(
+            params["version"],
+            model::params::ParamValue::String("20".to_string())
+        );
     }
 
     // ── Bundle tests ───────────────────────────────────────────────────────
@@ -984,7 +1069,7 @@ profile:
 
     #[test]
     fn bundle_use_order_last_wins() {
-        // base: core/git version "1.0", lang: core/git version "2.0"
+        // base: core/git params.version "1.0", lang: core/git params.version "2.0"
         // use: [base, lang] → lang wins
         let dir = tempfile::tempdir().unwrap();
         let yaml = "\
@@ -998,12 +1083,14 @@ bundles:
     components:
       core:
         git:
-          version: \"1.0\"
+          params:
+            version: \"1.0\"
   lang:
     components:
       core:
         git:
-          version: \"2.0\"
+          params:
+            version: \"2.0\"
 
 profile:
   components: {}
@@ -1011,9 +1098,10 @@ profile:
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let (profile, _) = load_config(&p).unwrap();
         let cfg = profile.components.get("core/git").unwrap();
+        let params = cfg.params.as_ref().unwrap();
         assert_eq!(
-            cfg.version.as_deref(),
-            Some("2.0"),
+            params["version"],
+            model::params::ParamValue::String("2.0".to_string()),
             "last bundle in use list must win"
         );
     }
@@ -1031,20 +1119,23 @@ bundles:
     components:
       core:
         git:
-          version: \"1.0\"
+          params:
+            version: \"1.0\"
 
 profile:
   components:
     core:
       git:
-        version: \"override\"
+        params:
+          version: \"override\"
 ";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let (profile, _) = load_config(&p).unwrap();
         let cfg = profile.components.get("core/git").unwrap();
+        let params = cfg.params.as_ref().unwrap();
         assert_eq!(
-            cfg.version.as_deref(),
-            Some("override"),
+            params["version"],
+            model::params::ParamValue::String("override".to_string()),
             "profile.components must override bundle"
         );
     }

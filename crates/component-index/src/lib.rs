@@ -358,6 +358,7 @@ fn build_one(
         dep,
         spec,
         scripts,
+        params_schema: None,
     })
 }
 

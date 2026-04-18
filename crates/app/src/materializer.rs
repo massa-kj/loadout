@@ -308,6 +308,7 @@ mod tests {
                 },
                 spec: Some(ComponentSpec { resources }),
                 scripts: None,
+                params_schema: None,
             },
         );
         ComponentIndex {
@@ -472,6 +473,7 @@ mod tests {
                     install: "install.sh".to_string(),
                     uninstall: "uninstall.sh".to_string(),
                 }),
+                params_schema: None,
             },
         );
         let index = ComponentIndex {

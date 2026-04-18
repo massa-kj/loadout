@@ -261,6 +261,7 @@ mod tests {
                     },
                     spec: None,
                     scripts: None,
+                    params_schema: None,
                 };
                 (id.to_string(), meta)
             })

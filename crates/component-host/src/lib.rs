@@ -218,6 +218,7 @@ mod tests {
             dep: DepSpec::default(),
             spec: None,
             scripts: None,
+            params_schema: None,
         }
     }
 

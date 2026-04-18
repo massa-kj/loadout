@@ -5,6 +5,7 @@
 //!
 //! See: `docs/specs/data/profile.md`
 
+use crate::params::ParamValue;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -26,10 +27,11 @@ pub struct Profile {
 /// An empty map `{}` is equivalent to no configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct ProfileComponentConfig {
-    /// Desired version string. Interpretation is component-specific.
-    /// Passed to the component script via `LOADOUT_COMPONENT_CONFIG_VERSION`.
+    /// Parameter values to inject into the component's resource templates.
+    /// Keys must match the component's `params_schema.properties`.
+    /// Validated and resolved by the params validator before materialization.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
+    pub params: Option<HashMap<String, ParamValue>>,
 }
 
 #[cfg(test)]
@@ -53,9 +55,20 @@ components:
     }
 
     #[test]
-    fn round_trip_with_version() {
-        let json = r#"{"components":{"node":{"version":"22.17.1"}}}"#;
+    fn round_trip_with_params() {
+        let json = r#"{"components":{"node":{"params":{"version":"22.17.1"}}}}"#;
         let p: Profile = serde_json::from_str(json).unwrap();
-        assert_eq!(p.components["node"].version.as_deref(), Some("22.17.1"));
+        let params = p.components["node"].params.as_ref().unwrap();
+        assert_eq!(
+            params["version"],
+            crate::params::ParamValue::String("22.17.1".to_string())
+        );
+    }
+
+    #[test]
+    fn empty_config_has_no_params() {
+        let json = r#"{"components":{"git":{}}}"#;
+        let p: Profile = serde_json::from_str(json).unwrap();
+        assert!(p.components["git"].params.is_none());
     }
 }

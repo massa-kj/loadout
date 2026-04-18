@@ -1440,6 +1440,7 @@ mod tests {
             dep: DepSpec::default(),
             spec: None,
             scripts: None,
+            params_schema: None,
         }
     }
 
@@ -1452,6 +1453,7 @@ mod tests {
             dep: DepSpec::default(),
             spec: None,
             scripts: None,
+            params_schema: None,
         }
     }
 
@@ -1467,6 +1469,7 @@ mod tests {
                 install: "install.sh".to_string(),
                 uninstall: "uninstall.sh".to_string(),
             }),
+            params_schema: None,
         }
     }
 

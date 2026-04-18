@@ -6,6 +6,7 @@
 //!
 //! See: `docs/specs/data/component_index.md`
 
+use crate::params::ParamsSchema;
 use crate::tool::ToolVerifyContract;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -42,6 +43,11 @@ pub struct ComponentMeta {
 
     /// Dependency declarations. May be empty but must be present.
     pub dep: DepSpec,
+
+    /// Parameter schema. Present only for `declarative` mode components.
+    /// Absent means the component accepts no params from the profile.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params_schema: Option<ParamsSchema>,
 
     /// Resource declarations. Present for `declarative` and `managed_script` mode components;
     /// may be absent for `script` mode components.
