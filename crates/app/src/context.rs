@@ -33,6 +33,14 @@ pub enum AppError {
     #[error("materialize error: {0}")]
     Materialize(#[from] crate::materializer::MaterializeError),
 
+    /// Parameter validation failed.
+    #[error("params validation error: {0}")]
+    ParamsValidation(#[from] params_validator::ParamsValidationError),
+
+    /// Parameter materialization failed.
+    #[error("params materialize error: {0}")]
+    ParamsMaterialize(#[from] params_materializer::MaterializeError),
+
     /// Planner could not produce a plan.
     #[error("planner error: {0}")]
     Planner(#[from] planner::PlannerError),

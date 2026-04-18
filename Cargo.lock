@@ -78,6 +78,8 @@ dependencies = [
  "config",
  "executor",
  "model",
+ "params-materializer",
+ "params-validator",
  "planner",
  "platform",
  "resolver",

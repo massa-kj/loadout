@@ -1,5 +1,6 @@
 // Shared read-only pipeline stages used by plan(), prepare_execution(), and read helpers.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::context::{AppContext, AppError};
@@ -68,9 +69,15 @@ pub(crate) fn run_pipeline(
         .unwrap_or_default();
     let materialized = materializer::materialize_fs_sources(&index, fingerprint_policy)?;
 
+    // Step 7.5: validate params and materialize component specs.
+    // For each desired component with a params_schema, validate profile params
+    // against the schema, resolve defaults, then replace ${params.*} references
+    // in the component's resource templates.
+    let materialized_specs = validate_and_materialize_params(&profile, &index, &order)?;
+
     // Step 8: compile desired resource graph (pure: uses materialized sources).
     let compiler_ms = to_compiler_materialized(&materialized);
-    let graph = compiler::compile(&index, &strategy, &order, &compiler_ms)?;
+    let graph = compiler::compile(&index, &materialized_specs, &strategy, &order, &compiler_ms)?;
 
     // Step 9: load state (state::load returns empty state if file absent).
     let state = state::load(&ctx.state_path())?;
@@ -102,6 +109,59 @@ fn to_compiler_materialized(
             )
         })
         .collect()
+}
+
+/// Validate profile params against component schemas and materialize specs.
+///
+/// For each component in `resolved_order`:
+/// 1. Look up the component's `params_schema` from the index.
+/// 2. Look up the profile's `params` for that component.
+/// 3. Validate and resolve defaults via `params_validator::validate_and_resolve`.
+/// 4. Materialize `${params.*}` references via `params_materializer::materialize`.
+///
+/// Components without `params_schema` and without profile params are skipped.
+/// The result maps component IDs to their param-resolved specs.
+fn validate_and_materialize_params(
+    profile: &config::Profile,
+    index: &model::ComponentIndex,
+    order: &model::ResolvedComponentOrder,
+) -> Result<HashMap<String, model::params::MaterializedComponentSpec>, AppError> {
+    let mut result = HashMap::new();
+
+    for component_id in order {
+        let id_str = component_id.as_str();
+
+        let meta = match index.components.get(id_str) {
+            Some(m) => m,
+            None => continue, // handled by compiler
+        };
+
+        let profile_params = profile
+            .components
+            .get(id_str)
+            .and_then(|c| c.params.as_ref());
+
+        let resolved = params_validator::validate_and_resolve(
+            id_str,
+            meta.params_schema.as_ref(),
+            profile_params,
+        )?;
+
+        // Only materialize if the component has a spec with resources.
+        if resolved.values.is_empty() {
+            continue;
+        }
+
+        let spec = match &meta.spec {
+            Some(s) => s,
+            None => continue,
+        };
+
+        let materialized = params_materializer::materialize(id_str, &spec.resources, &resolved)?;
+        result.insert(id_str.to_string(), materialized);
+    }
+
+    Ok(result)
 }
 
 /// Map `platform::Platform` → `component_index::Platform`.

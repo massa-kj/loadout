@@ -19,6 +19,7 @@ use model::desired_resource_graph::{
 };
 use model::fs::ConcreteFsSource;
 use model::id::{CanonicalBackendId, ResolvedComponentOrder};
+use model::params::MaterializedComponentSpec;
 use model::strategy::{BackendStrategy, Strategy};
 
 pub use model::desired_resource_graph::{
@@ -86,6 +87,10 @@ pub struct MaterializedFsResource {
 /// the output (they have no resources to compile). For declarative-mode components,
 /// each resource's `desired_backend` is resolved via `strategy`.
 ///
+/// `materialized_specs` provides param-resolved specs for components that declare
+/// `params_schema`. When present, the compiler uses the materialized resources
+/// instead of the raw spec resources. Components without params use their original spec.
+///
 /// `materialized_sources` provides pre-resolved fs source references produced by
 /// the materialize stage. The compiler looks up materialized data for each fs resource
 /// by `(component_id, resource_id)`.
@@ -97,6 +102,7 @@ pub struct MaterializedFsResource {
 /// can be resolved for a package or runtime resource.
 pub fn compile(
     component_index: &ComponentIndex,
+    materialized_specs: &HashMap<String, MaterializedComponentSpec>,
     strategy: &Strategy,
     resolved_order: &ResolvedComponentOrder,
     materialized_sources: &MaterializedSources,
@@ -127,28 +133,38 @@ pub fn compile(
         // resources. Scripts handle install/uninstall; core handles verification and state.
 
         // Declarative mode: expand spec resources into desired resources.
-        let spec = match &meta.spec {
-            Some(s) => s,
-            None => {
-                // Should not occur after component-index validation, but handle gracefully.
-                components.insert(
-                    id_str.to_string(),
-                    ComponentDesiredResources { resources: vec![] },
-                );
-                continue;
+        // Use materialized spec (param-resolved) if available, otherwise fall back to raw spec.
+        let resources = if let Some(ms) = materialized_specs.get(id_str) {
+            &ms.resources
+        } else {
+            match &meta.spec {
+                Some(s) => &s.resources,
+                None => {
+                    // Should not occur after component-index validation, but handle gracefully.
+                    components.insert(
+                        id_str.to_string(),
+                        ComponentDesiredResources { resources: vec![] },
+                    );
+                    continue;
+                }
             }
         };
 
-        let mut resources: Vec<DesiredResource> = Vec::new();
-        for resource in &spec.resources {
+        let mut compiled: Vec<DesiredResource> = Vec::new();
+        for resource in resources {
             let kind = compile_resource(resource, strategy, id_str, materialized_sources)?;
-            resources.push(DesiredResource {
+            compiled.push(DesiredResource {
                 id: resource.id.clone(),
                 kind,
             });
         }
 
-        components.insert(id_str.to_string(), ComponentDesiredResources { resources });
+        components.insert(
+            id_str.to_string(),
+            ComponentDesiredResources {
+                resources: compiled,
+            },
+        );
     }
 
     Ok(DesiredResourceGraph {
@@ -279,6 +295,7 @@ mod tests {
     };
     use model::fs::ConcreteFsSource;
     use model::id::CanonicalComponentId;
+    use model::params::MaterializedComponentSpec;
     use model::strategy::{BackendOverride, BackendStrategy, Strategy};
     use std::collections::HashMap;
     use std::path::PathBuf;
@@ -300,6 +317,10 @@ mod tests {
     }
 
     fn empty_ms() -> MaterializedSources {
+        HashMap::new()
+    }
+
+    fn empty_mcs() -> HashMap<String, MaterializedComponentSpec> {
         HashMap::new()
     }
 
@@ -411,7 +432,7 @@ mod tests {
         let strategy = Strategy::default();
         let order = vec![make_component_id("core/bash")];
 
-        let graph = compile(&index, &strategy, &order, &empty_ms()).unwrap();
+        let graph = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap();
         assert_eq!(graph.components.len(), 1);
         assert!(graph.components["core/bash"].resources.is_empty());
     }
@@ -429,7 +450,7 @@ mod tests {
         };
         let order = vec![make_component_id("core/git")];
 
-        let graph = compile(&index, &strategy, &order, &empty_ms()).unwrap();
+        let graph = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap();
         let resources = &graph.components["core/git"].resources;
         assert_eq!(resources.len(), 1);
         match &resources[0].kind {
@@ -461,7 +482,7 @@ mod tests {
         };
         let order = vec![make_component_id("core/ripgrep")];
 
-        let graph = compile(&index, &strategy, &order, &empty_ms()).unwrap();
+        let graph = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap();
         match &graph.components["core/ripgrep"].resources[0].kind {
             DesiredResourceKind::Package {
                 desired_backend, ..
@@ -485,7 +506,7 @@ mod tests {
         };
         let order = vec![make_component_id("core/node")];
 
-        let graph = compile(&index, &strategy, &order, &empty_ms()).unwrap();
+        let graph = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap();
         match &graph.components["core/node"].resources[0].kind {
             DesiredResourceKind::Runtime {
                 name,
@@ -517,7 +538,7 @@ mod tests {
         };
         let order = vec![make_component_id("core/python")];
 
-        let graph = compile(&index, &strategy, &order, &empty_ms()).unwrap();
+        let graph = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap();
         match &graph.components["core/python"].resources[0].kind {
             DesiredResourceKind::Runtime {
                 desired_backend, ..
@@ -549,7 +570,7 @@ mod tests {
             "/root/.gitconfig",
         )]);
 
-        let graph = compile(&index, &strategy, &order, &ms).unwrap();
+        let graph = compile(&index, &empty_mcs(), &strategy, &order, &ms).unwrap();
         match &graph.components["core/git"].resources[0].kind {
             DesiredResourceKind::Fs {
                 source,
@@ -588,7 +609,7 @@ mod tests {
             "/root/.config/nvim",
         )]);
 
-        let graph = compile(&index, &strategy, &order, &ms).unwrap();
+        let graph = compile(&index, &empty_mcs(), &strategy, &order, &ms).unwrap();
         match &graph.components["core/nvim"].resources[0].kind {
             DesiredResourceKind::Fs { entry_type, op, .. } => {
                 assert_eq!(*entry_type, FsEntryType::Dir);
@@ -614,7 +635,7 @@ mod tests {
         };
         let order = vec![make_component_id("core/git")];
 
-        let err = compile(&index, &strategy, &order, &empty_ms()).unwrap_err();
+        let err = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap_err();
         assert!(matches!(err, CompilerError::NoBackend { .. }));
     }
 
@@ -632,7 +653,7 @@ mod tests {
         };
         let order = vec![make_component_id("core/node")];
 
-        let err = compile(&index, &strategy, &order, &empty_ms()).unwrap_err();
+        let err = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap_err();
         assert!(matches!(err, CompilerError::NoBackend { .. }));
     }
 
@@ -643,7 +664,7 @@ mod tests {
         let strategy = Strategy::default();
         let order = vec![make_component_id("core/missing")];
 
-        let err = compile(&index, &strategy, &order, &empty_ms()).unwrap_err();
+        let err = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap_err();
         assert!(matches!(err, CompilerError::ComponentNotFound { id } if id == "core/missing"));
     }
 
@@ -672,7 +693,7 @@ mod tests {
             make_component_id("core/node"),
         ];
 
-        let graph = compile(&index, &strategy, &order, &empty_ms()).unwrap();
+        let graph = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap();
         // bash is now included with empty resources; git and node have resources
         assert_eq!(graph.components.len(), 3);
         assert!(graph.components.contains_key("core/git"));
@@ -687,7 +708,61 @@ mod tests {
         let strategy = Strategy::default();
         let order = vec![make_component_id("core/bash")];
 
-        let graph = compile(&index, &strategy, &order, &empty_ms()).unwrap();
+        let graph = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap();
         assert_eq!(graph.schema_version, DESIRED_RESOURCE_GRAPH_SCHEMA_VERSION);
+    }
+
+    /// When a materialized spec is provided, the compiler uses its resources
+    /// instead of the raw spec from the component index.
+    #[test]
+    fn materialized_spec_overrides_raw_spec() {
+        // Raw spec has runtime version "20" — materialized spec overrides to "22".
+        let index = make_index(vec![(
+            "core/node",
+            declarative_meta(vec![runtime_resource(
+                "runtime:node",
+                "node",
+                "${params.version}",
+            )]),
+        )]);
+        let strategy = Strategy {
+            runtime: Some(backend_strategy_default("core/mise")),
+            ..Default::default()
+        };
+        let order = vec![make_component_id("core/node")];
+
+        let mut mcs = HashMap::new();
+        mcs.insert(
+            "core/node".to_string(),
+            MaterializedComponentSpec {
+                resources: vec![runtime_resource("runtime:node", "node", "22")],
+            },
+        );
+
+        let graph = compile(&index, &mcs, &strategy, &order, &empty_ms()).unwrap();
+        match &graph.components["core/node"].resources[0].kind {
+            DesiredResourceKind::Runtime { version, .. } => {
+                assert_eq!(version, "22");
+            }
+            _ => panic!("expected Runtime"),
+        }
+    }
+
+    /// Components without materialized spec fall back to raw spec as before.
+    #[test]
+    fn no_materialized_spec_falls_back_to_raw() {
+        let index = make_index(vec![(
+            "core/git",
+            declarative_meta(vec![package_resource("package:git", "git")]),
+        )]);
+        let strategy = Strategy {
+            package: Some(backend_strategy_default("core/brew")),
+            ..Default::default()
+        };
+        let order = vec![make_component_id("core/git")];
+
+        // Empty materialized specs — should use raw spec.
+        let graph = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap();
+        assert_eq!(graph.components["core/git"].resources.len(), 1);
     }
 }
