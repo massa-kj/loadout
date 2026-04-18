@@ -96,6 +96,29 @@ pub enum ComponentIndexError {
         resource_id: String,
     },
 
+    /// A non-declarative component declares `params_schema` (only `mode: declarative` supports params).
+    #[error("component '{component_id}': params_schema is only allowed for mode: declarative")]
+    ParamsSchemaNotAllowed { component_id: String },
+
+    /// A `params_schema` property has both `default` and is listed in `required`.
+    #[error(
+        "component '{component_id}': param '{param}' has both a default value and is listed in required"
+    )]
+    ParamsDefaultAndRequired { component_id: String, param: String },
+
+    /// A platform override file attempts to set `params_schema`.
+    #[error(
+        "component '{component_id}': params_schema must not be overridden in platform feature file"
+    )]
+    ParamsSchemaInOverride { component_id: String },
+
+    /// `params_schema` YAML is malformed.
+    #[error("component '{component_id}': invalid params_schema: {reason}")]
+    InvalidParamsSchema {
+        component_id: String,
+        reason: String,
+    },
+
     /// A `dep.depends` entry uses a multi-slash form (normalized form must be `<source>/<name>`).
     #[error(
         "component '{component_id}': dep.depends entry '{entry}' has more than one '/' \
@@ -238,6 +261,14 @@ fn build_one(
                 path: override_path,
                 source: Box::new(e),
             })?;
+
+        // Reject params_schema in platform override files.
+        if overlay.params_schema.is_some() {
+            return Err(ComponentIndexError::ParamsSchemaInOverride {
+                component_id: component_id.to_string(),
+            });
+        }
+
         merge(base, overlay)
     } else {
         base
@@ -350,6 +381,40 @@ fn build_one(
         Some(ScriptSpec { install, uninstall })
     });
 
+    // Parse and validate params_schema.
+    let params_schema =
+        match merged.params_schema {
+            None => None,
+            Some(raw_value) => {
+                // Only declarative mode supports params.
+                if !matches!(mode, ComponentMode::Declarative) {
+                    return Err(ComponentIndexError::ParamsSchemaNotAllowed {
+                        component_id: component_id.to_string(),
+                    });
+                }
+
+                let schema: model::params::ParamsSchema = serde_yaml::from_value(raw_value)
+                    .map_err(|e| ComponentIndexError::InvalidParamsSchema {
+                        component_id: component_id.to_string(),
+                        reason: e.to_string(),
+                    })?;
+
+                // Validate: required params must not have defaults.
+                for req in &schema.required {
+                    if let Some(prop) = schema.properties.get(req) {
+                        if prop.default.is_some() {
+                            return Err(ComponentIndexError::ParamsDefaultAndRequired {
+                                component_id: component_id.to_string(),
+                                param: req.clone(),
+                            });
+                        }
+                    }
+                }
+
+                Some(schema)
+            }
+        };
+
     Ok(ComponentMeta {
         spec_version: SUPPORTED_SPEC_VERSION,
         mode,
@@ -358,7 +423,7 @@ fn build_one(
         dep,
         spec,
         scripts,
-        params_schema: None,
+        params_schema,
     })
 }
 
@@ -439,6 +504,8 @@ struct RawComponentYaml {
     provides: Option<Vec<RawCapRef>>,
     resources: Option<Vec<RawSpecResource>>,
     scripts: Option<RawScriptSpec>,
+    /// Raw params_schema value. Parsed and validated in `build_one()`.
+    params_schema: Option<serde_yaml::Value>,
 }
 
 /// Raw script entry points from `component.yaml`.
@@ -881,5 +948,221 @@ mod tests {
             err,
             ComponentIndexError::ManagedScriptInvalidResourceKind { .. }
         ));
+    }
+
+    // ─── params_schema ───────────────────────────────────────────────────────
+
+    #[test]
+    fn params_schema_parsed_for_declarative_component() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fdir = make_component_dir(tmp.path(), "node");
+        let yaml = "\
+spec_version: 1
+mode: declarative
+params_schema:
+  properties:
+    version:
+      type: string
+      default: '22.17.1'
+  required: []
+  additional_properties: false
+resources:
+  - id: rt:node
+    kind: runtime
+    name: node
+    version: '${params.version}'
+";
+        write(&fdir, "component.yaml", yaml);
+
+        let index = build(&[source_root("core", tmp.path())], &Platform::Linux).unwrap();
+        let meta = index.components.get("core/node").unwrap();
+        let schema = meta
+            .params_schema
+            .as_ref()
+            .expect("params_schema must be present");
+        assert_eq!(schema.properties.len(), 1);
+        assert!(schema.properties.contains_key("version"));
+        let prop = &schema.properties["version"];
+        assert_eq!(
+            prop.default,
+            Some(model::params::ParamValue::String("22.17.1".to_string()))
+        );
+        assert!(schema.required.is_empty());
+        assert!(!schema.additional_properties);
+    }
+
+    #[test]
+    fn no_params_schema_yields_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fdir = make_component_dir(tmp.path(), "jq");
+        write(&fdir, "component.yaml", simple_declarative_yaml());
+
+        let index = build(&[source_root("core", tmp.path())], &Platform::Linux).unwrap();
+        let meta = index.components.get("core/jq").unwrap();
+        assert!(meta.params_schema.is_none());
+    }
+
+    #[test]
+    fn params_schema_default_and_required_conflict_is_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fdir = make_component_dir(tmp.path(), "bad");
+        let yaml = "\
+spec_version: 1
+mode: declarative
+params_schema:
+  properties:
+    version:
+      type: string
+      default: '1.0'
+  required: [version]
+resources:
+  - id: pkg:bad
+    kind: package
+    name: bad
+";
+        write(&fdir, "component.yaml", yaml);
+
+        let err = build(&[source_root("core", tmp.path())], &Platform::Linux).unwrap_err();
+        assert!(
+            matches!(err, ComponentIndexError::ParamsDefaultAndRequired { ref param, .. } if param == "version"),
+            "expected ParamsDefaultAndRequired, got: {err}"
+        );
+    }
+
+    #[test]
+    fn params_schema_on_script_mode_is_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fdir = make_component_dir(tmp.path(), "bad");
+        let yaml = "\
+spec_version: 1
+mode: script
+params_schema:
+  properties:
+    version:
+      type: string
+  required: []
+";
+        write(&fdir, "component.yaml", yaml);
+
+        let err = build(&[source_root("core", tmp.path())], &Platform::Linux).unwrap_err();
+        assert!(
+            matches!(err, ComponentIndexError::ParamsSchemaNotAllowed { .. }),
+            "expected ParamsSchemaNotAllowed, got: {err}"
+        );
+    }
+
+    #[test]
+    fn params_schema_on_managed_script_mode_is_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fdir = make_component_dir(tmp.path(), "bad");
+        let yaml = "\
+spec_version: 1
+mode: managed_script
+scripts:
+  install: install.sh
+  uninstall: uninstall.sh
+params_schema:
+  properties:
+    version:
+      type: string
+  required: []
+resources:
+  - id: tool:bad
+    kind: tool
+    name: bad
+    verify:
+      identity:
+        type: resolved_command
+        command: bad
+        expected_path:
+          one_of:
+            - /usr/bin/bad
+";
+        write(&fdir, "component.yaml", yaml);
+
+        let err = build(&[source_root("core", tmp.path())], &Platform::Linux).unwrap_err();
+        assert!(
+            matches!(err, ComponentIndexError::ParamsSchemaNotAllowed { .. }),
+            "expected ParamsSchemaNotAllowed, got: {err}"
+        );
+    }
+
+    #[test]
+    fn params_schema_in_platform_override_is_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fdir = make_component_dir(tmp.path(), "node");
+        let base_yaml = "\
+spec_version: 1
+mode: declarative
+params_schema:
+  properties:
+    version:
+      type: string
+  required: []
+resources:
+  - id: rt:node
+    kind: runtime
+    name: node
+    version: '${params.version}'
+";
+        let override_yaml = "\
+params_schema:
+  properties:
+    version:
+      type: string
+      default: '99.0'
+  required: []
+";
+        write(&fdir, "component.yaml", base_yaml);
+        write(&fdir, "component.linux.yaml", override_yaml);
+
+        let err = build(&[source_root("core", tmp.path())], &Platform::Linux).unwrap_err();
+        assert!(
+            matches!(err, ComponentIndexError::ParamsSchemaInOverride { .. }),
+            "expected ParamsSchemaInOverride, got: {err}"
+        );
+    }
+
+    #[test]
+    fn params_schema_inherited_from_base_when_no_override() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fdir = make_component_dir(tmp.path(), "node");
+        let base_yaml = "\
+spec_version: 1
+mode: declarative
+params_schema:
+  properties:
+    version:
+      type: string
+  required: [version]
+resources:
+  - id: rt:node
+    kind: runtime
+    name: node
+    version: '${params.version}'
+";
+        // Platform override only changes resources, not params_schema.
+        let override_yaml = "\
+resources:
+  - id: rt:node
+    kind: runtime
+    name: node
+    version: '${params.version}'
+  - id: pkg:build-essential
+    kind: package
+    name: build-essential
+";
+        write(&fdir, "component.yaml", base_yaml);
+        write(&fdir, "component.linux.yaml", override_yaml);
+
+        let index = build(&[source_root("core", tmp.path())], &Platform::Linux).unwrap();
+        let meta = index.components.get("core/node").unwrap();
+        let schema = meta
+            .params_schema
+            .as_ref()
+            .expect("params_schema inherited from base");
+        assert_eq!(schema.required, vec!["version".to_string()]);
+        // Resources should be from override (2 resources).
+        assert_eq!(meta.spec.as_ref().unwrap().resources.len(), 2);
     }
 }
