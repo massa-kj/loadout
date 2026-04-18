@@ -16,6 +16,8 @@ members = [
     "crates/executor",
     "crates/backends-builtin",
     "crates/app",
+    "crates/params-validator",
+    "crates/params-materializer",
     # Test infrastructure (not part of the loadout product binary)
     "tests/runtime",
 ]
