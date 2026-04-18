@@ -627,25 +627,16 @@ mod tests {
     #[test]
     fn fingerprint_policy_all_copy_enables_absolute() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("f.txt"), b"data").unwrap();
-        let source = ConcreteFsSource::absolute(dir.path().to_path_buf());
+        let file = dir.path().join("f.txt");
+        std::fs::write(&file, b"data").unwrap();
+        let source = ConcreteFsSource::absolute(file);
         let fp = compute_fingerprint_if_eligible(
             &source,
             &SpecFsEntryType::File,
             &FsOp::Copy,
             FingerprintPolicy::AllCopy,
         );
-        // absolute + all_copy reads the tempdir itself which is a dir, not a file.
-        // Use the file directly instead.
-        let file = dir.path().join("f.txt");
-        let source_file = ConcreteFsSource::absolute(file);
-        let fp2 = compute_fingerprint_if_eligible(
-            &source_file,
-            &SpecFsEntryType::File,
-            &FsOp::Copy,
-            FingerprintPolicy::AllCopy,
-        );
-        assert!(fp2.is_some());
+        assert!(fp.is_some());
     }
 
     #[test]
