@@ -6,7 +6,8 @@ profile:
   components:
     local:
       dummy-rt:
-        version: "22"
+        params:
+          version: "22"
 
 strategy:
   package:

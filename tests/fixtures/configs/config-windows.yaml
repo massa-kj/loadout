@@ -14,13 +14,12 @@ profile:
 
       lua: {}
       node:
-        version: "22.17.1"
+        params:
+          version: "22.17.1"
       npm: {}
-      python:
-        version: "3.12"
+      python: {}
       uv: {}
-      rust:
-        version: "1.87"
+      rust: {}
 
 
 strategy:
