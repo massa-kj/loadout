@@ -19,7 +19,8 @@ profile:
     <source_id>:
       <component_name>: {}
       <component_name>:
-        version: "<string>"
+        params:
+          <key>: "<value>"
 
 bundle:            # optional — lists which bundles to apply
   use:
@@ -70,10 +71,12 @@ Empty map `{}` is valid and equivalent to no configuration.
 
 Optional fields:
 
-* `version` (string) — Desired version of the component.
-  Interpretation is component-specific. Core passes it to the component script via
-  `LOADOUT_COMPONENT_CONFIG_VERSION` and records it in state.
-  No format constraints are imposed by core.
+* `params` (map of string → value) — Parameter values to inject into the component's
+  resource templates. Keys must match the component's `params_schema.properties`.
+  Values are validated against type constraints (`string`, `enum`, `object`) and
+  unknown keys are rejected unless `additional_properties: true`.
+  Params with defaults in the schema may be omitted; the validator fills them in.
+  Components without `params_schema` reject any `params` at validation time.
 
 ## Semantics
 
@@ -98,7 +101,7 @@ The planner, resolver, executor, and state never see raw config syntax.
 * Duplicate canonical IDs produced after normalization are rejected.
 * Bare component names (keys without a `source_id` nesting) are not accepted.
 * Canonical direct form (`source_id/name: {}` at the `components` top level) is not accepted.
-* Unknown fields in the component configuration map are permitted and ignored by core.
+* Unknown fields in the component configuration map are rejected (`deny_unknown_fields`).
 
 ## Bundle Expansion
 

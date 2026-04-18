@@ -178,8 +178,11 @@ Installs a runtime via the resolved backend (e.g. mise).
 - kind: runtime
   id: runtime:node
   name: node
-  version: "22.0.0"       # exact version or constraint
+  version: "${params.version}"    # resolved from params_schema + profile params
 ```
+
+The `version` field typically uses a `${params.version}` reference so that the profile
+can control which version is installed. The component's `params_schema` provides a default.
 
 #### `fs`
 
@@ -422,15 +425,100 @@ File operations are tracked in state automatically via the `fs` module.
 Components must NOT access `state.json` directly.
 State registration is handled by the executor after each successful component operation.
 
-## Version Handling
+## Parameters (`params_schema`)
 
-Version is passed in via `LOADOUT_COMPONENT_CONFIG_VERSION`.
-Components that support versioning read this variable and use it in install logic.
-Components that do not support versioning ignore it.
+Declarative components can declare a `params_schema` to accept profile-injected values.
+Parameters allow the same component template to be configured differently per profile
+(e.g., different runtime versions on different machines).
 
-Record installed version in state using `state_set_runtime` (for runtimes).
+### Schema declaration
 
-See `specs/data/state.md` for the runtime resource format.
+Add `params_schema` to `component.yaml`:
+
+```yaml
+spec_version: 1
+description: Node.js runtime
+depends: []
+
+params_schema:
+  properties:
+    version:
+      type: string
+      default: "22.17.1"
+
+resources:
+  - kind: runtime
+    id: rt:node
+    name: node
+    version: "${params.version}"
+```
+
+### Schema fields
+
+* `properties` (map) — Parameter definitions keyed by name.
+  Each property has:
+  * `type` — `string`, `enum`, or `object`
+  * `default` (optional) — Default value when the profile omits this param.
+* `required` (list) — Param names that must be provided by the profile.
+  A required param must not have a `default`.
+* `additional_properties` (bool, default: `false`) — When `false`, unknown param keys are rejected.
+
+### Supported types
+
+| Type | Description | Example |
+|---|---|---|
+| `string` | Plain string value | `version: "22.17.1"` |
+| `enum` | One of a fixed set of values | `channel: stable` with `enum: [stable, beta, nightly]` |
+| `object` | Structured source reference | `{ kind: component_relative, path: files/config }` |
+
+### Profile usage
+
+In the profile config, provide params under the component's `params` key:
+
+```yaml
+profile:
+  components:
+    local:
+      node:
+        params:
+          version: "20.0.0"
+```
+
+Params with defaults may be omitted — the validator fills them in automatically.
+
+### Template resolution
+
+Resources use `${params.<key>}` placeholders that are replaced before compilation:
+
+```yaml
+resources:
+  - kind: runtime
+    id: rt:node
+    name: node
+    version: "${params.version}"    # replaced with "20.0.0" from profile
+```
+
+Partial substitution is supported: `"prefix-${params.version}-suffix"`.
+Multiple references in one field are supported: `"${params.a}-${params.b}"`.
+
+### Pipeline integration
+
+The params pipeline runs between fs source materialization and compilation:
+
+1. **Validate** — `params_validator` checks profile params against the schema,
+   rejects unknown keys, validates types, and applies defaults.
+2. **Materialize** — `params_materializer` replaces `${params.*}` references
+   in all resource string fields, producing a `MaterializedComponentSpec`.
+3. **Compile** — The compiler uses the materialized spec (if present) instead of the raw spec.
+
+Components without `params_schema` skip this pipeline entirely.
+
+### Restrictions
+
+* `params_schema` is only supported for `declarative` mode components.
+* Platform override files (`component.linux.yaml`, etc.) must not declare `params_schema`.
+* Params must not change resource count, kind, or id (structural invariance).
+* `${params.*}` references in resource `id` fields are forbidden.
 
 ## Component Naming Guidelines
 
