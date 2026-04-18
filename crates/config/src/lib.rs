@@ -97,7 +97,10 @@ pub enum ConfigError {
 
 /// Raw per-component config as parsed from YAML (grouping syntax inner value).
 /// Mirrors `ProfileComponentConfig` but is local to this crate.
+///
+/// `deny_unknown_fields` rejects legacy `version` field and other typos early.
 #[derive(Deserialize, Default, Clone)]
+#[serde(deny_unknown_fields)]
 struct RawComponentConfig {
     #[serde(default)]
     params: Option<HashMap<String, serde_yaml::Value>>,
@@ -280,27 +283,60 @@ fn expand_bundles(
     }
 
     // Merge: iterate use list in order; last bundle wins per component.
+    // Params are merged at key level (shallow merge): later values overwrite earlier ones.
     let mut merged: GroupedComponents = HashMap::new();
     for name in &bundle_ref.use_list {
         let bundle = &bundles[name];
         for (source_id, names) in &bundle.components {
             let source_entry = merged.entry(source_id.clone()).or_default();
             for (feat_name, cfg) in names {
-                // Later bundle overwrites earlier bundle for same component.
-                source_entry.insert(feat_name.clone(), cfg.clone());
+                merge_raw_component_config(source_entry, feat_name.clone(), cfg.clone());
             }
         }
     }
 
-    // Overlay: profile.components overwrites all bundle-merged components.
+    // Overlay: profile.components overwrites bundle params at key level.
     for (source_id, names) in profile_components {
         let source_entry = merged.entry(source_id).or_default();
         for (feat_name, cfg) in names {
-            source_entry.insert(feat_name, cfg);
+            merge_raw_component_config(source_entry, feat_name, cfg);
         }
     }
 
     Ok(merged)
+}
+
+/// Merge a `RawComponentConfig` into an existing component entry.
+///
+/// Params are merged at key level (shallow merge): if both the existing entry and the
+/// new entry have params, the new entry's keys overwrite the existing ones while
+/// preserving keys only present in the existing entry.
+fn merge_raw_component_config(
+    target: &mut HashMap<String, RawComponentConfig>,
+    feat_name: String,
+    incoming: RawComponentConfig,
+) {
+    match target.get_mut(&feat_name) {
+        Some(existing) => {
+            match (&mut existing.params, incoming.params) {
+                // Both have params: merge keys (incoming wins per key).
+                (Some(base), Some(overlay)) => {
+                    for (k, v) in overlay {
+                        base.insert(k, v);
+                    }
+                }
+                // Only incoming has params: replace.
+                (None, Some(overlay)) => {
+                    existing.params = Some(overlay);
+                }
+                // Only existing has params, or neither: keep existing.
+                (_, None) => {}
+            }
+        }
+        None => {
+            target.insert(feat_name, incoming);
+        }
+    }
 }
 
 // ─── Profile ────────────────────────────────────────────────────────────────
@@ -1165,6 +1201,183 @@ profile:
         let (profile, _) = load_config(&p).unwrap();
         assert!(profile.components.contains_key("core/git"));
         assert_eq!(profile.components.len(), 1);
+    }
+
+    #[test]
+    fn bundle_params_only_no_profile_params() {
+        // bundle provides params; profile does not specify params → bundle params pass through.
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "\
+bundle:
+  use:
+    - base
+
+bundles:
+  base:
+    components:
+      core:
+        git:
+          params:
+            version: \"2.40\"
+
+profile:
+  components:
+    core:
+      git: {}
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", yaml);
+        let (profile, _) = load_config(&p).unwrap();
+        let cfg = profile.components.get("core/git").unwrap();
+        let params = cfg
+            .params
+            .as_ref()
+            .expect("bundle params must pass through");
+        assert_eq!(
+            params["version"],
+            model::params::ParamValue::String("2.40".to_string()),
+        );
+    }
+
+    #[test]
+    fn bundle_params_shallow_merge_preserves_unspecified_keys() {
+        // bundle provides {a: "1", b: "2"}; profile provides {b: "override"}
+        // result: {a: "1", b: "override"}
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "\
+bundle:
+  use:
+    - base
+
+bundles:
+  base:
+    components:
+      core:
+        git:
+          params:
+            a: \"1\"
+            b: \"2\"
+
+profile:
+  components:
+    core:
+      git:
+        params:
+          b: \"override\"
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", yaml);
+        let (profile, _) = load_config(&p).unwrap();
+        let cfg = profile.components.get("core/git").unwrap();
+        let params = cfg.params.as_ref().unwrap();
+        assert_eq!(
+            params["a"],
+            model::params::ParamValue::String("1".to_string()),
+            "key only in bundle must be preserved"
+        );
+        assert_eq!(
+            params["b"],
+            model::params::ParamValue::String("override".to_string()),
+            "profile key must override bundle"
+        );
+    }
+
+    #[test]
+    fn bundle_inter_bundle_params_shallow_merge() {
+        // bundle base: {a: "1", b: "2"}, bundle lang: {b: "3", c: "4"}
+        // use: [base, lang] → {a: "1", b: "3", c: "4"}
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "\
+bundle:
+  use:
+    - base
+    - lang
+
+bundles:
+  base:
+    components:
+      core:
+        git:
+          params:
+            a: \"1\"
+            b: \"2\"
+  lang:
+    components:
+      core:
+        git:
+          params:
+            b: \"3\"
+            c: \"4\"
+
+profile:
+  components: {}
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", yaml);
+        let (profile, _) = load_config(&p).unwrap();
+        let cfg = profile.components.get("core/git").unwrap();
+        let params = cfg.params.as_ref().unwrap();
+        assert_eq!(
+            params["a"],
+            model::params::ParamValue::String("1".to_string()),
+        );
+        assert_eq!(
+            params["b"],
+            model::params::ParamValue::String("3".to_string()),
+            "later bundle must win"
+        );
+        assert_eq!(
+            params["c"],
+            model::params::ParamValue::String("4".to_string()),
+        );
+    }
+
+    #[test]
+    fn empty_params_does_not_clear_bundle_params() {
+        // profile specifies empty params {} → should NOT erase bundle params.
+        // Empty params map deserializes as Some(empty HashMap) → convert_raw_params returns None.
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "\
+bundle:
+  use:
+    - base
+
+bundles:
+  base:
+    components:
+      core:
+        git:
+          params:
+            version: \"2.40\"
+
+profile:
+  components:
+    core:
+      git:
+        params: {}
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", yaml);
+        let (profile, _) = load_config(&p).unwrap();
+        let cfg = profile.components.get("core/git").unwrap();
+        let params = cfg
+            .params
+            .as_ref()
+            .expect("bundle params must survive empty overlay");
+        assert_eq!(
+            params["version"],
+            model::params::ParamValue::String("2.40".to_string()),
+        );
+    }
+
+    #[test]
+    fn legacy_version_field_rejected() {
+        // The old `version` field must be rejected now that `params` is the only accepted key.
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "profile:\n  components:\n    core:\n      git:\n        version: \"2.40\"\n";
+        let p = write_yaml_file(dir.path(), "config.yaml", yaml);
+        let err = load_config(&p).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("version"),
+            "error must mention the unknown field 'version': {msg}"
+        );
     }
 
     // ── Additional Sources tests ───────────────────────────────────────────
