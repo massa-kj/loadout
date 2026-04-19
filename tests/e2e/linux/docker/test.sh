@@ -60,17 +60,20 @@ Shell commands
   shell             Interactive shell in the test image
 
 Scenario commands (use the test image)
-  minimal           Run minimal scenario
-  idempotent        Run idempotent scenario
-  lifecycle         Run lifecycle scenario
-  uninstall         Run uninstall scenario
-  version-install   Run version install scenario
-  version-upgrade   Run version upgrade scenario
-  version-mixed     Run version mixed scenario
-  managed-script    Run managed-script scenario
-  params-default    Run params default scenario
-  params-invalid    Run params validation error scenario
-  all               Run all scenarios
+  minimal                  Run minimal scenario
+  idempotent               Run idempotent scenario
+  lifecycle                Run lifecycle scenario
+  uninstall                Run uninstall scenario
+  version-install          Run version install scenario
+  version-upgrade          Run version upgrade scenario
+  version-mixed            Run version mixed scenario
+  managed-script           Run managed-script scenario
+  params-default           Run params default scenario
+  params-validation_error  Run params validation error scenario
+  import_single            Run import single scenario
+  import_merge_order       Run import merge order scenario
+  import_cycle             Run import cycle detection scenario
+  all                      Run all scenarios
 
 Maintenance
   clean             Remove all test images
@@ -205,7 +208,10 @@ case "$COMMAND" in
     version-mixed)   build_test_image && run_scenario "version-mixed" ;;
     managed-script)  build_test_image && run_scenario "managed-script" ;;
     params-default)  build_test_image && run_scenario "params-default" ;;
-    params-invalid)  build_test_image && run_scenario "params-validation-err" ;;
+    params-validation-error)  build_test_image && run_scenario "params-validation-error" ;;
+    import_single)   build_test_image && run_scenario "import-single" ;;
+    import_merge_order) build_test_image && run_scenario "import-merge-order" ;;
+    import_cycle)     build_test_image && run_scenario "import-cycle" ;;
 
     all)
         build_test_image

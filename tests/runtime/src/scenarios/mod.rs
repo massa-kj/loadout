@@ -4,6 +4,9 @@
 //! Add new scenarios here and register them in [`crate::main`].
 
 pub mod idempotent;
+pub mod import_cycle;
+pub mod import_merge_order;
+pub mod import_single;
 pub mod lifecycle;
 pub mod managed_script;
 pub mod minimal;

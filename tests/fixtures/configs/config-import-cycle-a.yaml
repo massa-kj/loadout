@@ -1,0 +1,19 @@
+# Cycle detection fixture — part A.
+# Imports config-import-cycle-b.yaml, which in turn imports this file → cycle.
+# Used by: import_cycle scenario (expected to fail with a non-zero exit).
+
+imports:
+  - config-import-cycle-b.yaml
+
+profile:
+  components:
+    local:
+      dummy-pkg: {}
+
+strategy:
+  package:
+    default_backend: local/dummy-pkg
+  runtime:
+    default_backend: local/dummy-rt
+  fs:
+    backup: false

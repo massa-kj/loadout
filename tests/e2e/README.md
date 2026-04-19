@@ -70,15 +70,18 @@ See [windows/README.md](windows/README.md) for full documentation.
 
 Both environments cover the same set of scenarios:
 
-| Scenario          | What it verifies                                              |
-|-------------------|---------------------------------------------------------------|
-| `minimal`         | State created, version correct, no duplicates                 |
-| `idempotent`      | Second apply produces identical state                         |
-| `lifecycle`       | Full cycle: base → full → reapply → shrink → empty            |
-| `uninstall`       | Tracked files removed; untracked files preserved              |
-| `version-install` | Version recorded in state after install                       |
-| `version-upgrade` | Version mismatch triggers reinstall; state updated            |
-| `version-mixed`   | Versioned and unversioned components coexist correctly          |
+| Scenario            | What it verifies                                              |
+|---------------------|---------------------------------------------------------------|
+| `minimal`           | State created, version correct, no duplicates                 |
+| `idempotent`        | Second apply produces identical state                         |
+| `lifecycle`         | Full cycle: base → full → reapply → shrink → empty            |
+| `uninstall`         | Tracked files removed; untracked files preserved              |
+| `version-install`   | Version recorded in state after install                       |
+| `version-upgrade`   | Version mismatch triggers reinstall; state updated            |
+| `version-mixed`     | Versioned and unversioned components coexist correctly        |
+| `import-single`     | Bundle from imported file is applied correctly                |
+| `import-merge-order`| Later import overrides earlier at bundle-name level           |
+| `import-cycle`      | Circular import reference is rejected; state not created      |
 
 ## Design Philosophy
 

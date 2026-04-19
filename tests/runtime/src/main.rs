@@ -20,6 +20,9 @@
 //!   managed-script         managed_script create/idempotent/destroy with tool resource
 //!   params-default         Schema default applied when profile omits params
 //!   params-validation-err  Unknown param key causes abort
+//!   import-single          Bundle from imported file is applied correctly
+//!   import-merge-order     Later import overrides earlier at bundle-name level
+//!   import-cycle           Circular import reference is rejected cleanly
 //!   all                    Run all scenarios (default)
 //! ```
 //!
@@ -76,11 +79,15 @@ fn dispatch(scenario: &str, ctx: &Context) -> Result<(), String> {
         "managed-script" => scenarios::managed_script::run(ctx),
         "params-default" => scenarios::params_default::run(ctx),
         "params-validation-err" => scenarios::params_validation_error::run(ctx),
+        "import-single" => scenarios::import_single::run(ctx),
+        "import-merge-order" => scenarios::import_merge_order::run(ctx),
+        "import-cycle" => scenarios::import_cycle::run(ctx),
         other => Err(format!(
             "unknown scenario '{other}'. Valid: \
              minimal, idempotent, uninstall, lifecycle, \
              version-install, version-upgrade, version-mixed, \
-             managed-script, params-default, params-validation-err, all"
+             managed-script, params-default, params-validation-err, \
+             import-single, import-merge-order, import-cycle, all"
         )),
     }
 }
@@ -102,6 +109,9 @@ fn run_all(ctx: &Context) -> Result<(), String> {
             "params-validation-err",
             scenarios::params_validation_error::run,
         ),
+        ("import-single", scenarios::import_single::run),
+        ("import-merge-order", scenarios::import_merge_order::run),
+        ("import-cycle", scenarios::import_cycle::run),
     ];
 
     let mut failed: Vec<(&str, String)> = Vec::new();
