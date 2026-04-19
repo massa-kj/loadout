@@ -70,7 +70,7 @@ Remaining open areas:
 * Migration of existing `mode: script` core components to `mode: declarative`
 * Runtime version constraints (range expressions, not just exact pins)
 
-### External git repository source
+### ~~External git repository source~~
 
 Allowing component/backend packs to be loaded from external git repositories.
 
@@ -79,7 +79,7 @@ Allowing component/backend packs to be loaded from external git repositories.
 * **Status** — Deferred. `sources.yaml` schema and `source_registry` are in place; execution path not yet wired.
 * **Prerequisite** — Security design for executing component scripts from external repos.
 
-### Bundle concept
+### ~~Bundle concept~~
 
 A "bundle" is a named set of profiles/components that can be expanded together.
 

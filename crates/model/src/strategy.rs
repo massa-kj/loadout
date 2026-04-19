@@ -71,21 +71,16 @@ pub struct FsStrategy {
 }
 
 /// Policy controlling which `copy` sources the materializer fingerprints.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum FingerprintPolicy {
     /// Fingerprint only `component_relative` sources.
     ManagedOnly,
     /// Fingerprint all source kinds when `op = copy` (default).
+    #[default]
     AllCopy,
     /// Disable fingerprinting entirely.
     None,
-}
-
-impl Default for FingerprintPolicy {
-    fn default() -> Self {
-        Self::AllCopy
-    }
 }
 
 #[cfg(test)]
