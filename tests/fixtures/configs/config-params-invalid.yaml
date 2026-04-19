@@ -1,0 +1,19 @@
+# Config with an unknown param key for dummy-rt.
+# Verifies: params validation rejects unknown keys when additionalProperties: false.
+# Used by: params_validation_error scenario.
+
+profile:
+  components:
+    local:
+      dummy-rt:
+        params:
+          version: "1.0"
+          build_from_source: "true"   # unknown key; must cause validation error
+
+strategy:
+  package:
+    default_backend: local/dummy-pkg
+  runtime:
+    default_backend: local/dummy-rt
+  fs:
+    backup: false

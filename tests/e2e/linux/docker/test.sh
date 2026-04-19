@@ -68,6 +68,8 @@ Scenario commands (use the test image)
   version-upgrade   Run version upgrade scenario
   version-mixed     Run version mixed scenario
   managed-script    Run managed-script scenario
+  params-default    Run params default scenario
+  params-invalid    Run params validation error scenario
   all               Run all scenarios
 
 Maintenance
@@ -202,6 +204,8 @@ case "$COMMAND" in
     version-upgrade) build_test_image && run_scenario "version-upgrade" ;;
     version-mixed)   build_test_image && run_scenario "version-mixed" ;;
     managed-script)  build_test_image && run_scenario "managed-script" ;;
+    params-default)  build_test_image && run_scenario "params-default" ;;
+    params-invalid)  build_test_image && run_scenario "params-validation-err" ;;
 
     all)
         build_test_image

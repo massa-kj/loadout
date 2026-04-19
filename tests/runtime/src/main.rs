@@ -10,15 +10,17 @@
 //! loadout-e2e [scenario]
 //!
 //! Scenarios:
-//!   minimal          State created, version correct, no duplicates
-//!   idempotent       Second apply produces identical state
-//!   uninstall        Tracked files removed; untracked files preserved
-//!   lifecycle        Full multi-phase cycle (base → full → shrink → empty)
-//!   version-install  Version recorded in state after install
-//!   version-upgrade  Version mismatch triggers reinstall; state updated
-//!   version-mixed    Versioned and unversioned components coexist correctly
-//!   managed-script   managed_script create/idempotent/destroy with tool resource
-//!   all              Run all scenarios (default)
+//!   minimal                State created, version correct, no duplicates
+//!   idempotent             Second apply produces identical state
+//!   uninstall              Tracked files removed; untracked files preserved
+//!   lifecycle              Full multi-phase cycle (base → full → shrink → empty)
+//!   version-install        Version recorded in state after install
+//!   version-upgrade        Version mismatch triggers reinstall; state updated
+//!   version-mixed          Versioned and unversioned components coexist correctly
+//!   managed-script         managed_script create/idempotent/destroy with tool resource
+//!   params-default         Schema default applied when profile omits params
+//!   params-validation-err  Unknown param key causes abort
+//!   all                    Run all scenarios (default)
 //! ```
 //!
 //! # Environment variables
@@ -72,11 +74,13 @@ fn dispatch(scenario: &str, ctx: &Context) -> Result<(), String> {
         "version-upgrade" => scenarios::version_upgrade::run(ctx),
         "version-mixed" => scenarios::version_mixed::run(ctx),
         "managed-script" => scenarios::managed_script::run(ctx),
+        "params-default" => scenarios::params_default::run(ctx),
+        "params-validation-err" => scenarios::params_validation_error::run(ctx),
         other => Err(format!(
             "unknown scenario '{other}'. Valid: \
              minimal, idempotent, uninstall, lifecycle, \
              version-install, version-upgrade, version-mixed, \
-             managed-script, all"
+             managed-script, params-default, params-validation-err, all"
         )),
     }
 }
@@ -93,6 +97,11 @@ fn run_all(ctx: &Context) -> Result<(), String> {
         ("version-upgrade", scenarios::version_upgrade::run),
         ("version-mixed", scenarios::version_mixed::run),
         ("managed-script", scenarios::managed_script::run),
+        ("params-default", scenarios::params_default::run),
+        (
+            "params-validation-err",
+            scenarios::params_validation_error::run,
+        ),
     ];
 
     let mut failed: Vec<(&str, String)> = Vec::new();

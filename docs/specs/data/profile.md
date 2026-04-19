@@ -122,8 +122,8 @@ The planner uses the profile as the "desired state":
 
 * Component in profile but not in state → classified as `create`
 * Component in state but not in profile → classified as `destroy`
-* Component in both with matching version → classified as `noop` or `strengthen`
-* Component in both with version mismatch → classified as `replace`
+* Component in both with matching resources → classified as `noop` or `strengthen`
+* Component in both with resource mismatch (e.g. params change) → classified as `replace`
 
 See `specs/algorithms/planner.md` for the full classification rules.
 
@@ -147,7 +147,7 @@ local/git
 local/bash
 ```
 
-Components with version, multiple sources:
+Components with params, multiple sources:
 
 ```yaml
 profile:
@@ -156,9 +156,8 @@ profile:
       git: {}
     local:
       node:
-        version: "22.17.1"
-      python:
-        version: "3.12"
+        params:
+          version: "22.17.1"
       mycomponent: {}
 
 strategy:

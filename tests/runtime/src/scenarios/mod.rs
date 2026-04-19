@@ -7,6 +7,8 @@ pub mod idempotent;
 pub mod lifecycle;
 pub mod managed_script;
 pub mod minimal;
+pub mod params_default;
+pub mod params_validation_error;
 pub mod uninstall;
 pub mod version_install;
 pub mod version_mixed;

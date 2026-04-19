@@ -251,3 +251,158 @@ pub(crate) fn profile_to_desired_ids(
     ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
     ids
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use model::{
+        component_index::{
+            ComponentIndex, ComponentMeta, ComponentMode, ComponentSpec, DepSpec, SpecResource,
+            SpecResourceKind,
+        },
+        params::{ParamProperty, ParamType, ParamValue, ParamsSchema},
+        profile::{Profile, ProfileComponentConfig},
+        CanonicalComponentId,
+    };
+    use std::collections::HashMap;
+
+    // --- Helpers ---
+
+    fn make_rt_meta(version_template: &str, schema: Option<ParamsSchema>) -> ComponentMeta {
+        ComponentMeta {
+            spec_version: 1,
+            mode: ComponentMode::Declarative,
+            description: None,
+            source_dir: "/tmp".to_string(),
+            dep: DepSpec::default(),
+            params_schema: schema,
+            spec: Some(ComponentSpec {
+                resources: vec![SpecResource {
+                    id: "rt:test".to_string(),
+                    kind: SpecResourceKind::Runtime {
+                        name: "test".to_string(),
+                        version: version_template.to_string(),
+                    },
+                }],
+            }),
+            scripts: None,
+        }
+    }
+
+    fn make_index(id: &str, meta: ComponentMeta) -> ComponentIndex {
+        let mut components = HashMap::new();
+        components.insert(id.to_string(), meta);
+        ComponentIndex {
+            schema_version: 1,
+            components,
+        }
+    }
+
+    fn make_profile(id: &str, params: Option<HashMap<String, ParamValue>>) -> Profile {
+        let mut components = HashMap::new();
+        components.insert(id.to_string(), ProfileComponentConfig { params });
+        Profile { components }
+    }
+
+    fn make_order(id: &str) -> model::ResolvedComponentOrder {
+        vec![CanonicalComponentId::new(id).unwrap()]
+    }
+
+    fn make_schema_with_default(default_ver: &str) -> ParamsSchema {
+        let mut props = HashMap::new();
+        props.insert(
+            "version".to_string(),
+            ParamProperty {
+                param_type: ParamType::String,
+                default: Some(ParamValue::String(default_ver.to_string())),
+            },
+        );
+        ParamsSchema {
+            properties: props,
+            required: vec![],
+            additional_properties: false,
+        }
+    }
+
+    // --- Tests ---
+
+    /// Profile params override the template reference in the spec.
+    #[test]
+    fn profile_params_are_materialized_into_spec() {
+        let schema = make_schema_with_default("1.0");
+        let meta = make_rt_meta("${params.version}", Some(schema));
+        let index = make_index("local/test-comp", meta);
+
+        let mut params_map = HashMap::new();
+        params_map.insert("version".to_string(), ParamValue::String("2.0".to_string()));
+        let profile = make_profile("local/test-comp", Some(params_map));
+        let order = make_order("local/test-comp");
+
+        let result = validate_and_materialize_params(&profile, &index, &order).unwrap();
+
+        let mcs = result
+            .get("local/test-comp")
+            .expect("materialized spec must be present");
+        match &mcs.resources[0].kind {
+            SpecResourceKind::Runtime { version, .. } => {
+                assert_eq!(version, "2.0", "profile param must override template");
+            }
+            _ => panic!("expected Runtime resource"),
+        }
+    }
+
+    /// Default value is applied when the profile omits params entirely.
+    #[test]
+    fn default_param_used_when_profile_omits_params() {
+        let schema = make_schema_with_default("1.0");
+        let meta = make_rt_meta("${params.version}", Some(schema));
+        let index = make_index("local/test-comp", meta);
+        let profile = make_profile("local/test-comp", None);
+        let order = make_order("local/test-comp");
+
+        let result = validate_and_materialize_params(&profile, &index, &order).unwrap();
+
+        let mcs = result
+            .get("local/test-comp")
+            .expect("materialized spec must be present when default is available");
+        match &mcs.resources[0].kind {
+            SpecResourceKind::Runtime { version, .. } => {
+                assert_eq!(version, "1.0", "schema default must be applied");
+            }
+            _ => panic!("expected Runtime resource"),
+        }
+    }
+
+    /// Providing params to a component that has no schema is an error.
+    #[test]
+    fn params_without_schema_returns_validation_error() {
+        let meta = make_rt_meta("1.0", None);
+        let index = make_index("local/test-comp", meta);
+
+        let mut params_map = HashMap::new();
+        params_map.insert("version".to_string(), ParamValue::String("2.0".to_string()));
+        let profile = make_profile("local/test-comp", Some(params_map));
+        let order = make_order("local/test-comp");
+
+        let err = validate_and_materialize_params(&profile, &index, &order).unwrap_err();
+        assert!(
+            matches!(err, AppError::ParamsValidation(_)),
+            "expected ParamsValidation error, got {err:?}"
+        );
+    }
+
+    /// Component without schema and without profile params produces no materialized spec.
+    #[test]
+    fn component_without_schema_and_without_params_is_skipped() {
+        let meta = make_rt_meta("1.0", None);
+        let index = make_index("local/test-comp", meta);
+        let profile = make_profile("local/test-comp", None);
+        let order = make_order("local/test-comp");
+
+        let result = validate_and_materialize_params(&profile, &index, &order).unwrap();
+        assert!(
+            result.is_empty(),
+            "no materialized specs expected for component without schema and without params"
+        );
+    }
+}
