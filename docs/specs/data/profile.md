@@ -14,6 +14,11 @@ A config file (`config.yaml`) contains the following top-level sections:
 
 ```yaml
 # configs/linux.yaml
+imports:           # optional — list of config files to merge before this file
+  - path: path/to/file.yaml          # kind: relative (default) — relative to this file
+  - path: dotfiles/loadout/base.yaml
+    kind: home                       # relative to the user's home directory
+
 profile:
   components:
     <source_id>:
@@ -114,6 +119,59 @@ Merge order (lowest → highest priority):
 `bundle.use` values are bundle names (plain strings).
 Referencing an undefined bundle name is an error.
 
+## Import Expansion
+
+The `imports:` section allows a config file to be split across multiple files.
+Imports are resolved and merged **before** bundle expansion.
+
+### Import path kinds
+
+| `kind` | Base directory | Typical use |
+|--------|---------------|-------------|
+| `relative` (default) | Directory containing the importing file | Splitting a config in-place |
+| `home` | User's home directory | Referencing shared dotfiles |
+
+Absolute paths are forbidden. Implicit `~` or `$VAR` expansion is never performed.
+
+### Merge order
+
+Priority (lowest → highest):
+```
+imports[0] < imports[1] < … < imports[N] < the current file
+```
+
+Merge rules per section:
+
+| Section | Rule |
+|---------|------|
+| `profile.components` | source_id‑level shallow merge; component-level replace |
+| `strategy` | Field-level replace (`package`, `runtime`, `fs` independently) |
+| `bundle.use` | Replace (array; no concatenation — later value wins entirely) |
+| `bundles` | Bundle-name-level replace |
+| `imports` | Not merged; each file’s imports are expanded independently |
+
+### Constraints
+
+- Cycle detection is required and enforced (A → B → A is rejected).
+- Diamond imports (A → B, A → C, B → D, C → D) are allowed.
+- Maximum recursion depth: 8 levels.
+- Import paths must be relative (no absolute paths).
+- Local filesystem only; external retrieval is the responsibility of the source registry.
+
+### Schema forms
+
+```yaml
+# String shorthand — implicit kind: relative
+imports:
+  - bundles/base.yaml
+
+# Explicit object form
+imports:
+  - path: bundles/base.yaml          # kind: relative (default)
+  - path: dotfiles/loadout/base.yaml
+    kind: home                        # ~/dotfiles/loadout/base.yaml
+```
+
 ## Interaction with Planner
 
 The profile is one of three inputs to the planner (alongside state and strategy).
@@ -165,19 +223,21 @@ strategy:
     default_backend: local/mise
 ```
 
-Config using bundles:
+Config using bundles and imports:
 
 ```yaml
+# configs/linux.yaml — split via imports
+imports:
+  - bundles/base.yaml                 # defines 'base' bundle
+  - path: dotfiles/loadout/work.yaml  # only on work machines; kind: relative
+    # kind: home would resolve against ~/
+
 bundle:
   use:
     - base
     - work          # last entry wins on conflict
 
-bundles:
-  base:
-    components:
-      core:
-        git: {}
+bundles:             # local bundle definitions (can also live in imported files)
   work:
     components:
       dev:

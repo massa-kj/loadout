@@ -20,6 +20,23 @@
 //!         version: "3.12"
 //! ```
 //!
+//! ## Import expansion
+//!
+//! Config files may declare `imports:` to merge other config files before processing.
+//! Imports are resolved recursively in order; the importing file always wins.
+//!
+//! ```yaml
+//! imports:
+//!   - bundles/base.yaml          # kind: relative (default) — relative to this file
+//!   - path: dotfiles/base.yaml
+//!     kind: home                 # relative to the user's home directory
+//! ```
+//!
+//! Absolute paths are forbidden. Cycle detection (via a DFS stack of canonical paths)
+//! and a depth limit of [`IMPORT_DEPTH_LIMIT`] prevent runaway recursion.
+//!
+//! ## Bundle expansion
+//!
 //! Bundles allow reusable component sets:
 //!
 //! ```yaml
@@ -44,6 +61,16 @@
 //!       nvim: {}      # profile.components overrides all bundles
 //! ```
 //!
+//! ## Pipeline
+//!
+//! ```text
+//! YAML deserialize
+//!   → import expansion  (cycle-free, depth-limited recursive merge)
+//!   → bundle expansion  (bundle.use → merge bundles:)
+//!   → grouped-component normalization  (source_id/name canonical IDs)
+//!   → canonicalization
+//! ```
+//!
 //! After expansion and normalization, all component keys are canonical `source_id/name`.
 //! Source existence is NOT verified here; that happens at `SourceRegistry` construction.
 //!
@@ -60,7 +87,7 @@ pub use write::{
 };
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -91,6 +118,18 @@ pub enum ConfigError {
 
     #[error("config file already exists: {}", path.display())]
     AlreadyExists { path: std::path::PathBuf },
+
+    #[error("import cycle detected: {chain}")]
+    ImportCycle { chain: String },
+
+    #[error("import depth limit ({limit}) exceeded at: {path}")]
+    ImportDepthExceeded { limit: usize, path: String },
+
+    #[error("imported config not found: {path} (referenced from {from})")]
+    ImportNotFound { path: String, from: String },
+
+    #[error("absolute import paths are not allowed: {path}")]
+    ImportAbsolutePath { path: String },
 }
 
 // ─── Raw profile types (config-crate-local) ─────────────────────────────────
@@ -138,6 +177,173 @@ struct RawBundle {
 
 /// `bundles:` section in config.yaml — named bundle definitions.
 type RawBundlesMap = HashMap<String, RawBundle>;
+
+// ─── Import types ─────────────────────────────────────────────────────────────
+
+/// Maximum import recursion depth.
+///
+/// Prevents runaway recursion even when cycle detection has edge-case gaps
+/// (e.g., unusual symlink layouts). Depth 0 = root config, depth 1 = direct imports.
+const IMPORT_DEPTH_LIMIT: usize = 8;
+
+/// The base directory kind for resolving an import path.
+///
+/// `Relative` (default): relative to the directory containing the importing file.
+/// `Home`: relative to the user's home directory.
+///
+/// Implicit expansion (`~`, environment variables) is never performed regardless of kind.
+#[derive(Deserialize, Default, Clone)]
+#[serde(rename_all = "snake_case")]
+enum ImportKind {
+    #[default]
+    Relative,
+    Home,
+}
+
+/// A single `imports:` entry in a config file.
+///
+/// Supports two forms:
+///
+/// ```yaml
+/// # String shorthand — kind defaults to `relative`.
+/// imports:
+///   - bundles/base.yaml
+///
+/// # Explicit object form — kind is optional, defaults to `relative`.
+/// imports:
+///   - path: bundles/base.yaml
+///   - path: dotfiles/loadout/shared.yaml
+///     kind: home
+/// ```
+///
+/// Absolute paths are rejected at expansion time.
+#[derive(Deserialize, Clone)]
+#[serde(untagged)]
+enum RawImportEntry {
+    /// `- path/to/file.yaml` shorthand; equivalent to `kind: relative`.
+    Shorthand(String),
+    /// `- path: path/to/file.yaml` (with optional `kind:` field).
+    Explicit {
+        path: String,
+        #[serde(default)]
+        kind: ImportKind,
+    },
+}
+
+impl RawImportEntry {
+    fn path_str(&self) -> &str {
+        match self {
+            RawImportEntry::Shorthand(s) => s,
+            RawImportEntry::Explicit { path, .. } => path,
+        }
+    }
+
+    fn kind(&self) -> &ImportKind {
+        match self {
+            RawImportEntry::Shorthand(_) => &ImportKind::Relative,
+            RawImportEntry::Explicit { kind, .. } => kind,
+        }
+    }
+}
+
+// ─── Unified config top-level struct ─────────────────────────────────────────
+
+/// Top-level structure for a config.yaml file.
+///
+/// `deny_unknown_fields` is intentionally absent so future sections do not break
+/// existing versions (serde default: unknown keys are silently ignored).
+#[derive(Deserialize)]
+struct RawConfig {
+    /// List of config files to import before applying this file's values.
+    #[serde(default)]
+    imports: Vec<RawImportEntry>,
+    profile: Option<RawProfile>,
+    strategy: Option<Strategy>,
+    #[serde(default)]
+    bundle: RawBundleRef,
+    #[serde(default)]
+    bundles: RawBundlesMap,
+}
+
+/// Intermediate accumulator built during import expansion.
+///
+/// Holds merged values from all imported files before assembling the final `RawConfig`.
+/// `profile_components` uses `Option` to preserve the "is profile section present" signal:
+/// `None` means no file provided a `profile:` section; `Some({})` means a profile
+/// section was present but declared zero components.
+#[derive(Default)]
+struct MergedConfig {
+    profile_components: Option<GroupedComponents>,
+    strategy: Option<Strategy>,
+    bundle_use: Vec<String>,
+    bundles: RawBundlesMap,
+}
+
+impl MergedConfig {
+    /// Assemble the accumulator into a `RawConfig` for further processing.
+    fn into_raw_config(self) -> RawConfig {
+        RawConfig {
+            imports: Vec::new(), // already expanded; not used downstream
+            profile: self
+                .profile_components
+                .map(|c| RawProfile { components: c }),
+            strategy: self.strategy,
+            bundle: RawBundleRef {
+                use_list: self.bundle_use,
+            },
+            bundles: self.bundles,
+        }
+    }
+}
+
+/// Merge a `RawConfig` into the accumulator following import merge rules.
+///
+/// Rules applied:
+/// - `profile.components`: source_id-level shallow merge; component-level replace (no field merge).
+/// - `strategy`: field-level replace — each of `package`, `runtime`, `fs` is replaced
+///   independently if the overlay provides a non-`None` value.
+/// - `bundle.use`: replace (array; no list concatenation — later value wins entirely).
+/// - `bundles`: bundle-name-level replace (the entire bundle definition is replaced).
+/// - `imports`: not merged (each file's imports are expanded independently before reaching here).
+fn merge_into_acc(acc: &mut MergedConfig, raw: RawConfig) {
+    // profile.components: source_id shallow merge, component-level replace.
+    if let Some(p) = raw.profile {
+        let acc_components = acc.profile_components.get_or_insert_with(HashMap::new);
+        for (source_id, names) in p.components {
+            let source_entry = acc_components.entry(source_id).or_default();
+            for (name, cfg) in names {
+                source_entry.insert(name, cfg);
+            }
+        }
+    }
+
+    // strategy: field-level merge.
+    if let Some(s) = raw.strategy {
+        let base_s = acc.strategy.get_or_insert_with(Strategy::default);
+        if s.strategy.is_some() {
+            base_s.strategy = s.strategy;
+        }
+        if s.package.is_some() {
+            base_s.package = s.package;
+        }
+        if s.runtime.is_some() {
+            base_s.runtime = s.runtime;
+        }
+        if s.fs.is_some() {
+            base_s.fs = s.fs;
+        }
+    }
+
+    // bundle.use: replace (array; no concatenation).
+    if !raw.bundle.use_list.is_empty() {
+        acc.bundle_use = raw.bundle.use_list;
+    }
+
+    // bundles: bundle-name-level replace.
+    for (name, bundle) in raw.bundles {
+        acc.bundles.insert(name, bundle);
+    }
+}
 
 // ─── Expansion helpers ───────────────────────────────────────────────────────
 
@@ -339,6 +545,99 @@ fn merge_raw_component_config(
     }
 }
 
+// ─── Import expansion ────────────────────────────────────────────────────────
+
+/// Expand `imports:` directives in `config_path` recursively, returning a single
+/// merged `RawConfig` ready for bundle expansion.
+///
+/// The `stack` parameter holds the canonical paths of all config files in the
+/// current DFS call chain. It is used for cycle detection and is not the same as
+/// a simple "visited" set — diamond-shaped imports (A → B, A → C, B → D, C → D)
+/// are allowed and processed correctly.
+///
+/// Merge order: each import in the `imports:` list is processed in order;
+/// later entries override earlier ones. The current file always takes priority
+/// over all its imports.
+fn expand_imports(
+    config_path: &Path,
+    home_dir: &Path,
+    from: &str,
+    depth: usize,
+    stack: &mut Vec<PathBuf>,
+) -> Result<RawConfig, ConfigError> {
+    if depth > IMPORT_DEPTH_LIMIT {
+        return Err(ConfigError::ImportDepthExceeded {
+            limit: IMPORT_DEPTH_LIMIT,
+            path: config_path.display().to_string(),
+        });
+    }
+
+    if !config_path.exists() {
+        return Err(ConfigError::ImportNotFound {
+            path: config_path.display().to_string(),
+            from: from.to_string(),
+        });
+    }
+
+    // Canonicalize for robust cycle detection (resolves symlinks and `..` components).
+    // Fall back to the absolute-looking path if canonicalize fails.
+    let canonical =
+        std::fs::canonicalize(config_path).unwrap_or_else(|_| config_path.to_path_buf());
+
+    if stack.contains(&canonical) {
+        let mut chain: Vec<String> = stack.iter().map(|p| p.display().to_string()).collect();
+        chain.push(canonical.display().to_string());
+        return Err(ConfigError::ImportCycle {
+            chain: chain.join(" \u{2192} "),
+        });
+    }
+
+    // Push onto the DFS stack; pop on return (success or error) for correct diamond handling.
+    stack.push(canonical);
+    let result = expand_imports_inner(config_path, home_dir, depth, stack);
+    stack.pop();
+    result
+}
+
+/// Inner body of `expand_imports`, called after cycle/depth guards have passed.
+fn expand_imports_inner(
+    config_path: &Path,
+    home_dir: &Path,
+    depth: usize,
+    stack: &mut Vec<PathBuf>,
+) -> Result<RawConfig, ConfigError> {
+    let raw: RawConfig = io::load_yaml(config_path)?;
+    let base_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
+    let from = config_path.display().to_string();
+
+    let mut acc = MergedConfig::default();
+
+    for entry in &raw.imports {
+        let path_str = entry.path_str();
+
+        // Absolute paths are forbidden — they break portability.
+        if std::path::Path::new(path_str).is_absolute() {
+            return Err(ConfigError::ImportAbsolutePath {
+                path: path_str.to_string(),
+            });
+        }
+
+        // Resolve against the appropriate base directory.
+        let resolved = match entry.kind() {
+            ImportKind::Relative => normalize_path(&base_dir.join(path_str)),
+            ImportKind::Home => normalize_path(&home_dir.join(path_str)),
+        };
+
+        let imported = expand_imports(&resolved, home_dir, &from, depth + 1, stack)?;
+        merge_into_acc(&mut acc, imported);
+    }
+
+    // Overlay the current file on top of all its imports.
+    merge_into_acc(&mut acc, raw);
+
+    Ok(acc.into_raw_config())
+}
+
 // ─── Profile ────────────────────────────────────────────────────────────────
 
 /// Load and normalize a profile from a standalone profile YAML file.
@@ -442,20 +741,14 @@ fn validate_backend_strategy_field(field: &str, value: Option<&str>) -> Result<(
 /// future_section: ...        # silently ignored
 /// ```
 pub fn load_config(path: &Path) -> Result<(Profile, Strategy), ConfigError> {
-    /// Intermediate struct for deserializing config.yaml.
-    /// Unknown top-level keys are silently ignored (serde default behaviour,
-    /// no `deny_unknown_fields` attribute).
-    #[derive(Deserialize)]
-    struct RawConfig {
-        profile: Option<RawProfile>,
-        strategy: Option<Strategy>,
-        #[serde(default)]
-        bundle: RawBundleRef,
-        #[serde(default)]
-        bundles: RawBundlesMap,
-    }
+    // Resolve home directory once and pass it into the recursive expander.
+    // Using an empty PathBuf as fallback means `kind: home` imports will not
+    // resolve when $HOME is unset — the error manifests as ImportNotFound.
+    let home = home_dir().unwrap_or_default();
+    let mut stack: Vec<PathBuf> = Vec::new();
 
-    let raw: RawConfig = io::load_yaml(path)?;
+    // Expand all `imports:` directives recursively before bundle/profile processing.
+    let raw = expand_imports(path, &home, "<root>", 0, &mut stack)?;
 
     // profile is required.
     let raw_profile = raw.profile.ok_or_else(|| ConfigError::InvalidProfile {
@@ -1494,5 +1787,529 @@ profile:
         let p = dir.path().join("sources.lock.yaml");
         let lock = load_sources_lock(&p).unwrap();
         assert!(lock.sources.is_empty());
+    }
+
+    // ── Import tests ───────────────────────────────────────────────────────
+
+    #[test]
+    fn import_single_file_bundles_available() {
+        // Main config imports a file that defines a bundle; bundle.use references it.
+        let dir = tempfile::tempdir().unwrap();
+
+        let base_yaml = "\
+bundles:
+  base:
+    components:
+      core:
+        git: {}
+";
+        write_yaml_file(dir.path(), "base.yaml", base_yaml);
+
+        let main_yaml = "\
+imports:
+  - base.yaml
+
+bundle:
+  use:
+    - base
+
+profile:
+  components:
+    local:
+      nvim: {}
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", main_yaml);
+        let (profile, _) = load_config(&p).unwrap();
+        assert!(
+            profile.components.contains_key("core/git"),
+            "imported bundle must be applied"
+        );
+        assert!(
+            profile.components.contains_key("local/nvim"),
+            "main profile must be present"
+        );
+    }
+
+    #[test]
+    fn import_multiple_files_last_wins() {
+        // Two imports each provide 'base' bundle; the later one wins.
+        let dir = tempfile::tempdir().unwrap();
+
+        write_yaml_file(
+            dir.path(),
+            "a.yaml",
+            "\
+bundles:
+  base:
+    components:
+      core:
+        git: {}
+",
+        );
+        write_yaml_file(
+            dir.path(),
+            "b.yaml",
+            "\
+bundles:
+  base:
+    components:
+      core:
+        bash: {}
+",
+        );
+        let main_yaml = "\
+imports:
+  - a.yaml
+  - b.yaml
+
+bundle:
+  use:
+    - base
+
+profile:
+  components: {}
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", main_yaml);
+        let (profile, _) = load_config(&p).unwrap();
+        // b.yaml is later → its 'base' bundle wins
+        assert!(
+            profile.components.contains_key("core/bash"),
+            "later import must win"
+        );
+        // a.yaml's bundle was completely replaced at bundle-name level
+        assert!(
+            !profile.components.contains_key("core/git"),
+            "earlier bundle must be replaced"
+        );
+    }
+
+    #[test]
+    fn import_main_overrides_imported_profile() {
+        // Imported file provides profile.components; main file overrides the same component.
+        let dir = tempfile::tempdir().unwrap();
+
+        write_yaml_file(
+            dir.path(),
+            "imported.yaml",
+            "\
+profile:
+  components:
+    core:
+      git:
+        params:
+          version: \"2.40\"
+",
+        );
+        let main_yaml = "\
+imports:
+  - imported.yaml
+
+profile:
+  components:
+    core:
+      git:
+        params:
+          version: \"2.44\"
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", main_yaml);
+        let (profile, _) = load_config(&p).unwrap();
+        let cfg = profile.components.get("core/git").unwrap();
+        let params = cfg.params.as_ref().unwrap();
+        assert_eq!(
+            params["version"],
+            model::params::ParamValue::String("2.44".to_string()),
+            "main file must override imported file"
+        );
+    }
+
+    #[test]
+    fn import_profile_merge_different_sources() {
+        // Imported file provides core/git; main file provides local/nvim.
+        // Both must appear in the final profile.
+        let dir = tempfile::tempdir().unwrap();
+
+        write_yaml_file(
+            dir.path(),
+            "imported.yaml",
+            "\
+profile:
+  components:
+    core:
+      git: {}
+",
+        );
+        let main_yaml = "\
+imports:
+  - imported.yaml
+
+profile:
+  components:
+    local:
+      nvim: {}
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", main_yaml);
+        let (profile, _) = load_config(&p).unwrap();
+        assert!(
+            profile.components.contains_key("core/git"),
+            "imported component must be present"
+        );
+        assert!(
+            profile.components.contains_key("local/nvim"),
+            "main component must be present"
+        );
+        assert_eq!(profile.components.len(), 2);
+    }
+
+    #[test]
+    fn import_recursive_a_b_c() {
+        // main → a.yaml → b.yaml; each layer adds a component.
+        let dir = tempfile::tempdir().unwrap();
+
+        write_yaml_file(
+            dir.path(),
+            "b.yaml",
+            "\
+profile:
+  components:
+    core:
+      bash: {}
+",
+        );
+        write_yaml_file(
+            dir.path(),
+            "a.yaml",
+            "\
+imports:
+  - b.yaml
+
+profile:
+  components:
+    core:
+      git: {}
+",
+        );
+        let main_yaml = "\
+imports:
+  - a.yaml
+
+profile:
+  components:
+    local:
+      nvim: {}
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", main_yaml);
+        let (profile, _) = load_config(&p).unwrap();
+        assert!(
+            profile.components.contains_key("core/bash"),
+            "b.yaml component must be present"
+        );
+        assert!(
+            profile.components.contains_key("core/git"),
+            "a.yaml component must be present"
+        );
+        assert!(
+            profile.components.contains_key("local/nvim"),
+            "main component must be present"
+        );
+    }
+
+    #[test]
+    fn import_diamond_allowed() {
+        // main → a.yaml and b.yaml; both → shared.yaml.  Not a cycle.
+        let dir = tempfile::tempdir().unwrap();
+
+        write_yaml_file(
+            dir.path(),
+            "shared.yaml",
+            "\
+profile:
+  components:
+    core:
+      git: {}
+",
+        );
+        write_yaml_file(
+            dir.path(),
+            "a.yaml",
+            "\
+imports:
+  - shared.yaml
+profile:
+  components:
+    local:
+      tool-a: {}
+",
+        );
+        write_yaml_file(
+            dir.path(),
+            "b.yaml",
+            "\
+imports:
+  - shared.yaml
+profile:
+  components:
+    local:
+      tool-b: {}
+",
+        );
+        let main_yaml = "\
+imports:
+  - a.yaml
+  - b.yaml
+profile:
+  components: {}
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", main_yaml);
+        // Should succeed without cycle error
+        let (profile, _) = load_config(&p).unwrap();
+        assert!(profile.components.contains_key("core/git"));
+        assert!(profile.components.contains_key("local/tool-a"));
+        assert!(profile.components.contains_key("local/tool-b"));
+    }
+
+    #[test]
+    fn import_cycle_detected() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // a.yaml imports b.yaml; b.yaml imports a.yaml → cycle
+        write_yaml_file(
+            dir.path(),
+            "b.yaml",
+            "\
+imports:
+  - a.yaml
+profile:
+  components: {}
+",
+        );
+        write_yaml_file(
+            dir.path(),
+            "a.yaml",
+            "\
+imports:
+  - b.yaml
+profile:
+  components: {}
+",
+        );
+        let main_yaml = "\
+imports:
+  - a.yaml
+profile:
+  components:
+    local:
+      nvim: {}
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", main_yaml);
+        let err = load_config(&p).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::ImportCycle { .. }),
+            "expected ImportCycle error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn import_depth_exceeded() {
+        // Create a chain of files each importing the next, exceeding IMPORT_DEPTH_LIMIT.
+        let dir = tempfile::tempdir().unwrap();
+
+        // Create files depth+2 down to 1, each importing the next.
+        let limit = IMPORT_DEPTH_LIMIT + 2;
+        for i in (1..limit).rev() {
+            let next = format!("file{}.yaml", i + 1);
+            let content = format!("imports:\n  - {next}\nprofile:\n  components: {{}}\n");
+            write_yaml_file(dir.path(), &format!("file{i}.yaml"), &content);
+        }
+        // Leaf file (no imports)
+        write_yaml_file(
+            dir.path(),
+            &format!("file{limit}.yaml"),
+            "profile:\n  components: {}\n",
+        );
+
+        let main_yaml = "imports:\n  - file1.yaml\nprofile:\n  components: {}\n".to_string();
+        let p = write_yaml_file(dir.path(), "config.yaml", &main_yaml);
+        let err = load_config(&p).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::ImportDepthExceeded { .. }),
+            "expected ImportDepthExceeded, got: {err}"
+        );
+    }
+
+    #[test]
+    fn import_not_found_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let main_yaml = "\
+imports:
+  - nonexistent.yaml
+profile:
+  components:
+    local:
+      nvim: {}
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", main_yaml);
+        let err = load_config(&p).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::ImportNotFound { .. }),
+            "expected ImportNotFound, got: {err}"
+        );
+    }
+
+    #[test]
+    fn import_absolute_path_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let main_yaml = "\
+imports:
+  - /etc/loadout/base.yaml
+profile:
+  components:
+    local:
+      nvim: {}
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", main_yaml);
+        let err = load_config(&p).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::ImportAbsolutePath { .. }),
+            "expected ImportAbsolutePath, got: {err}"
+        );
+    }
+
+    #[test]
+    fn import_object_form_accepted() {
+        // Explicit `path:` form (kind: relative by default) works identically to shorthand.
+        let dir = tempfile::tempdir().unwrap();
+
+        write_yaml_file(
+            dir.path(),
+            "base.yaml",
+            "\
+profile:
+  components:
+    core:
+      git: {}
+",
+        );
+        let main_yaml = "\
+imports:
+  - path: base.yaml
+profile:
+  components:
+    local:
+      nvim: {}
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", main_yaml);
+        let (profile, _) = load_config(&p).unwrap();
+        assert!(profile.components.contains_key("core/git"));
+        assert!(profile.components.contains_key("local/nvim"));
+    }
+
+    #[test]
+    fn import_kind_home_resolves_against_injected_home() {
+        // We cannot reliably test against the real $HOME, but we can verify that
+        // kind: home resolves against a known directory by placing the file there.
+        // Since load_config uses home_dir() internally, we test expand_imports directly.
+        let home_dir = tempfile::tempdir().unwrap();
+        let config_dir = tempfile::tempdir().unwrap();
+
+        // File located at <home_dir>/shared.yaml
+        write_yaml_file(
+            home_dir.path(),
+            "shared.yaml",
+            "\
+profile:
+  components:
+    core:
+      git: {}
+",
+        );
+        let main_yaml = "\
+imports:
+  - path: shared.yaml
+    kind: home
+profile:
+  components:
+    local:
+      nvim: {}
+";
+        let config_path = write_yaml_file(config_dir.path(), "config.yaml", main_yaml);
+
+        // Call expand_imports directly to inject a controlled home_dir.
+        let mut stack = Vec::new();
+        let raw = expand_imports(&config_path, home_dir.path(), "<test>", 0, &mut stack).unwrap();
+
+        // Verify profile was merged correctly.
+        let merged_components = raw.profile.unwrap().components;
+        assert!(merged_components
+            .get("core")
+            .and_then(|m| m.get("git"))
+            .is_some());
+        assert!(merged_components
+            .get("local")
+            .and_then(|m| m.get("nvim"))
+            .is_some());
+    }
+
+    #[test]
+    fn import_strategy_field_level_merge() {
+        // Import provides package strategy; main provides runtime strategy.
+        // Both must appear in the merged output.
+        let dir = tempfile::tempdir().unwrap();
+
+        write_yaml_file(
+            dir.path(),
+            "base.yaml",
+            "\
+strategy:
+  package:
+    default_backend: local/brew
+profile:
+  components: {}
+",
+        );
+        let main_yaml = "\
+imports:
+  - base.yaml
+profile:
+  components:
+    local:
+      nvim: {}
+strategy:
+  runtime:
+    default_backend: local/mise
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", main_yaml);
+        let (_, strategy) = load_config(&p).unwrap();
+        assert_eq!(
+            strategy
+                .package
+                .as_ref()
+                .and_then(|s| s.default_backend.as_deref()),
+            Some("local/brew"),
+            "package strategy from import must be preserved"
+        );
+        assert_eq!(
+            strategy
+                .runtime
+                .as_ref()
+                .and_then(|s| s.default_backend.as_deref()),
+            Some("local/mise"),
+            "runtime strategy from main must be present"
+        );
+    }
+
+    #[test]
+    fn import_with_no_imports_field_unchanged() {
+        // A config without `imports:` key must behave exactly as before.
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "\
+profile:
+  components:
+    core:
+      git: {}
+";
+        let p = write_yaml_file(dir.path(), "config.yaml", yaml);
+        let (profile, _) = load_config(&p).unwrap();
+        assert!(profile.components.contains_key("core/git"));
+        assert_eq!(profile.components.len(), 1);
     }
 }

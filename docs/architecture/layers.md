@@ -58,6 +58,7 @@ config file queries, and state inspection.
 Must NOT: perform package management directly, re-classify after planner has decided.
 
 The `load` step includes all of the following before handing off to core:
+- Import expansion (`imports:` → recursive file merge, cycle detection, depth limit)
 - Bundle expansion (`bundle.use` → merge `bundles:` definitions)
 - Namespace grouping normalization (`source_id: { name: {} }` → `source_id/name`)
 - Canonicalization (flat `HashMap<String, ProfileComponentConfig>` keyed by canonical ID)
