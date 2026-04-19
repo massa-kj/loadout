@@ -41,6 +41,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
+          channel: 1.87.0
           targets: ${{ matrix.target }}
 
       - name: Cache cargo registry
