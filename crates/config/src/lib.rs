@@ -616,7 +616,13 @@ fn expand_imports_inner(
         let path_str = entry.path_str();
 
         // Absolute paths are forbidden — they break portability.
-        if std::path::Path::new(path_str).is_absolute() {
+        // Also reject Unix-style root paths (e.g. /etc/...) on Windows, where
+        // is_absolute() returns false for paths without a drive letter but such
+        // paths are still non-portable.
+        let looks_absolute = std::path::Path::new(path_str).is_absolute()
+            || path_str.starts_with('/')
+            || path_str.starts_with('\\');
+        if looks_absolute {
             return Err(ConfigError::ImportAbsolutePath {
                 path: path_str.to_string(),
             });
