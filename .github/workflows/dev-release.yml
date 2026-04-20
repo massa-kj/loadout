@@ -42,10 +42,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
         with:
           channel: 1.95.0
-          targets: ${{ matrix.target }}
+          # targets: ${{ matrix.target }}
+
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Show installed targets
+        run: rustup target list --installed
 
       - name: Cache cargo registry
         uses: actions/cache@v4
