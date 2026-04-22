@@ -537,18 +537,13 @@ fn find_source_references(ctx: &AppContext, source_id: &str) -> Vec<String> {
     found
 }
 
-/// Collect all backend IDs declared in a strategy (default_backend + all override backends).
+/// Collect all backend IDs declared in `strategy.rules[*].use_backend`.
 fn collect_strategy_backends(strategy: &config::Strategy) -> Vec<String> {
-    let mut result = Vec::new();
-    for kind_strategy in [&strategy.package, &strategy.runtime].into_iter().flatten() {
-        if let Some(ref default) = kind_strategy.default_backend {
-            result.push(default.clone());
-        }
-        for ovr in kind_strategy.overrides.values() {
-            result.push(ovr.backend.clone());
-        }
-    }
-    result
+    strategy
+        .rules
+        .iter()
+        .map(|r| r.use_backend.clone())
+        .collect()
 }
 
 /// Returns `true` if the components dimension of the allow-list is effectively a wildcard (`"*"`).

@@ -21,7 +21,7 @@ const CONFIG_TEMPLATE: &str = "\
 # loadout config
 #
 # profile: list of components to enable, grouped by source
-# strategy: backend selection overrides (optional)
+# strategy: backend selection rules (optional)
 profile:
   components:
     # Add components using the grouped syntax:
@@ -34,11 +34,17 @@ profile:
     #   core:
     #     node: {}
 strategy:
-  # Override the default backend per resource kind (optional):
-  # package:
-  #   backend: local/mise
-  # runtime:
-  #   backend: local/mise
+  # Select backends via match rules (optional).
+  # Rules are evaluated in order; the most specific match wins.
+  #
+  # Example:
+  #   rules:
+  #     - match:
+  #         kind: package
+  #       use: local/brew
+  #     - match:
+  #         kind: runtime
+  #       use: local/mise
 ";
 
 // ---------------------------------------------------------------------------
@@ -343,7 +349,7 @@ pub fn rewrite_component_source(
 }
 
 /// Rewrite all occurrences of `old_source/<name>` to `new_source/<name>` in the
-/// `strategy` section of a config file (`default_backend` and `overrides.*.backend`).
+/// `strategy` section of a config file (`strategy.rules[*].use`).
 ///
 /// Returns `true` if any changes were made.
 /// Returns `false` (without error) if the file does not exist or the strategy section is absent.
@@ -450,16 +456,16 @@ fn move_component_in_mapping(
     true
 }
 
-/// Rewrite `default_backend` / `overrides.*.backend` values matching `old_id`
-/// to `new_id` in the `strategy:` section of a YAML document.
+/// Rewrite `strategy.rules[*].use` values matching `old_id` to `new_id`
+/// in the `strategy:` section of a YAML document.
 fn rewrite_strategy_ids(doc: &mut Value, old_id: &str, new_id: &str) -> bool {
-    let strategy_key = Value::String("strategy".into());
     let mut changed = false;
 
     let doc_map = match doc.as_mapping_mut() {
         Some(m) => m,
         None => return false,
     };
+    let strategy_key = Value::String("strategy".into());
     let strategy_val = match doc_map.get_mut(&strategy_key) {
         Some(v) => v,
         None => return false,
@@ -469,34 +475,23 @@ fn rewrite_strategy_ids(doc: &mut Value, old_id: &str, new_id: &str) -> bool {
         None => return false,
     };
 
-    for (_, kind_val) in strategy.iter_mut() {
-        let Some(kind_map) = kind_val.as_mapping_mut() else {
-            continue;
-        };
+    let rules_key = Value::String("rules".into());
+    let rules_val = match strategy.get_mut(&rules_key) {
+        Some(v) => v,
+        None => return false,
+    };
+    let rules = match rules_val.as_sequence_mut() {
+        Some(seq) => seq,
+        None => return false,
+    };
 
-        // Rewrite default_backend.
-        let db_key = Value::String("default_backend".into());
-        if let Some(db) = kind_map.get_mut(&db_key) {
-            if db.as_str() == Some(old_id) {
-                *db = Value::String(new_id.to_string());
-                changed = true;
-            }
-        }
-
-        // Rewrite overrides.*.backend.
-        let overrides_key = Value::String("overrides".into());
-        if let Some(overrides_val) = kind_map.get_mut(&overrides_key) {
-            if let Some(overrides) = overrides_val.as_mapping_mut() {
-                for (_, override_val) in overrides.iter_mut() {
-                    if let Some(override_map) = override_val.as_mapping_mut() {
-                        let backend_key = Value::String("backend".into());
-                        if let Some(backend) = override_map.get_mut(&backend_key) {
-                            if backend.as_str() == Some(old_id) {
-                                *backend = Value::String(new_id.to_string());
-                                changed = true;
-                            }
-                        }
-                    }
+    let use_key = Value::String("use".into());
+    for rule in rules.iter_mut() {
+        if let Some(rule_map) = rule.as_mapping_mut() {
+            if let Some(use_val) = rule_map.get_mut(&use_key) {
+                if use_val.as_str() == Some(old_id) {
+                    *use_val = Value::String(new_id.to_string());
+                    changed = true;
                 }
             }
         }

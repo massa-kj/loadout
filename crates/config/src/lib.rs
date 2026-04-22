@@ -97,7 +97,10 @@ pub use model::{
         AllowList, AllowSpec, DetailedAllow, SourceEntry, SourceLockEntry, SourceRef, SourceType,
         SourcesLock, SourcesSpec, WildcardAll,
     },
-    strategy::{BackendOverride, BackendStrategy, FsStrategy, Strategy},
+    strategy::{
+        FingerprintPolicy, FsStrategy, MatchKind, MatchSelector, Specificity, Strategy,
+        StrategyGroup, StrategyRule,
+    },
 };
 use thiserror::Error;
 
@@ -300,8 +303,10 @@ impl MergedConfig {
 ///
 /// Rules applied:
 /// - `profile.components`: source_id-level shallow merge; component-level replace (no field merge).
-/// - `strategy`: field-level replace — each of `package`, `runtime`, `fs` is replaced
-///   independently if the overlay provides a non-`None` value.
+/// - `strategy.groups`: group-name-level replace (later file wins per group name).
+/// - `strategy.rules`: replace entirely if non-empty (array; later file wins entirely).
+/// - `strategy.fs`: field-level replace — replaced independently if the overlay provides a
+///   non-`None` value.
 /// - `bundle.use`: replace (array; no list concatenation — later value wins entirely).
 /// - `bundles`: bundle-name-level replace (the entire bundle definition is replaced).
 /// - `imports`: not merged (each file's imports are expanded independently before reaching here).
@@ -317,17 +322,19 @@ fn merge_into_acc(acc: &mut MergedConfig, raw: RawConfig) {
         }
     }
 
-    // strategy: field-level merge.
+    // strategy: field-level / collection merge.
     if let Some(s) = raw.strategy {
         let base_s = acc.strategy.get_or_insert_with(Strategy::default);
         if s.strategy.is_some() {
             base_s.strategy = s.strategy;
         }
-        if s.package.is_some() {
-            base_s.package = s.package;
+        // groups: group-name-level replace (later file wins per group name).
+        for (name, group) in s.groups {
+            base_s.groups.insert(name, group);
         }
-        if s.runtime.is_some() {
-            base_s.runtime = s.runtime;
+        // rules: replace entirely if non-empty.
+        if !s.rules.is_empty() {
+            base_s.rules = s.rules;
         }
         if s.fs.is_some() {
             base_s.fs = s.fs;
@@ -671,40 +678,66 @@ pub fn load_strategy(path: &Path) -> Result<Strategy, ConfigError> {
 }
 
 fn validate_strategy(strategy: Strategy) -> Result<Strategy, ConfigError> {
-    if let Some(ref pkg) = strategy.package {
-        validate_backend_strategy_field("package.default_backend", pkg.default_backend.as_deref())?;
-        for (name, ov) in &pkg.overrides {
-            if ov.backend.is_empty() {
+    // Validate group kind keys: only 'package' and 'runtime' are permitted.
+    for (group_name, group) in &strategy.groups {
+        for kind_key in group.0.keys() {
+            if kind_key != "package" && kind_key != "runtime" {
                 return Err(ConfigError::InvalidStrategy {
-                    reason: format!("package.overrides[{name}].backend must not be empty"),
+                    reason: format!(
+                        "groups.{group_name}: invalid kind '{kind_key}'; \
+                         must be 'package' or 'runtime'"
+                    ),
                 });
             }
         }
     }
 
-    if let Some(ref rt) = strategy.runtime {
-        validate_backend_strategy_field("runtime.default_backend", rt.default_backend.as_deref())?;
-        for (name, ov) in &rt.overrides {
-            if ov.backend.is_empty() {
-                return Err(ConfigError::InvalidStrategy {
-                    reason: format!("runtime.overrides[{name}].backend must not be empty"),
-                });
+    // Validate each rule.
+    for (i, rule) in strategy.rules.iter().enumerate() {
+        // use_backend must be a non-empty string.
+        if rule.use_backend.is_empty() {
+            return Err(ConfigError::InvalidStrategy {
+                reason: format!("rules[{i}].use must not be empty"),
+            });
+        }
+
+        // component-only rule is forbidden: kind must accompany component.
+        if rule.selector.component.is_some() && rule.selector.kind.is_none() {
+            return Err(ConfigError::InvalidStrategy {
+                reason: format!(
+                    "rules[{i}]: component-only rule is forbidden because it matches \
+                     multiple resource kinds; add 'kind' alongside 'component'"
+                ),
+            });
+        }
+
+        // group reference must resolve to a defined group.
+        if let Some(ref group_name) = rule.selector.group {
+            let group =
+                strategy
+                    .groups
+                    .get(group_name)
+                    .ok_or_else(|| ConfigError::InvalidStrategy {
+                        reason: format!(
+                            "rules[{i}]: group '{group_name}' is not defined in 'groups'"
+                        ),
+                    })?;
+
+            // kind consistency: if kind=runtime, the group must have runtime entries.
+            if let Some(MatchKind::Runtime) = rule.selector.kind {
+                if group.names_for_kind("runtime").is_none() {
+                    return Err(ConfigError::InvalidStrategy {
+                        reason: format!(
+                            "rules[{i}]: match.kind is 'runtime' but group '{group_name}' \
+                             has no 'runtime' entries"
+                        ),
+                    });
+                }
             }
         }
     }
 
     Ok(strategy)
-}
-
-fn validate_backend_strategy_field(field: &str, value: Option<&str>) -> Result<(), ConfigError> {
-    if let Some(v) = value {
-        if v.is_empty() {
-            return Err(ConfigError::InvalidStrategy {
-                reason: format!("{field} must not be empty string if present"),
-            });
-        }
-    }
-    Ok(())
 }
 
 // ─── Unified config ──────────────────────────────────────────────────────────
@@ -741,8 +774,10 @@ fn validate_backend_strategy_field(field: &str, value: Option<&str>) -> Result<(
 ///       nvim: {}
 ///
 /// strategy:                  # optional
-///   package:
-///     default_backend: local/brew
+///   rules:
+///     - match:
+///         kind: package
+///       use: local/brew
 ///
 /// future_section: ...        # silently ignored
 /// ```
@@ -1152,48 +1187,97 @@ mod tests {
     // ── Strategy tests ─────────────────────────────────────────────────────
 
     #[test]
-    fn strategy_load_minimal() {
-        let dir = tempfile::tempdir().unwrap();
-        let p = write_yaml_file(
-            dir.path(),
-            "strategy.yaml",
-            "package:\n  default_backend: brew\n",
-        );
-        let strategy = load_strategy(&p).unwrap();
-        assert_eq!(
-            strategy.package.unwrap().default_backend.as_deref(),
-            Some("brew")
-        );
-    }
-
-    #[test]
-    fn strategy_empty_default_backend_rejected() {
-        let dir = tempfile::tempdir().unwrap();
-        let p = write_yaml_file(
-            dir.path(),
-            "strategy.yaml",
-            "package:\n  default_backend: \"\"\n",
-        );
-        let err = load_strategy(&p).unwrap_err();
-        assert!(matches!(err, ConfigError::InvalidStrategy { .. }));
-    }
-
-    #[test]
-    fn strategy_empty_override_backend_rejected() {
-        let dir = tempfile::tempdir().unwrap();
-        let yaml = "package:\n  overrides:\n    ripgrep:\n      backend: \"\"\n";
-        let p = write_yaml_file(dir.path(), "strategy.yaml", yaml);
-        let err = load_strategy(&p).unwrap_err();
-        assert!(matches!(err, ConfigError::InvalidStrategy { .. }));
-    }
-
-    #[test]
-    fn strategy_no_defaults_ok() {
+    fn strategy_empty_is_valid() {
         let dir = tempfile::tempdir().unwrap();
         let p = write_yaml_file(dir.path(), "strategy.yaml", "{}\n");
         let strategy = load_strategy(&p).unwrap();
-        assert!(strategy.package.is_none());
-        assert!(strategy.runtime.is_none());
+        assert!(strategy.rules.is_empty());
+        assert!(strategy.groups.is_empty());
+    }
+
+    #[test]
+    fn strategy_simple_rule_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "rules:\n  - match:\n      kind: package\n    use: core/brew\n";
+        let p = write_yaml_file(dir.path(), "strategy.yaml", yaml);
+        let strategy = load_strategy(&p).unwrap();
+        assert_eq!(strategy.rules.len(), 1);
+        assert_eq!(strategy.rules[0].use_backend, "core/brew");
+    }
+
+    #[test]
+    fn strategy_empty_use_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "rules:\n  - match:\n      kind: package\n    use: \"\"\n";
+        let p = write_yaml_file(dir.path(), "strategy.yaml", yaml);
+        let err = load_strategy(&p).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::InvalidStrategy { reason } if reason.contains("rules[0].use"))
+        );
+    }
+
+    #[test]
+    fn strategy_component_without_kind_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "rules:\n  - match:\n      component: core/cli-tools\n    use: core/npm\n";
+        let p = write_yaml_file(dir.path(), "strategy.yaml", yaml);
+        let err = load_strategy(&p).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::InvalidStrategy { reason } if reason.contains("component-only"))
+        );
+    }
+
+    #[test]
+    fn strategy_component_with_kind_is_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml =
+            "rules:\n  - match:\n      component: core/cli-tools\n      kind: package\n    use: core/npm\n";
+        let p = write_yaml_file(dir.path(), "strategy.yaml", yaml);
+        let strategy = load_strategy(&p).unwrap();
+        assert_eq!(strategy.rules.len(), 1);
+    }
+
+    #[test]
+    fn strategy_undefined_group_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml =
+            "rules:\n  - match:\n      kind: package\n      group: npm_global\n    use: core/npm\n";
+        let p = write_yaml_file(dir.path(), "strategy.yaml", yaml);
+        let err = load_strategy(&p).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::InvalidStrategy { reason } if reason.contains("npm_global")),
+        );
+    }
+
+    #[test]
+    fn strategy_group_and_rule_consistent_kind_is_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "\
+groups:\n  npm_global:\n    package:\n      - eslint\nrules:\n  - match:\n      kind: package\n      group: npm_global\n    use: core/npm\n";
+        let p = write_yaml_file(dir.path(), "strategy.yaml", yaml);
+        let strategy = load_strategy(&p).unwrap();
+        assert_eq!(strategy.rules.len(), 1);
+    }
+
+    #[test]
+    fn strategy_runtime_rule_referencing_package_group_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "\
+groups:\n  my_group:\n    package:\n      - eslint\nrules:\n  - match:\n      kind: runtime\n      group: my_group\n    use: core/mise\n";
+        let p = write_yaml_file(dir.path(), "strategy.yaml", yaml);
+        let err = load_strategy(&p).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::InvalidStrategy { reason } if reason.contains("runtime")),
+        );
+    }
+
+    #[test]
+    fn strategy_group_invalid_kind_key_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "groups:\n  my_group:\n    tool:\n      - something\n";
+        let p = write_yaml_file(dir.path(), "strategy.yaml", yaml);
+        let err = load_strategy(&p).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidStrategy { reason } if reason.contains("tool")),);
     }
 
     // ── Sources tests ──────────────────────────────────────────────────────
@@ -1273,8 +1357,10 @@ profile:
       myapp: {}
 
 strategy:
-  package:
-    default_backend: local/brew
+  rules:
+    - match:
+        kind: package
+      use: local/brew
 ";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let (profile, strategy) = load_config(&p).unwrap();
@@ -1286,10 +1372,8 @@ strategy:
             profile.components.contains_key("local/myapp"),
             "local/myapp must be present"
         );
-        assert_eq!(
-            strategy.package.unwrap().default_backend.as_deref(),
-            Some("local/brew")
-        );
+        assert_eq!(strategy.rules.len(), 1);
+        assert_eq!(strategy.rules[0].use_backend, "local/brew");
     }
 
     #[test]
@@ -1299,8 +1383,8 @@ strategy:
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let (profile, strategy) = load_config(&p).unwrap();
         assert!(profile.components.contains_key("core/git"));
-        assert!(strategy.package.is_none());
-        assert!(strategy.runtime.is_none());
+        assert!(strategy.rules.is_empty());
+        assert!(strategy.groups.is_empty());
     }
 
     #[test]
@@ -1331,7 +1415,8 @@ another_unknown: 42
     #[test]
     fn config_missing_profile_section_errors() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = "strategy:\n  package:\n    default_backend: local/brew\n";
+        let yaml =
+            "strategy:\n  rules:\n    - match:\n        kind: package\n      use: local/brew\n";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let err = load_config(&p).unwrap_err();
         assert!(matches!(err, ConfigError::InvalidProfile { .. }));
@@ -1340,14 +1425,17 @@ another_unknown: 42
     #[test]
     fn config_invalid_strategy_propagates_error() {
         let dir = tempfile::tempdir().unwrap();
+        // component-only rule (no kind) must be rejected.
         let yaml = "\
 profile:
   components:
     core:
       git: {}
 strategy:
-  package:
-    default_backend: \"\"
+  rules:
+    - match:
+        component: core/cli-tools
+      use: core/npm
 ";
         let p = write_yaml_file(dir.path(), "config.yaml", yaml);
         let err = load_config(&p).unwrap_err();
@@ -2257,8 +2345,8 @@ profile:
 
     #[test]
     fn import_strategy_field_level_merge() {
-        // Import provides package strategy; main provides runtime strategy.
-        // Both must appear in the merged output.
+        // Import provides a package rule; main provides a runtime rule.
+        // The main file's rules replace entirely (rules array from main wins).
         let dir = tempfile::tempdir().unwrap();
 
         write_yaml_file(
@@ -2266,8 +2354,10 @@ profile:
             "base.yaml",
             "\
 strategy:
-  package:
-    default_backend: local/brew
+  rules:
+    - match:
+        kind: package
+      use: local/brew
 profile:
   components: {}
 ",
@@ -2280,27 +2370,21 @@ profile:
     local:
       nvim: {}
 strategy:
-  runtime:
-    default_backend: local/mise
+  rules:
+    - match:
+        kind: runtime
+      use: local/mise
 ";
         let p = write_yaml_file(dir.path(), "config.yaml", main_yaml);
         let (_, strategy) = load_config(&p).unwrap();
+        // Main's rules replace imported rules entirely.
+        assert_eq!(strategy.rules.len(), 1);
         assert_eq!(
-            strategy
-                .package
-                .as_ref()
-                .and_then(|s| s.default_backend.as_deref()),
-            Some("local/brew"),
-            "package strategy from import must be preserved"
+            strategy.rules[0].selector.kind,
+            Some(MatchKind::Runtime),
+            "runtime rule from main must win"
         );
-        assert_eq!(
-            strategy
-                .runtime
-                .as_ref()
-                .and_then(|s| s.default_backend.as_deref()),
-            Some("local/mise"),
-            "runtime strategy from main must be present"
-        );
+        assert_eq!(strategy.rules[0].use_backend, "local/mise");
     }
 
     #[test]

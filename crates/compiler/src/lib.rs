@@ -20,7 +20,7 @@ use model::desired_resource_graph::{
 use model::fs::ConcreteFsSource;
 use model::id::{CanonicalBackendId, ResolvedComponentOrder};
 use model::params::MaterializedComponentSpec;
-use model::strategy::{BackendStrategy, Strategy};
+use model::strategy::{MatchKind, Strategy};
 
 pub use model::desired_resource_graph::{
     DesiredResource as CompiledResource, DesiredResourceGraph as CompiledGraph,
@@ -39,12 +39,10 @@ pub enum CompilerError {
     #[error("component not found in index: {id}")]
     ComponentNotFound { id: String },
 
-    /// No backend could be resolved for a resource.
-    /// Either `strategy.<kind>.default_backend` is absent and there is no matching override,
-    /// or the strategy section itself is absent.
+    /// No backend rule matched any rule in strategy for this resource.
     #[error(
         "no backend for {kind} resource '{resource_id}' in component '{component_id}': \
-         add a default_backend or an override in strategy"
+         no matching rule found in strategy; add a rule with 'kind: {kind}' to strategy.rules"
     )]
     NoBackend {
         component_id: String,
@@ -186,12 +184,12 @@ fn compile_resource(
 ) -> Result<DesiredResourceKind, CompilerError> {
     match &resource.kind {
         SpecResourceKind::Package { name } => {
-            let backend = resolve_backend(
-                strategy.package.as_ref(),
+            let backend = resolve_backend_from_rules(
+                strategy,
+                &MatchKind::Package,
                 name,
                 component_id,
                 &resource.id,
-                "package",
             )?;
             Ok(DesiredResourceKind::Package {
                 name: name.clone(),
@@ -200,12 +198,12 @@ fn compile_resource(
         }
 
         SpecResourceKind::Runtime { name, version } => {
-            let backend = resolve_backend(
-                strategy.runtime.as_ref(),
+            let backend = resolve_backend_from_rules(
+                strategy,
+                &MatchKind::Runtime,
                 name,
                 component_id,
                 &resource.id,
-                "runtime",
             )?;
             Ok(DesiredResourceKind::Runtime {
                 name: name.clone(),
@@ -239,30 +237,67 @@ fn compile_resource(
     }
 }
 
-/// Resolve a backend ID from a strategy section by checking overrides first, then default.
-fn resolve_backend(
-    strategy_section: Option<&BackendStrategy>,
+/// Resolve a backend ID from strategy rules using fixed-priority specificity comparison.
+///
+/// All rules are evaluated against the resource. The most specific matching rule wins.
+/// Equal specificity is broken by rule index — last matching rule (highest index) wins.
+///
+/// Specificity is determined by `MatchSelector::specificity()`, which returns a
+/// `(has_component, has_kind, has_name, has_group)` tuple compared lexicographically.
+/// This guarantees `component` always outranks `name`, etc., regardless of other axes.
+///
+/// Returns `CompilerError::NoBackend` if no rule matches.
+fn resolve_backend_from_rules(
+    strategy: &Strategy,
+    resource_kind: &MatchKind,
     resource_name: &str,
     component_id: &str,
     resource_id: &str,
-    kind_name: &str,
 ) -> Result<CanonicalBackendId, CompilerError> {
+    let kind_str = resource_kind.as_str();
+
+    // Evaluate all rules; collect matching (index, specificity) pairs.
+    let winner = strategy
+        .rules
+        .iter()
+        .enumerate()
+        .filter_map(|(i, rule)| {
+            // Compute group membership only when the selector references a group.
+            let group_member = match &rule.selector.group {
+                None => false, // matches() treats None group field as always-pass
+                Some(group_name) => strategy
+                    .groups
+                    .get(group_name)
+                    .and_then(|g| g.names_for_kind(kind_str))
+                    .map(|names| names.contains(&resource_name.to_string()))
+                    .unwrap_or(false),
+            };
+
+            if rule
+                .selector
+                .matches(resource_kind, resource_name, component_id, group_member)
+            {
+                Some((i, rule.selector.specificity()))
+            } else {
+                None
+            }
+        })
+        // Max by specificity first; tie-break by index (last wins = higher index).
+        .max_by(|(i_a, spec_a), (i_b, spec_b)| spec_a.cmp(spec_b).then(i_a.cmp(i_b)));
+
     let no_backend = || CompilerError::NoBackend {
         component_id: component_id.to_string(),
         resource_id: resource_id.to_string(),
-        kind: kind_name.to_string(),
+        kind: kind_str.to_string(),
     };
 
-    let bp = strategy_section.ok_or_else(no_backend)?;
-
-    // Per-resource override takes priority over default.
-    if let Some(entry) = bp.overrides.get(resource_name) {
-        return CanonicalBackendId::new(&entry.backend).map_err(|_| no_backend());
+    match winner {
+        Some((i, _)) => {
+            let backend_str = &strategy.rules[i].use_backend;
+            CanonicalBackendId::new(backend_str).map_err(|_| no_backend())
+        }
+        None => Err(no_backend()),
     }
-
-    // Fall back to default_backend.
-    let default = bp.default_backend.as_deref().ok_or_else(no_backend)?;
-    CanonicalBackendId::new(default).map_err(|_| no_backend())
 }
 
 /// Convert SpecFsEntryType (component spec) to FsEntryType (desired resource graph).
@@ -296,7 +331,7 @@ mod tests {
     use model::fs::ConcreteFsSource;
     use model::id::CanonicalComponentId;
     use model::params::MaterializedComponentSpec;
-    use model::strategy::{BackendOverride, BackendStrategy, Strategy};
+    use model::strategy::{MatchKind, MatchSelector, Strategy, StrategyGroup, StrategyRule};
     use std::collections::HashMap;
     use std::path::PathBuf;
 
@@ -402,24 +437,57 @@ mod tests {
         }
     }
 
-    fn backend_strategy_default(default: &str) -> BackendStrategy {
-        BackendStrategy {
-            default_backend: Some(default.to_string()),
-            overrides: HashMap::new(),
+    /// Build a rule that matches all resources of the given kind.
+    fn rule_kind(kind: MatchKind, backend: &str) -> StrategyRule {
+        StrategyRule {
+            selector: MatchSelector {
+                kind: Some(kind),
+                ..Default::default()
+            },
+            use_backend: backend.to_string(),
         }
     }
 
-    fn backend_strategy_with_override(default: &str, name: &str, backend: &str) -> BackendStrategy {
-        let mut overrides = HashMap::new();
-        overrides.insert(
-            name.to_string(),
-            BackendOverride {
-                backend: backend.to_string(),
+    /// Build a rule that matches kind + exact name.
+    fn rule_kind_name(kind: MatchKind, name: &str, backend: &str) -> StrategyRule {
+        StrategyRule {
+            selector: MatchSelector {
+                kind: Some(kind),
+                name: Some(name.to_string()),
+                ..Default::default()
             },
-        );
-        BackendStrategy {
-            default_backend: Some(default.to_string()),
-            overrides,
+            use_backend: backend.to_string(),
+        }
+    }
+
+    /// Build a rule that matches kind + group membership.
+    fn rule_kind_group(kind: MatchKind, group: &str, backend: &str) -> StrategyRule {
+        StrategyRule {
+            selector: MatchSelector {
+                kind: Some(kind),
+                group: Some(group.to_string()),
+                ..Default::default()
+            },
+            use_backend: backend.to_string(),
+        }
+    }
+
+    /// Build a rule that matches component + kind.
+    fn rule_component_kind(component: &str, kind: MatchKind, backend: &str) -> StrategyRule {
+        StrategyRule {
+            selector: MatchSelector {
+                component: Some(component.to_string()),
+                kind: Some(kind),
+                ..Default::default()
+            },
+            use_backend: backend.to_string(),
+        }
+    }
+
+    fn strategy_with_rules(rules: Vec<StrategyRule>) -> Strategy {
+        Strategy {
+            rules,
+            ..Default::default()
         }
     }
 
@@ -437,17 +505,14 @@ mod tests {
         assert!(graph.components["core/bash"].resources.is_empty());
     }
 
-    /// Declarative package resource resolves backend from default_backend.
+    /// Declarative package resource resolves backend from a kind rule.
     #[test]
-    fn package_resolved_from_default_backend() {
+    fn package_resolved_from_kind_rule() {
         let index = make_index(vec![(
             "core/git",
             declarative_meta(vec![package_resource("package:git", "git")]),
         )]);
-        let strategy = Strategy {
-            package: Some(backend_strategy_default("core/brew")),
-            ..Default::default()
-        };
+        let strategy = strategy_with_rules(vec![rule_kind(MatchKind::Package, "core/brew")]);
         let order = vec![make_component_id("core/git")];
 
         let graph = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap();
@@ -465,21 +530,17 @@ mod tests {
         }
     }
 
-    /// Per-resource override takes precedence over default_backend.
+    /// More specific kind+name rule wins over kind-only rule.
     #[test]
-    fn package_override_wins_over_default() {
+    fn name_rule_wins_over_kind_rule() {
         let index = make_index(vec![(
             "core/ripgrep",
             declarative_meta(vec![package_resource("package:ripgrep", "ripgrep")]),
         )]);
-        let strategy = Strategy {
-            package: Some(backend_strategy_with_override(
-                "core/brew",
-                "ripgrep",
-                "core/cargo",
-            )),
-            ..Default::default()
-        };
+        let strategy = strategy_with_rules(vec![
+            rule_kind(MatchKind::Package, "core/brew"),
+            rule_kind_name(MatchKind::Package, "ripgrep", "core/cargo"),
+        ]);
         let order = vec![make_component_id("core/ripgrep")];
 
         let graph = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap();
@@ -493,17 +554,14 @@ mod tests {
         }
     }
 
-    /// Runtime resource resolves backend from default_backend.
+    /// Runtime resource resolves backend from a kind rule.
     #[test]
-    fn runtime_resolved_from_default_backend() {
+    fn runtime_resolved_from_kind_rule() {
         let index = make_index(vec![(
             "core/node",
             declarative_meta(vec![runtime_resource("runtime:node", "node", "20")]),
         )]);
-        let strategy = Strategy {
-            runtime: Some(backend_strategy_default("core/mise")),
-            ..Default::default()
-        };
+        let strategy = strategy_with_rules(vec![rule_kind(MatchKind::Runtime, "core/mise")]);
         let order = vec![make_component_id("core/node")];
 
         let graph = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap();
@@ -521,21 +579,17 @@ mod tests {
         }
     }
 
-    /// Runtime resource resolves backend from a per-runtime override.
+    /// More specific kind+name runtime rule wins over kind-only rule.
     #[test]
-    fn runtime_override_wins_over_default() {
+    fn runtime_name_rule_wins_over_kind_rule() {
         let index = make_index(vec![(
             "core/python",
             declarative_meta(vec![runtime_resource("runtime:python", "python", "3.12")]),
         )]);
-        let strategy = Strategy {
-            runtime: Some(backend_strategy_with_override(
-                "core/mise",
-                "python",
-                "core/uv",
-            )),
-            ..Default::default()
-        };
+        let strategy = strategy_with_rules(vec![
+            rule_kind(MatchKind::Runtime, "core/mise"),
+            rule_kind_name(MatchKind::Runtime, "python", "core/uv"),
+        ]);
         let order = vec![make_component_id("core/python")];
 
         let graph = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap();
@@ -546,6 +600,126 @@ mod tests {
                 assert_eq!(desired_backend.as_str(), "core/uv");
             }
             _ => panic!("expected Runtime"),
+        }
+    }
+
+    /// component+kind rule wins over kind+name rule (component dominates name).
+    #[test]
+    fn component_kind_rule_wins_over_kind_name_rule() {
+        let index = make_index(vec![(
+            "core/cli-tools",
+            declarative_meta(vec![package_resource("package:eslint", "eslint")]),
+        )]);
+        // kind+name specificity = (0,1,1,0); component+kind specificity = (1,1,0,0)
+        // component dominates name → component+kind wins.
+        let strategy = strategy_with_rules(vec![
+            rule_kind_name(MatchKind::Package, "eslint", "core/npm-global"),
+            rule_component_kind("core/cli-tools", MatchKind::Package, "core/npm"),
+        ]);
+        let order = vec![make_component_id("core/cli-tools")];
+
+        let graph = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap();
+        match &graph.components["core/cli-tools"].resources[0].kind {
+            DesiredResourceKind::Package {
+                desired_backend, ..
+            } => {
+                assert_eq!(desired_backend.as_str(), "core/npm");
+            }
+            _ => panic!("expected Package"),
+        }
+    }
+
+    /// Among equal-specificity rules, the last one (higher index) wins.
+    #[test]
+    fn tie_break_last_rule_wins() {
+        let index = make_index(vec![(
+            "core/git",
+            declarative_meta(vec![package_resource("package:git", "git")]),
+        )]);
+        // Two kind-only rules — same specificity (0,1,0,0); last wins.
+        let strategy = strategy_with_rules(vec![
+            rule_kind(MatchKind::Package, "core/brew"),
+            rule_kind(MatchKind::Package, "core/apt"),
+        ]);
+        let order = vec![make_component_id("core/git")];
+
+        let graph = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap();
+        match &graph.components["core/git"].resources[0].kind {
+            DesiredResourceKind::Package {
+                desired_backend, ..
+            } => {
+                assert_eq!(desired_backend.as_str(), "core/apt");
+            }
+            _ => panic!("expected Package"),
+        }
+    }
+
+    /// Group-based rule selects resources listed in the group.
+    #[test]
+    fn group_rule_selects_group_members() {
+        let index = make_index(vec![(
+            "core/node",
+            declarative_meta(vec![package_resource("package:eslint", "eslint")]),
+        )]);
+        let mut group_inner = HashMap::new();
+        group_inner.insert(
+            "package".to_string(),
+            vec!["eslint".to_string(), "prettier".to_string()],
+        );
+        let mut groups = HashMap::new();
+        groups.insert("npm_global".to_string(), StrategyGroup(group_inner));
+        // kind rule has lower specificity; group rule (kind+group) has higher for group members.
+        let strategy = Strategy {
+            groups,
+            rules: vec![
+                rule_kind(MatchKind::Package, "core/brew"),
+                rule_kind_group(MatchKind::Package, "npm_global", "core/npm"),
+            ],
+            ..Default::default()
+        };
+        let order = vec![make_component_id("core/node")];
+
+        let graph = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap();
+        match &graph.components["core/node"].resources[0].kind {
+            DesiredResourceKind::Package {
+                desired_backend, ..
+            } => {
+                assert_eq!(desired_backend.as_str(), "core/npm");
+            }
+            _ => panic!("expected Package"),
+        }
+    }
+
+    /// Group rule does not match resources not listed in the group.
+    #[test]
+    fn group_rule_does_not_match_non_members() {
+        let index = make_index(vec![(
+            "core/cli",
+            declarative_meta(vec![package_resource("package:git", "git")]),
+        )]);
+        let mut group_inner = HashMap::new();
+        group_inner.insert("package".to_string(), vec!["eslint".to_string()]);
+        let mut groups = HashMap::new();
+        groups.insert("npm_global".to_string(), StrategyGroup(group_inner));
+        let strategy = Strategy {
+            groups,
+            rules: vec![
+                rule_kind(MatchKind::Package, "core/brew"),
+                rule_kind_group(MatchKind::Package, "npm_global", "core/npm"),
+            ],
+            ..Default::default()
+        };
+        let order = vec![make_component_id("core/cli")];
+
+        // "git" is not in npm_global → falls back to kind rule → core/brew.
+        let graph = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap();
+        match &graph.components["core/cli"].resources[0].kind {
+            DesiredResourceKind::Package {
+                desired_backend, ..
+            } => {
+                assert_eq!(desired_backend.as_str(), "core/brew");
+            }
+            _ => panic!("expected Package"),
         }
     }
 
@@ -619,42 +793,32 @@ mod tests {
         }
     }
 
-    /// No default_backend and no matching override → NoBackend error.
+    /// No rules in strategy → NoBackend error.
     #[test]
-    fn no_backend_returns_error() {
+    fn no_rules_returns_no_backend_error() {
         let index = make_index(vec![(
             "core/git",
             declarative_meta(vec![package_resource("package:git", "git")]),
         )]);
-        let strategy = Strategy {
-            package: Some(BackendStrategy {
-                default_backend: None,
-                overrides: HashMap::new(),
-            }),
-            ..Default::default()
-        };
+        let strategy = Strategy::default();
         let order = vec![make_component_id("core/git")];
 
         let err = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap_err();
         assert!(matches!(err, CompilerError::NoBackend { .. }));
     }
 
-    /// Absent strategy section for the resource kind → NoBackend error.
+    /// Only a package rule exists; runtime resource → NoBackend error.
     #[test]
-    fn absent_strategy_section_returns_no_backend() {
+    fn no_matching_kind_rule_returns_no_backend() {
         let index = make_index(vec![(
             "core/node",
             declarative_meta(vec![runtime_resource("runtime:node", "node", "20")]),
         )]);
-        // strategy.runtime is None
-        let strategy = Strategy {
-            package: Some(backend_strategy_default("core/brew")),
-            ..Default::default()
-        };
+        let strategy = strategy_with_rules(vec![rule_kind(MatchKind::Package, "core/brew")]);
         let order = vec![make_component_id("core/node")];
 
         let err = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap_err();
-        assert!(matches!(err, CompilerError::NoBackend { .. }));
+        assert!(matches!(err, CompilerError::NoBackend { kind, .. } if kind == "runtime"));
     }
 
     /// Component referenced in resolved_order but absent from index → ComponentNotFound.
@@ -682,19 +846,17 @@ mod tests {
             ),
             ("core/bash", script_meta()),
         ]);
-        let strategy = Strategy {
-            package: Some(backend_strategy_default("core/brew")),
-            runtime: Some(backend_strategy_default("core/mise")),
-            ..Default::default()
-        };
+        let strategy = strategy_with_rules(vec![
+            rule_kind(MatchKind::Package, "core/brew"),
+            rule_kind(MatchKind::Runtime, "core/mise"),
+        ]);
         let order = vec![
             make_component_id("core/git"),
-            make_component_id("core/bash"), // script: skipped
+            make_component_id("core/bash"), // script: included with empty resources
             make_component_id("core/node"),
         ];
 
         let graph = compile(&index, &empty_mcs(), &strategy, &order, &empty_ms()).unwrap();
-        // bash is now included with empty resources; git and node have resources
         assert_eq!(graph.components.len(), 3);
         assert!(graph.components.contains_key("core/git"));
         assert!(graph.components.contains_key("core/node"));
@@ -725,10 +887,7 @@ mod tests {
                 "${params.version}",
             )]),
         )]);
-        let strategy = Strategy {
-            runtime: Some(backend_strategy_default("core/mise")),
-            ..Default::default()
-        };
+        let strategy = strategy_with_rules(vec![rule_kind(MatchKind::Runtime, "core/mise")]);
         let order = vec![make_component_id("core/node")];
 
         let mut mcs = HashMap::new();
@@ -755,10 +914,7 @@ mod tests {
             "core/git",
             declarative_meta(vec![package_resource("package:git", "git")]),
         )]);
-        let strategy = Strategy {
-            package: Some(backend_strategy_default("core/brew")),
-            ..Default::default()
-        };
+        let strategy = strategy_with_rules(vec![rule_kind(MatchKind::Package, "core/brew")]);
         let order = vec![make_component_id("core/git")];
 
         // Empty materialized specs — should use raw spec.
