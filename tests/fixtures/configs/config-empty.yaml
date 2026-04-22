@@ -5,9 +5,12 @@ profile:
   components: {}
 
 strategy:
-  package:
-    default_backend: core/brew
-  runtime:
-    default_backend: core/mise
+  rules:
+    - match:
+        kind: package
+      use: core/brew
+    - match:
+        kind: runtime
+      use: core/mise
   fs:
     backup: false

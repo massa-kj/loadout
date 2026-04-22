@@ -26,9 +26,12 @@ profile:
       dummy-fs-link: {}
 
 strategy:
-  package:
-    default_backend: local/dummy-pkg
-  runtime:
-    default_backend: local/dummy-rt
+  rules:
+    - match:
+        kind: package
+      use: local/dummy-pkg
+    - match:
+        kind: runtime
+      use: local/dummy-rt
   fs:
     backup: false

@@ -11,9 +11,12 @@ profile:
           build_from_source: "true"   # unknown key; must cause validation error
 
 strategy:
-  package:
-    default_backend: local/dummy-pkg
-  runtime:
-    default_backend: local/dummy-rt
+  rules:
+    - match:
+        kind: package
+      use: local/dummy-pkg
+    - match:
+        kind: runtime
+      use: local/dummy-rt
   fs:
     backup: false
