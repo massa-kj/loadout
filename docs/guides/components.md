@@ -131,7 +131,7 @@ Declarative resources (packages and runtimes) require a **backend** to perform i
 - Communicate via JSON stdin/stdout protocol
 - Useful for project-specific or custom package managers
 
-Backend selection is controlled by **strategy** files (`strategies/<platform>.yaml`).
+Backend selection is controlled by the **`strategy:`** section of your config file.
 Components declare what they need; strategy determines which backend satisfies the requirement.
 
 For backend implementation details, see [`guides/backends.md`](backends.md) and [`specs/api/backend.md`](../specs/api/backend.md).

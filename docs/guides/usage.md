@@ -191,6 +191,67 @@ To remove a component: remove it from your profile, then run `apply`.
 To change a version: update the `version` field in your profile, then run `apply`.
 The component will be uninstalled and reinstalled at the new version.
 
+## Strategy
+
+The `strategy:` section of your config file controls which backend handles each resource.
+
+### Basic rule set
+
+```yaml
+# configs/linux.yaml
+strategy:
+  rules:
+    - match:
+        kind: package
+      use: local/brew
+    - match:
+        kind: runtime
+      use: local/mise
+```
+
+Rules are evaluated against every resource.
+The **most specific match** wins; if multiple rules tie on specificity, the **last rule wins**.
+
+### Per-name override
+
+```yaml
+strategy:
+  rules:
+    - match:
+        kind: package
+      use: local/brew
+    - match:
+        kind: package
+        name: ripgrep
+      use: local/apt
+```
+
+`name` + `kind` is more specific than `kind` alone, so `ripgrep` is routed to `apt`.
+
+### Groups
+
+Group a set of resource names and match them together:
+
+```yaml
+strategy:
+  groups:
+    npm_global:
+      package:
+        - eslint
+        - prettier
+
+  rules:
+    - match:
+        kind: package
+      use: local/brew
+    - match:
+        kind: package
+        group: npm_global
+      use: local/npm
+```
+
+For the full specificity table and validation rules, see [specs/data/strategy.md](../specs/data/strategy.md).
+
 ## Troubleshooting
 
 **Component is blocked in plan output**

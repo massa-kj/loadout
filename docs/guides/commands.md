@@ -274,7 +274,7 @@ Sets the value at a dot-separated YAML path. `<VALUE>` is parsed as YAML, so:
 
 ```sh
 loadout config raw set profile.components.local.git '{}'
-loadout config raw set strategy.package.default_backend local/mise
+loadout config raw set strategy.rules '[{match: {kind: package}, use: local/brew}]'
 ```
 
 Missing intermediate nodes are created as empty mappings.
@@ -290,7 +290,7 @@ loadout config raw unset <PATH> [-c <NAME|PATH>]
 Removes the key at the dot-separated path. Prints `no change` if the key is not present.
 
 ```sh
-loadout config raw unset strategy.package.default_backend
+loadout config raw unset strategy.rules
 ```
 
 > **Note:** Write operations do not preserve YAML comments.
@@ -520,7 +520,7 @@ Copies a backend from an external source into the `local` source directory
 | Argument / Flag | Description |
 |---|---|
 | `<SOURCE/NAME>` | Canonical backend ID from an external source (e.g. `community/brew`). |
-| `--move-strategy` | Also rewrite all config files (strategy `default_backend` and `overrides.*.backend`) to reference `local/<NAME>` instead of the external source. |
+| `--move-strategy` | Also rewrite all config files (strategy `rules[*].use`) to reference `local/<NAME>` instead of the external source. |
 | `--dry-run` | Show what would happen without writing any files. |
 
 ```sh
@@ -813,8 +813,8 @@ loadout config component remove local/git -c work
 
 # Low-level YAML access
 loadout config raw show
-loadout config raw set strategy.package.default_backend local/mise
-loadout config raw unset strategy.package.default_backend
+loadout config raw set strategy.rules '[{match: {kind: package}, use: local/brew}]'
+loadout config raw unset strategy.rules
 
 # Edit a local component's component.yaml directly
 loadout component edit git

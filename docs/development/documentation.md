@@ -53,7 +53,7 @@ Documentation must be split clearly to avoid duplication and maintain clarity.
 - Invariants (e.g., "state must not contain duplicate `fs.path` across components")
 - Safety rules (e.g., "components must not write to `state.json` directly")
 - Forbidden operations (e.g., "planner must not execute backends")
-- Resolution order (e.g., "profile override > default_backend > abort")
+- Resolution order (e.g., "most specific rule wins → tie-break last wins → abort")
 - Decision tables (e.g., planner classification rules)
 - Plugin interface protocols (e.g., JSON stdin/stdout for backends, env vars for components)
 

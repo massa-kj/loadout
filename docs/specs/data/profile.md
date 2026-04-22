@@ -219,8 +219,10 @@ profile:
       mycomponent: {}
 
 strategy:
-  runtime:
-    default_backend: local/mise
+  rules:
+    - match:
+        kind: runtime
+      use: local/mise
 ```
 
 Config using bundles and imports:

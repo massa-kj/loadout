@@ -2,17 +2,17 @@
 
 ## Scope
 
-This document defines the normative contract for strategy files.
+This document defines the normative contract for the `strategy:` section of a config file.
 
-Covered: schema, backend resolution model, override rules, and resolution order.
+Covered: schema, backend resolution model, specificity rules, validation rules, and diagnostics contract.
 
 Not covered: how backends work (see `specs/api/backend.md`),
-or how to configure strategies (see `guides/usage.md`).
+or how to write strategies in practice (see `guides/usage.md`).
 
 ## Schema
 
 Strategy is embedded as the optional `strategy:` section within a `config.yaml` file.
-When the `strategy:` section is absent, `Strategy::default()` is used (no backend selection, backup enabled).
+When the `strategy:` section is absent, `Strategy::default()` is used (no rules, backup enabled).
 
 ```yaml
 # configs/linux.yaml
@@ -21,23 +21,57 @@ profile:
     ...
 
 strategy:      # optional section
-  package:
-    default_backend: <backend_id>
-    overrides:
-      <package_name>:
-        backend: <backend_id>
+  groups:
+    <group_name>:
+      <kind>:           # "package" or "runtime"
+        - <resource_name>
 
-  runtime:
-    default_backend: <backend_id>
-    overrides:
-      <runtime_name>:
-        backend: <backend_id>
+  rules:
+    - match:
+        kind: package | runtime   # required if component is present
+        name: <resource_name>     # exact resource name (optional)
+        component: <component_id> # canonical component ID (optional; requires kind)
+        group: <group_name>       # group membership filter (optional; requires kind)
+      use: <backend_id>
 
   fs:
     backup: true | false
     backup_dir: "<path>"
     fingerprint_policy: managed_only | all_copy | none   # default: all_copy
 ```
+
+### `groups`
+
+A group is a named, static set of resource names, keyed by kind.
+
+```yaml
+groups:
+  npm_global:
+    package:
+      - eslint
+      - prettier
+```
+
+Groups are pure enumeration. Conditions, version constraints, globs, and regexes are forbidden.
+If filtering logic is needed in the future, it must be introduced as a separate concept (e.g. `predicates`).
+
+### `rules`
+
+Each rule has a `match:` selector and a `use:` backend ID.
+
+Rules are evaluated against every resource. The **most specific match** wins.
+If multiple rules have equal specificity, the **last rule wins** (tie-break by index).
+
+### `match` Fields
+
+| Field       | Type   | Description |
+|-------------|--------|-------------|
+| `kind`      | string | `"package"` or `"runtime"` only. `fs` / `tool` are not backend-resolved and are forbidden here. |
+| `name`      | string | Exact resource name (package name or runtime name). |
+| `component` | string | Canonical component ID (e.g. `core/cli-tools`). Requires `kind`. |
+| `group`     | string | Group name defined in `groups:`. Requires `kind`. |
+
+All fields are optional, but `component` requires `kind` to be present (see Validation Rules).
 
 ### `fingerprint_policy`
 
@@ -74,31 +108,66 @@ Backend identifiers accept the same two forms as component identifiers:
 Bare backend names are normalized to `core/<name>` before backend loading.
 `local` and external source backends must be explicit.
 
-Resolution applies per resource kind:
+Resolution applies per resource:
 
-* `package` resources — resolved via `package.default_backend` and `package.overrides`
-* `runtime` resources — resolved via `runtime.default_backend` and `runtime.overrides`
+* `package` resources — resolved from `rules` where `match.kind = "package"`
+* `runtime` resources — resolved from `rules` where `match.kind = "runtime"`
 * `fs` resources — no backend; handled by the fs module directly
 
-## Override Rules
+## Specificity Decision Table
 
-Override keys for `package` are exact package names as passed to the backend install command.
-Override keys for `runtime` are runtime names (e.g. `node`, `python`), not component names.
+Each matching rule has a **specificity vector** `(has_component, has_kind, has_name, has_group)`.
+Comparison is lexicographic (highest priority left). Not additive scoring.
 
-If an override exists for a resource, it takes precedence over `default_backend`.
-If no override exists, `default_backend` is used.
-If `default_backend` is absent and no override matches, execution aborts.
+| `match` fields                                  | Specificity vector |
+|-------------------------------------------------|--------------------|
+| _(no selector)_                                 | (0, 0, 0, 0)       |
+| `kind`                                          | (0, 1, 0, 0)       |
+| `kind` + `group`                                | (0, 1, 0, 1)       |
+| `kind` + `name`                                 | (0, 1, 1, 0)       |
+| `component` + `kind`                            | (1, 1, 0, 0)       |
+| `component` + `kind` + `group`                  | (1, 1, 0, 1)       |
+| `component` + `kind` + `name`                   | (1, 1, 1, 0)       |
+
+**Key invariant**: `component` always outranks `name`, regardless of other axes.
+`(1, 1, 0, 0) > (0, 1, 1, 0)` — a component+kind rule always beats a kind+name rule.
 
 ## Resolution Order
 
 ```
-per-resource override  >  default_backend  >  abort
+most specific rule wins (lexicographic specificity vector)
+  →  tie-break: last rule wins (higher index)
+  →  no match: execution aborts (NoBackend error)
 ```
 
 ## Validation Rules
 
-* `package.default_backend` must be a non-empty string if present.
-* `runtime.default_backend` must be a non-empty string if present.
-* Override values must contain a `backend` key with a non-empty string.
-* Unknown top-level keys are reserved and must not be present.
-* External and `local` backends are resolved only if their source allow-list permits them.
+1. `match.kind` must be `"package"` or `"runtime"`. Using `"fs"`, `"tool"`, or other values is forbidden.
+2. `match.component` requires `match.kind` to be present. A component-only rule is forbidden.
+3. `rules[*].use` must be a non-empty string.
+4. `match.group` must reference a name defined in `strategy.groups`. Forward references are forbidden.
+5. If `match.kind = "runtime"` and `match.group` is set, the referenced group must define a `"runtime"` key. Referencing a package-only group from a runtime rule is forbidden.
+
+## Diagnostics Contract
+
+For each resource, the following information must be traceable (e.g. via `--verbose` or `doctor`).
+Diagnostics are a responsibility of the compiler layer; the planner must not be involved.
+
+Output items:
+- Evaluated rules count
+- Matched rules (rule index and match content)
+- Selected rule index
+- Selected reason (result of specificity vector comparison)
+- Competing rules (if tie-break occurred)
+- No-match reason (if no rule matched)
+
+Output example:
+
+```text
+resource: package:eslint (component=local/node-tools)
+matched:
+  [2] kind=package, group=npm_global -> core/npm
+  [5] component=local/node-tools, kind=package, name=eslint -> local/custom-npm
+selected:
+  [5] because component+kind+name (1,1,1,0) outranks kind+group (0,1,0,1)
+```
