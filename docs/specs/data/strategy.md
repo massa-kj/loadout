@@ -144,9 +144,10 @@ most specific rule wins (lexicographic specificity vector)
 
 1. `match.kind` must be `"package"` or `"runtime"`. Using `"fs"`, `"tool"`, or other values is forbidden.
 2. `match.component` requires `match.kind` to be present. A component-only rule is forbidden.
-3. `rules[*].use` must be a non-empty string.
-4. `match.group` must reference a name defined in `strategy.groups`. Forward references are forbidden.
-5. If `match.kind = "runtime"` and `match.group` is set, the referenced group must define a `"runtime"` key. Referencing a package-only group from a runtime rule is forbidden.
+3. `match.group` requires `match.kind` to be present. A group-only rule is forbidden. (Without `kind`, specificity is `(0,0,0,1)` which is lower than a kind-only rule `(0,1,0,0)`, so the rule can never be selected.)
+4. `rules[*].use` must be a non-empty string.
+5. `match.group` must reference a name defined in `strategy.groups`. Forward references are forbidden.
+6. If `match.kind = "runtime"` and `match.group` is set, the referenced group must define a `"runtime"` key. Referencing a package-only group from a runtime rule is forbidden.
 
 ## Diagnostics Contract
 

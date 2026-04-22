@@ -156,10 +156,22 @@ set -euo pipefail
 
 case "$LOADOUT_RESOURCE_KIND" in
     Package)
-        mytool uninstall "$LOADOUT_PACKAGE_NAME" || true
+        # Pre-check for idempotency: exit 0 if already absent.
+        # Do NOT use `|| true` — that would swallow genuine errors (e.g. dependency
+        # conflicts) and cause the executor to treat a failed removal as success,
+        # which corrupts state.
+        if ! mytool list "$LOADOUT_PACKAGE_NAME" &>/dev/null; then
+            echo "Package not installed, skipping" >&2
+            exit 0
+        fi
+        mytool uninstall "$LOADOUT_PACKAGE_NAME"
         ;;
     Runtime)
-        runtimetool uninstall "$LOADOUT_RUNTIME_NAME@$LOADOUT_RUNTIME_VERSION" || true
+        if ! runtimetool list "$LOADOUT_RUNTIME_NAME@$LOADOUT_RUNTIME_VERSION" &>/dev/null; then
+            echo "Runtime not installed, skipping" >&2
+            exit 0
+        fi
+        runtimetool uninstall "$LOADOUT_RUNTIME_NAME@$LOADOUT_RUNTIME_VERSION"
         ;;
     *)
         echo "Unsupported kind: $LOADOUT_RESOURCE_KIND" >&2
@@ -172,7 +184,9 @@ esac
 - **Input:** Environment variables (primary), and optionally JSON on stdin
 - **Output:** None (stderr for logging only)
 - **Exit code:** 0 = success, non-0 = failure
-- **Idempotency:** Must succeed if resource is already absent
+- **Idempotency:** Must succeed (exit 0) if the resource is already absent
+
+**Important:** Implement idempotency via a **pre-check** (`if ! tool list ... ; then exit 0; fi`), not via `|| true` after the uninstall command. Using `|| true` swallows genuine errors such as dependency conflicts, causing the executor to record the operation as successful and clear state even though the resource was not actually removed.
 
 ### 4. Implement `status.sh`
 

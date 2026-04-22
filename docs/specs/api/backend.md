@@ -283,14 +283,18 @@ brew install "$LOADOUT_PACKAGE_NAME"
 - **Non-0** — Failure (removal failed; stderr captured for logging)
 
 **Contract:**
-- Must be **idempotent**: removing an absent resource must succeed without error.
+- Must be **idempotent**: removing an absent resource must succeed without error. Implement idempotency via a **pre-check** (`if ! tool list ...; then exit 0; fi`), not via `|| true` after the uninstall command. Using `|| true` swallows genuine errors (e.g. dependency conflicts) and causes the executor to clear state even when removal failed.
 - Must only remove what this backend installed. Must NOT remove resources managed by other backends.
 
 **Example (using environment variables):**
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-brew uninstall "$LOADOUT_PACKAGE_NAME" 2>&1 || true
+if ! brew list --formula "$LOADOUT_PACKAGE_NAME" &>/dev/null; then
+    echo "Package not installed, skipping" >&2
+    exit 0
+fi
+brew uninstall "$LOADOUT_PACKAGE_NAME"
 ```
 
 ---
@@ -381,7 +385,11 @@ brew install "$LOADOUT_PACKAGE_NAME"
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-brew uninstall "$LOADOUT_PACKAGE_NAME" 2>&1 || true
+if ! brew list --formula "$LOADOUT_PACKAGE_NAME" &>/dev/null; then
+    echo "Package not installed, skipping" >&2
+    exit 0
+fi
+brew uninstall "$LOADOUT_PACKAGE_NAME"
 ```
 
 ### `status.sh`

@@ -711,6 +711,19 @@ fn validate_strategy(strategy: Strategy) -> Result<Strategy, ConfigError> {
             });
         }
 
+        // group-only rule is forbidden: kind must accompany group.
+        // Without kind, specificity is (0,0,0,1) which is lower than a kind-only
+        // catch-all (0,1,0,0), so the group rule can never win.
+        if rule.selector.group.is_some() && rule.selector.kind.is_none() {
+            return Err(ConfigError::InvalidStrategy {
+                reason: format!(
+                    "rules[{i}]: 'group' requires 'kind' to be present; \
+                     a group-only rule has lower specificity than a kind-only rule \
+                     and can never be selected"
+                ),
+            });
+        }
+
         // group reference must resolve to a defined group.
         if let Some(ref group_name) = rule.selector.group {
             let group =
@@ -1235,6 +1248,18 @@ mod tests {
         let p = write_yaml_file(dir.path(), "strategy.yaml", yaml);
         let strategy = load_strategy(&p).unwrap();
         assert_eq!(strategy.rules.len(), 1);
+    }
+
+    #[test]
+    fn strategy_group_without_kind_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "\
+groups:\n  npm_global:\n    package:\n      - eslint\nrules:\n  - match:\n      group: npm_global\n    use: core/npm\n";
+        let p = write_yaml_file(dir.path(), "strategy.yaml", yaml);
+        let err = load_strategy(&p).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::InvalidStrategy { reason } if reason.contains("'group' requires 'kind'")),
+        );
     }
 
     #[test]
