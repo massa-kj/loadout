@@ -89,6 +89,13 @@ a loadout-managed component.
 
 `dep.depends`, by contrast, is **hard**: the named component must be in the desired set, or resolution aborts.
 
+**Removal safety invariant:**
+If component A declares `depends: [B]`, it is impossible to remove B from the desired set while A remains.
+Attempting to do so results in a `MissingDependency` error and aborts plan generation.
+This is not a separate "uninstall guard" — it is the direct consequence of the hard dependency contract:
+a desired set that includes A but not B is invalid input.
+To remove B, the user must first remove A (or all other dependents of B) from the profile.
+
 ## Graph Construction
 
 1. Read dep fields from the Component Index for all desired components.

@@ -22,7 +22,11 @@ pub enum ResolverError {
 
     /// An explicit `dep.depends` entry points to a component not in the desired set.
     ///
-    /// Example: A depends on B, but B was not requested and has no transitive requirer.
+    /// This error fires in two scenarios:
+    /// - Adding A to the profile without also adding B (A depends on B, B is absent).
+    /// - Removing B from the profile while A still remains (A depends on B, B is absent).
+    ///
+    /// In both cases, the desired set is invalid: A cannot exist without B.
     #[error("component '{dependent}' depends on '{dependency}', but '{dependency}' is not in the desired set")]
     MissingDependency {
         dependent: String,
