@@ -67,8 +67,8 @@ Normalization rules for `dep.depends`:
 * bare name `helper` in `local/mycomponent` → `local/helper`
 * cross-source dependency must be explicit, e.g. `core/git` or `community/node`
 
-**`provides` / `requires`** — capability-based dependency.
-Use when a component needs any provider of an abstract capability.
+**`provides` / `requires`** — capability-based ordering hint.
+Use when a component should be installed after any provider of an abstract capability, if one is present.
 
 ```yaml
 # provider
@@ -81,16 +81,21 @@ requires:
 ```
 
 The resolver finds all components in the desired set that declare the matching `dep.provides` entry,
-and injects them as implicit ordering dependencies of the requiring component.
+and injects them as implicit ordering dependencies (before the requiring component).
+
+`dep.requires` is **soft**: if no provider is present in the desired set, the ordering constraint is
+silently omitted. This allows a component to use an externally installed backend without declaring it as
+a loadout-managed component.
+
+`dep.depends`, by contrast, is **hard**: the named component must be in the desired set, or resolution aborts.
 
 ## Graph Construction
 
 1. Read dep fields from the Component Index for all desired components.
 2. Normalize `dep.depends` entries to canonical IDs and build explicit dependency edges.
 3. For each component with `dep.requires`, find matching `dep.provides` among desired components.
-   Inject found providers as implicit `depends` edges.
-4. If a required capability has no provider in the desired set, abort with an error.
-5. If an explicit dependency is not present in the desired set, abort with an error.
+   Inject found providers as implicit ordering edges. If no provider is present, skip silently.
+4. If an explicit dependency declared in `dep.depends` is not present in the desired set, abort with an error.
 
 Source allow-list validation: External and `local` components are subject to source allow-list validation.
 If the component itself or any declared explicit dependency is not allowed by the source registry,

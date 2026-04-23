@@ -29,15 +29,6 @@ pub enum ResolverError {
         dependency: String,
     },
 
-    /// A `dep.requires` capability has no provider in the desired set.
-    ///
-    /// Example: Component requires `capability:package-manager` but no brew/apt is in the profile.
-    #[error("component '{requirer}' requires capability '{capability}', but no provider is in the desired set")]
-    MissingCapabilityProvider {
-        requirer: String,
-        capability: String,
-    },
-
     /// A dependency cycle was detected; install order cannot be determined.
     ///
     /// Example: A depends on B, B depends on C, C depends on A.
@@ -66,8 +57,10 @@ pub enum ResolverError {
 /// Returns [`ResolverError`] if:
 /// - a desired component is not in the index
 /// - an explicit dependency is not in the desired set
-/// - a required capability has no provider in the desired set
 /// - the dependency graph contains a cycle
+///
+/// `dep.requires` with no provider in the desired set is **not** an error; the ordering
+/// constraint is simply omitted (the backend may already be installed externally).
 pub fn resolve(
     component_index: &ComponentIndex,
     desired_components: &[CanonicalComponentId],
@@ -116,29 +109,18 @@ pub fn resolve(
             deps.push(dep_id.as_str());
         }
 
-        // Capability-based `dep.requires` → implicit dependency on providers.
+        // Capability-based `dep.requires` → implicit ordering dependency on providers.
+        // Soft: if no provider is present in the desired set, the constraint is silently skipped.
+        // The required capability may be satisfied by an externally installed tool.
         for req in &meta.dep.requires {
-            match capability_providers.get(req.name.as_str()) {
-                None => {
-                    return Err(ResolverError::MissingCapabilityProvider {
-                        requirer: id.as_str().into(),
-                        capability: req.name.clone(),
-                    });
-                }
-                Some(providers) if providers.is_empty() => {
-                    return Err(ResolverError::MissingCapabilityProvider {
-                        requirer: id.as_str().into(),
-                        capability: req.name.clone(),
-                    });
-                }
-                Some(providers) => {
-                    for &provider in providers {
-                        if provider != id.as_str() {
-                            deps.push(provider);
-                        }
+            if let Some(providers) = capability_providers.get(req.name.as_str()) {
+                for &provider in providers {
+                    if provider != id.as_str() {
+                        deps.push(provider);
                     }
                 }
             }
+            // No provider in desired set → no ordering edge (not an error).
         }
 
         // Deduplicate while preserving first-seen order (for determinism).
@@ -371,14 +353,14 @@ mod tests {
     }
 
     #[test]
-    fn missing_capability_provider() {
+    fn requires_without_provider_is_soft() {
+        // No provider for package_manager in desired set → not an error,
+        // ordering constraint is simply omitted.
         let index = make_index(&[("core/git", &[], &["package_manager"], &[])]);
-        let desired = ids(&["core/git"]); // no provider for package_manager
-        let err = resolve(&index, &desired).unwrap_err();
-        assert!(matches!(
-            err,
-            ResolverError::MissingCapabilityProvider { .. }
-        ));
+        let desired = ids(&["core/git"]);
+        let order = resolve(&index, &desired).unwrap();
+        assert_eq!(order.len(), 1);
+        assert_eq!(order[0].as_str(), "core/git");
     }
 
     #[test]

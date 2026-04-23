@@ -105,9 +105,9 @@ For detailed field types, see `crates/model/src/component_index.rs` (rustdoc).
 - `declarative` mode: Component declares resources in `spec.resources` (no scripts)
 
 **`dep` fields (Resolver reads these only)**
-- `dep.depends`: Explicit component dependencies (canonical IDs)
-- `dep.requires`: Capability names this component needs (abstract dependencies)
-- `dep.provides`: Capability names this component exposes (abstract provision)
+- `dep.depends`: Explicit component dependencies (canonical IDs). **Hard**: if the named component is absent from the desired set, resolution aborts.
+- `dep.requires`: Capability names this component should be ordered after. **Soft (ordering-only)**: if no provider is present in the desired set, the ordering constraint is silently omitted. The backend may be installed externally.
+- `dep.provides`: Capability names this component exposes (matched against `dep.requires` of other components).
 
 **`spec` fields (ComponentCompiler reads these)**
 - Present for `declarative` mode components
