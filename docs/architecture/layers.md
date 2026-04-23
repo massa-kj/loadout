@@ -154,6 +154,9 @@ State Commit
 - **State is both input and output**: Input = current reality, Output = recorded effects.
 - **Source registry**: Influences lookup and admission only; must not introduce hidden fallback or side effects.
 - **Resolver**: Reads only `dep` fields from Component Index; must not read `resources` fields.
+  The resolver API has two entry points: `resolve` (desired components only) and `resolve_extended`
+  (desired + state-only component IDs for correct destroy ordering). Both are pure functions;
+  state-derived IDs are extracted by the pipeline (impure Load phase) and passed as plain ID lists.
 - **ComponentCompiler**: Applies strategy to resolve `desired_backend` for each resource; the result is embedded in DesiredResourceGraph.
 
 ### Phase Characteristics
@@ -163,7 +166,7 @@ State Commit
 | Load | Impure (I/O) | Filesystem | Profile, Strategy, Sources, State |
 | SourceRegistry | Pure (lookup) | Sources | Source paths, allow-lists |
 | ComponentIndexBuilder | Impure (I/O) | Source paths, component.yaml | ComponentIndex |
-| Resolver | Pure | Profile.components, ComponentIndex.dep | ResolvedComponentOrder |
+| Resolver | Pure | Profile.components, ComponentIndex.dep, State component IDs (via resolve_extended) | ResolvedComponentOrder |
 | ComponentCompiler | Pure | ResolvedComponentOrder, ComponentIndex, Strategy | DesiredResourceGraph |
 | Planner | Pure | DesiredResourceGraph, State, ResolvedComponentOrder | Plan |
 | Executor | Impure (side effects) | Plan, DesiredResourceGraph, ComponentIndex, BackendRegistry | Effects |

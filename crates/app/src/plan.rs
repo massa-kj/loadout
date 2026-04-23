@@ -14,11 +14,13 @@ use crate::pipeline::{run_pipeline, PipelineOutput};
 /// All stages are read-only; no state is modified.
 pub fn plan(ctx: &AppContext, config_path: &Path) -> Result<model::plan::Plan, AppError> {
     let PipelineOutput {
-        order,
+        full_order,
         graph,
         state,
         ..
     } = run_pipeline(ctx, config_path)?;
-    let p = planner::plan(&graph, &state, &order)?;
+    // Use full_order (desired + state-only components) so the planner can compute
+    // correct reverse destroy ordering when both a component and its dependency are removed.
+    let p = planner::plan(&graph, &state, &full_order)?;
     Ok(p)
 }

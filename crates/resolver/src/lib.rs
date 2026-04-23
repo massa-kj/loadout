@@ -128,9 +128,155 @@ pub fn resolve(
         adj.insert(id.as_str(), deps);
     }
 
-    // Topological sort via iterative DFS with cycle detection.
-    // We use an explicit stack to avoid recursion depth issues for large graphs.
-    //
+    let all_ids: Vec<&str> = desired_components.iter().map(|id| id.as_str()).collect();
+    let result = topo_sort(&all_ids, &adj)?;
+
+    let order = result
+        .into_iter()
+        .map(|s| CanonicalComponentId::new(s).expect("resolver output id is always canonical"))
+        .collect();
+
+    Ok(order)
+}
+
+/// Resolve dependency order for a combined set of desired and state-only components,
+/// enabling correct destroy ordering when both a component and its dependency are removed.
+///
+/// Like [`resolve`], but also accepts `state_extras` — components recorded in state that
+/// are absent from the desired set (i.e., about to be destroyed). For these extra components:
+///
+/// - Components not found in the index are silently skipped (their `component.yaml` may have
+///   been deleted from the component library).
+/// - Dependencies on components absent from the combined set are silently omitted (soft-missing),
+///   rather than returning [`ResolverError::MissingDependency`].
+///
+/// The returned order is a complete topological sort of desired + resolvable state-extra
+/// components. The planner uses this extended order for both install ordering (desired
+/// components) and reverse destroy ordering (state-extra components).
+///
+/// # Errors
+///
+/// Returns [`ResolverError`] for desired components, with the same rules as [`resolve`]:
+/// - a desired component is not in the index
+/// - a desired component's explicit dependency is absent from the combined set
+/// - the dependency graph contains a cycle
+///
+/// See `docs/specs/algorithms/resolver.md` for full specification.
+pub fn resolve_extended(
+    component_index: &ComponentIndex,
+    desired_ids: &[CanonicalComponentId],
+    state_extras: &[CanonicalComponentId],
+) -> Result<ResolvedComponentOrder, ResolverError> {
+    // Filter state_extras to those present in the index.
+    // Components whose yaml has been deleted are silently excluded.
+    let state_in_index: Vec<&CanonicalComponentId> = state_extras
+        .iter()
+        .filter(|id| component_index.components.contains_key(id.as_str()))
+        .collect();
+
+    // No resolvable state_extras → delegate entirely to the standard resolver.
+    if state_in_index.is_empty() {
+        return resolve(component_index, desired_ids);
+    }
+
+    // Validate desired components exist in the index (hard error, same as resolve).
+    for id in desired_ids {
+        if !component_index.components.contains_key(id.as_str()) {
+            return Err(ResolverError::ComponentNotFound {
+                id: id.as_str().into(),
+            });
+        }
+    }
+
+    let desired_set: HashSet<&str> = desired_ids.iter().map(|id| id.as_str()).collect();
+    let state_extra_set: HashSet<&str> = state_in_index.iter().map(|id| id.as_str()).collect();
+    // Combined set used to evaluate whether a dependency is satisfiable.
+    let combined_set: HashSet<&str> = desired_set
+        .iter()
+        .chain(state_extra_set.iter())
+        .copied()
+        .collect();
+
+    // Build capability → providers map over the full combined set.
+    let mut capability_providers: HashMap<&str, Vec<&str>> = HashMap::new();
+    for &id in combined_set.iter() {
+        if let Some(meta) = component_index.components.get(id) {
+            for cap in &meta.dep.provides {
+                capability_providers
+                    .entry(cap.name.as_str())
+                    .or_default()
+                    .push(id);
+            }
+        }
+    }
+
+    // Build adjacency list for all combined components.
+    // desired IDs come first to preserve their relative stable order in the sort.
+    let all_combined: Vec<&str> = desired_ids
+        .iter()
+        .map(|id| id.as_str())
+        .chain(state_in_index.iter().map(|id| id.as_str()))
+        .collect();
+
+    let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
+
+    for &id in &all_combined {
+        let meta = component_index.components.get(id).unwrap(); // both sets validated above
+        let is_desired = desired_set.contains(id);
+        let mut deps: Vec<&str> = Vec::new();
+
+        for dep_id in &meta.dep.depends {
+            if !combined_set.contains(dep_id.as_str()) {
+                if is_desired {
+                    // Hard: a desired component's dependency is absent → error.
+                    return Err(ResolverError::MissingDependency {
+                        dependent: id.into(),
+                        dependency: dep_id.clone(),
+                    });
+                }
+                // Soft: a state-extra component's dependency is absent (its yaml may be
+                // gone or it was installed externally) → skip this edge silently.
+                continue;
+            }
+            deps.push(dep_id.as_str());
+        }
+
+        // Capability-based deps are always soft (same rule as resolve).
+        for req in &meta.dep.requires {
+            if let Some(providers) = capability_providers.get(req.name.as_str()) {
+                for &provider in providers {
+                    if provider != id {
+                        deps.push(provider);
+                    }
+                }
+            }
+        }
+
+        deps.dedup();
+        adj.insert(id, deps);
+    }
+
+    let result = topo_sort(&all_combined, &adj)?;
+
+    let order = result
+        .into_iter()
+        .map(|s| CanonicalComponentId::new(s).expect("resolver output id is always canonical"))
+        .collect();
+
+    Ok(order)
+}
+
+/// Perform iterative post-order DFS topological sort.
+///
+/// Returns sorted ids (dependencies before dependents) or [`ResolverError::Cycle`].
+///
+/// # Preconditions
+/// - Every node appearing as a dependency in `adj` values must also be a key in `adj`.
+/// - `all_ids` must list every key in `adj` (no extra entries, no missing entries).
+fn topo_sort<'a>(
+    all_ids: &[&'a str],
+    adj: &HashMap<&'a str, Vec<&'a str>>,
+) -> Result<Vec<&'a str>, ResolverError> {
     // State per node:
     //   White (not visited) → Gray (in current DFS path) → Black (fully processed)
     #[derive(Clone, Copy, PartialEq)]
@@ -140,15 +286,11 @@ pub fn resolve(
         Black,
     }
 
-    let mut color: HashMap<&str, Color> = desired_components
-        .iter()
-        .map(|id| (id.as_str(), Color::White))
-        .collect();
-
-    let mut result: Vec<&str> = Vec::with_capacity(desired_components.len());
+    let mut color: HashMap<&str, Color> = all_ids.iter().map(|&id| (id, Color::White)).collect();
+    let mut result: Vec<&str> = Vec::with_capacity(all_ids.len());
 
     // Process nodes in a deterministic order (sorted by id string).
-    let mut sorted_ids: Vec<&str> = desired_components.iter().map(|id| id.as_str()).collect();
+    let mut sorted_ids: Vec<&str> = all_ids.to_vec();
     sorted_ids.sort_unstable();
 
     for start in sorted_ids {
@@ -196,13 +338,7 @@ pub fn resolve(
         }
     }
 
-    // Convert to CanonicalComponentId. All strings are known-valid at this point.
-    let order = result
-        .into_iter()
-        .map(|s| CanonicalComponentId::new(s).expect("resolver output id is always canonical"))
-        .collect();
-
-    Ok(order)
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -382,5 +518,102 @@ mod tests {
         let order1 = resolve(&index, &desired).unwrap();
         let order2 = resolve(&index, &desired).unwrap();
         assert_eq!(order1, order2);
+    }
+
+    // --- resolve_extended ---
+
+    #[test]
+    fn extended_no_state_extras_delegates_to_resolve() {
+        // With no state_extras, resolve_extended must produce the same result as resolve.
+        let index = make_index(&[
+            ("core/git", &[], &[], &[]),
+            ("core/neovim", &["core/git"], &[], &[]),
+        ]);
+        let desired = ids(&["core/git", "core/neovim"]);
+        let state_extras = ids(&[]);
+        let order_ext = resolve_extended(&index, &desired, &state_extras).unwrap();
+        let order_std = resolve(&index, &desired).unwrap();
+        assert_eq!(order_ext, order_std);
+    }
+
+    #[test]
+    fn extended_orders_state_extras_in_reverse_dependency_order() {
+        // Both A (neovim, depends on git) and B (git) are being destroyed.
+        // Destroy order must be: neovim first, then git (reverse of install order).
+        let index = make_index(&[
+            ("core/git", &[], &[], &[]),
+            ("core/neovim", &["core/git"], &[], &[]),
+        ]);
+        let desired = ids(&[]);
+        let state_extras = ids(&["core/git", "core/neovim"]);
+        let order = resolve_extended(&index, &desired, &state_extras).unwrap();
+        let strs = as_strs(&order);
+        let git_pos = strs.iter().position(|&s| s == "core/git").unwrap();
+        let nvim_pos = strs.iter().position(|&s| s == "core/neovim").unwrap();
+        // Install order: git before neovim. Destroy order (caller reverses): neovim before git.
+        assert!(
+            git_pos < nvim_pos,
+            "git (dependency) must appear before neovim (dependent) in the install order"
+        );
+    }
+
+    #[test]
+    fn extended_state_extra_not_in_index_is_skipped() {
+        // If a state component's yaml was deleted, it must be silently excluded.
+        let index = make_index(&[("core/git", &[], &[], &[])]);
+        let desired = ids(&["core/git"]);
+        let state_extras = ids(&["core/ghost"]); // not in index
+        let order = resolve_extended(&index, &desired, &state_extras).unwrap();
+        let strs = as_strs(&order);
+        assert!(strs.contains(&"core/git"));
+        assert!(!strs.contains(&"core/ghost"), "ghost must be excluded");
+    }
+
+    #[test]
+    fn extended_state_extra_missing_dep_is_soft() {
+        // A state component whose dependency was also deleted from the index must not
+        // cause a MissingDependency error; the dep edge is simply omitted.
+        let index = make_index(&[
+            // core/neovim depends on core/git, but core/git is NOT in the index.
+            ("core/neovim", &["core/git"], &[], &[]),
+        ]);
+        let desired = ids(&[]);
+        let state_extras = ids(&["core/neovim"]); // core/git not in index → skipped
+        let order = resolve_extended(&index, &desired, &state_extras).unwrap();
+        let strs = as_strs(&order);
+        assert!(strs.contains(&"core/neovim"));
+    }
+
+    #[test]
+    fn extended_desired_missing_dep_is_still_hard_error() {
+        // For desired components, MissingDependency must still be a hard error.
+        let index = make_index(&[
+            ("core/git", &[], &[], &[]),
+            ("core/neovim", &["core/git"], &[], &[]),
+        ]);
+        let desired = ids(&["core/neovim"]); // git missing from desired
+        let state_extras = ids(&[]);
+        let err = resolve_extended(&index, &desired, &state_extras).unwrap_err();
+        assert!(matches!(err, ResolverError::MissingDependency { .. }));
+    }
+
+    #[test]
+    fn extended_desired_and_state_extra_combined_ordering() {
+        // desired: core/rust (no deps)
+        // state_extras: core/neovim depends on core/git (both in state, both in index)
+        // Full order must satisfy: git < neovim, and rust is present.
+        let index = make_index(&[
+            ("core/git", &[], &[], &[]),
+            ("core/neovim", &["core/git"], &[], &[]),
+            ("core/rust", &[], &[], &[]),
+        ]);
+        let desired = ids(&["core/rust"]);
+        let state_extras = ids(&["core/git", "core/neovim"]);
+        let order = resolve_extended(&index, &desired, &state_extras).unwrap();
+        let strs = as_strs(&order);
+        let git_pos = strs.iter().position(|&s| s == "core/git").unwrap();
+        let nvim_pos = strs.iter().position(|&s| s == "core/neovim").unwrap();
+        assert!(git_pos < nvim_pos);
+        assert!(strs.contains(&"core/rust"));
     }
 }

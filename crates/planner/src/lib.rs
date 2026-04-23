@@ -22,11 +22,14 @@ use thiserror::Error;
 /// Errors produced by the planner.
 #[derive(Debug, Error, PartialEq)]
 pub enum PlannerError {
-    /// A component appears in `resolved_component_order` but not in the DesiredResourceGraph.
+    /// A component in the DesiredResourceGraph is absent from `resolved_component_order`.
     ///
     /// This is always a programming error caused by a mismatch between resolver and compiler output.
     /// Should be unreachable in normal operation if the pipeline is correctly sequenced.
-    #[error("component '{id}' is in the resolved order but not in the DesiredResourceGraph")]
+    ///
+    /// Note: `resolved_order` may contain state-only component IDs (for correct destroy ordering)
+    /// in addition to desired component IDs; this is expected and not an error.
+    #[error("component '{id}' is in the DesiredResourceGraph but not in the resolved order")]
     ComponentOrderMismatch { id: String },
 }
 
@@ -56,7 +59,9 @@ enum Classification {
 /// # Parameters
 /// - `desired`: compiled desired resources (ComponentCompiler output, includes resolved backends)
 /// - `state`: current authoritative state (components installed, resources recorded)
-/// - `resolved_order`: topologically sorted component IDs (resolver output, defines install order)
+/// - `resolved_order`: topologically sorted component IDs from the resolver. This order
+///   includes **both** desired components (install order) and state-only components that
+///   were resolvable by `resolver::resolve_extended` (for correct reverse destroy ordering).
 ///
 /// # Returns
 ///
@@ -77,20 +82,31 @@ pub fn plan(
     let desired_ids: HashSet<&str> = desired.components.keys().map(String::as_str).collect();
     let state_ids: HashSet<&str> = state.components.keys().map(String::as_str).collect();
 
-    // Validate: every component in resolved_order must be in desired.
-    for id in resolved_order {
-        if !desired_ids.contains(id.as_str()) {
-            return Err(PlannerError::ComponentOrderMismatch {
-                id: id.as_str().into(),
-            });
+    // Build a position map from resolved_order for use in both install and destroy ordering.
+    // resolved_order may include state-only component IDs (for destroy ordering); this is expected.
+    let order_positions: HashMap<&str, usize> = resolved_order
+        .iter()
+        .enumerate()
+        .map(|(i, id)| (id.as_str(), i))
+        .collect();
+
+    // Validate: every desired component must appear in resolved_order.
+    // (resolved_order may also contain state-only IDs for destroy ordering; that is not an error.)
+    for id in desired_ids.iter() {
+        if !order_positions.contains_key(id) {
+            return Err(PlannerError::ComponentOrderMismatch { id: (*id).into() });
         }
     }
 
-    // Build ordered list of all components to consider.
-    // Components in desired but not in resolved_order (shouldn't happen in normal use)
+    // Build ordered list of desired components, preserving the install order from resolved_order.
+    // Components in desired but missing from resolved_order (shouldn't happen in normal use)
     // are appended at the end in sorted order to remain deterministic.
     let ordered_desired: Vec<&str> = {
-        let mut v: Vec<&str> = resolved_order.iter().map(|id| id.as_str()).collect();
+        let mut v: Vec<&str> = resolved_order
+            .iter()
+            .map(|id| id.as_str())
+            .filter(|id| desired_ids.contains(id))
+            .collect();
         let in_order: HashSet<&str> = v.iter().copied().collect();
         let mut extras: Vec<&str> = desired_ids.difference(&in_order).copied().collect();
         extras.sort_unstable();
@@ -98,19 +114,16 @@ pub fn plan(
         v
     };
 
-    // Components in state but not in desired → destroy (reverse order of install).
+    // Components in state but not in desired → destroy (reverse dependency order).
     let destroy_ids: Vec<&str> = {
         let mut v: Vec<&str> = state_ids.difference(&desired_ids).copied().collect();
-        // Reverse topological order for destroy: reverse of resolved_order for known components,
-        // then alphabetical for unknown. Use a position map from resolved_order.
-        let pos: HashMap<&str, usize> = resolved_order
-            .iter()
-            .enumerate()
-            .map(|(i, id)| (id.as_str(), i))
-            .collect();
+        // Sort by position in resolved_order (which now includes state-only components thanks to
+        // resolve_extended), then emit in reverse so that dependents are destroyed before their
+        // dependencies. Components absent from resolved_order (yaml deleted) fall back to
+        // alphabetical descending as a best-effort tie-breaker.
         v.sort_unstable_by(|a, b| {
-            let pa = pos.get(a).copied().unwrap_or(usize::MAX);
-            let pb = pos.get(b).copied().unwrap_or(usize::MAX);
+            let pa = order_positions.get(a).copied().unwrap_or(usize::MAX);
+            let pb = order_positions.get(b).copied().unwrap_or(usize::MAX);
             pb.cmp(&pa).then(b.cmp(a))
         });
         v
@@ -856,6 +869,91 @@ mod tests {
         assert_eq!(p.summary.create, 1);
         assert_eq!(p.summary.destroy, 1);
         assert_eq!(p.noops.len(), 1);
+    }
+
+    // --- ordering: destroy respects dependency order ---
+
+    #[test]
+    fn destroy_ordering_dependent_before_dependency() {
+        // Both core/neovim (depends on core/git) and core/git are being destroyed
+        // (neither is in desired). The full_order from resolve_extended contains both,
+        // with git before neovim (install order). Reverse for destroy: neovim must be
+        // destroyed before git.
+        let desired = empty_desired(&[]);
+        let mut state = state_with_package("core/git", "git", "core/brew");
+        state.components.insert(
+            "core/neovim".to_string(),
+            ComponentState {
+                resources: vec![Resource {
+                    id: "package:neovim".to_string(),
+                    kind: ResourceKind::Package {
+                        backend: backend("core/brew"),
+                        package: PackageDetails {
+                            name: "neovim".to_string(),
+                            version: None,
+                        },
+                    },
+                }],
+            },
+        );
+
+        // Simulate full_order from resolve_extended: git at position 0, neovim at position 1
+        // (install order: git before neovim because neovim depends on git).
+        let full_order = vec![cid("core/git"), cid("core/neovim")];
+        let p = plan(&desired, &state, &full_order).unwrap();
+
+        assert_eq!(p.summary.destroy, 2);
+        let ops: Vec<&str> = p
+            .actions
+            .iter()
+            .filter(|a| a.operation == Operation::Destroy)
+            .map(|a| a.component.as_str())
+            .collect();
+        let git_pos = ops.iter().position(|&s| s == "core/git").unwrap();
+        let nvim_pos = ops.iter().position(|&s| s == "core/neovim").unwrap();
+        assert!(
+            nvim_pos < git_pos,
+            "neovim (dependent) must be destroyed before git (dependency); got ops={ops:?}"
+        );
+    }
+
+    #[test]
+    fn destroy_ordering_without_full_order_falls_back_to_alphabetical_descending() {
+        // When the full_order does NOT contain the state-only components (e.g. their yaml
+        // was deleted and resolve_extended excluded them), destroy order falls back to
+        // alphabetical descending. This is the pre-existing best-effort behaviour.
+        let desired = empty_desired(&[]);
+        let mut state = state_with_package("core/aaa", "aaa", "core/brew");
+        state.components.insert(
+            "core/zzz".to_string(),
+            ComponentState {
+                resources: vec![Resource {
+                    id: "package:zzz".to_string(),
+                    kind: ResourceKind::Package {
+                        backend: backend("core/brew"),
+                        package: PackageDetails {
+                            name: "zzz".to_string(),
+                            version: None,
+                        },
+                    },
+                }],
+            },
+        );
+
+        // Empty order (both yamls gone; resolve_extended skipped them).
+        let full_order: ResolvedComponentOrder = vec![];
+        let p = plan(&desired, &state, &full_order).unwrap();
+
+        assert_eq!(p.summary.destroy, 2);
+        let ops: Vec<&str> = p
+            .actions
+            .iter()
+            .filter(|a| a.operation == Operation::Destroy)
+            .map(|a| a.component.as_str())
+            .collect();
+        // Alphabetical descending: zzz before aaa.
+        assert_eq!(ops[0], "core/zzz");
+        assert_eq!(ops[1], "core/aaa");
     }
 
     // ── tool resource helpers ─────────────────────────────────────────────────

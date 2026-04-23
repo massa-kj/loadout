@@ -32,12 +32,15 @@ pub fn prepare_execution(ctx: &AppContext, config_path: &Path) -> Result<Executi
     let PipelineOutput {
         index,
         order,
+        full_order,
         graph,
         state,
         ..
     } = run_pipeline(ctx, config_path)?;
 
-    let plan = planner::plan(&graph, &state, &order)?;
+    // Use full_order for the planner so destroy ordering is correct when both a component
+    // and its dependency are removed simultaneously. The executor receives desired-only `order`.
+    let plan = planner::plan(&graph, &state, &full_order)?;
     let registry = build_backend_registry(ctx);
 
     Ok(ExecutionPlan {

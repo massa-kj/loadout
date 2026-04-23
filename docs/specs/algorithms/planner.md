@@ -46,7 +46,11 @@ Planner operates only on:
 
 1. `desired_resource_graph` — compiled desired resources, grouped by component (produced by ComponentCompiler)
 2. `state` — current authoritative state
-3. `resolved_component_order` — topologically sorted component identifiers from resolver
+3. `resolved_component_order` — topologically sorted component identifiers from `resolver::resolve_extended`.
+   This order includes **both** desired components (install order) and resolvable state-only components
+   (components in state but not in desired, included for correct reverse destroy ordering).
+   State-only components whose `component.yaml` has been deleted are excluded (silently skipped by
+   `resolve_extended`). See `docs/specs/algorithms/resolver.md` for the extended resolution contract.
 
 Component identifiers in `desired_resource_graph`, `state`, and planner output are canonical IDs of the form
 `<source_id>/<name>`. Planner does not normalize bare names; normalization happens before planner input construction.
@@ -193,7 +197,11 @@ The executor reads `details.add_resources` to determine what to install without 
 
 ## Ordering Rules
 
-1. `destroy` operations in reverse dependency order
+1. `destroy` operations in reverse dependency order (dependents before their dependencies).
+   Order is derived from the position of each component in `resolved_component_order`, which
+   includes state-only components via `resolve_extended`. Components absent from the order
+   (their `component.yaml` was deleted) fall back to alphabetical descending as a best-effort
+   tie-breaker.
 2. `replace` operations: uninstall first, then install
 3. `create` operations in dependency order
 4. `replace_backend` treated as `replace`

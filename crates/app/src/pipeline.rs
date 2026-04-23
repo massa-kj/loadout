@@ -13,7 +13,11 @@ pub(crate) struct PipelineOutput {
     #[allow(dead_code)]
     pub(crate) strategy: config::Strategy,
     pub(crate) index: model::ComponentIndex,
+    /// Desired-only topological order (used by compiler, executor, and public API).
     pub(crate) order: model::ResolvedComponentOrder,
+    /// Full order: desired + resolvable state-only components (used by planner for
+    /// correct reverse destroy ordering when both a component and its dependency are removed).
+    pub(crate) full_order: model::ResolvedComponentOrder,
     pub(crate) graph: model::desired_resource_graph::DesiredResourceGraph,
     pub(crate) state: state::State,
 }
@@ -30,6 +34,10 @@ pub(crate) struct PipelineOutput {
 ///   7. Materialize fs sources (resolve defaults, validate, compute fingerprints).
 ///   8. Compile: `ComponentIndex + Strategy + order + materialized` → `DesiredResourceGraph`.
 ///   9. Load (or initialise) state.
+///
+/// Note: state is loaded at step 5.5 (before resolver) so that state component IDs can be
+/// included in the resolver's extended order. This enables correct reverse destroy ordering
+/// when both a component and its dependency are removed from the profile simultaneously.
 pub(crate) fn run_pipeline(
     ctx: &AppContext,
     config_path: &Path,
@@ -57,8 +65,32 @@ pub(crate) fn run_pipeline(
     // An empty desired list is valid: it means "uninstall everything in state".
     let desired_ids = profile_to_desired_ids(&profile, &index);
 
-    // Step 6: resolve dependency order (topological sort).
-    let order = resolver::resolve(&index, &desired_ids)?;
+    // Step 5.5: load state early so that state-only component IDs can participate in
+    // dependency-order resolution. This ensures destroy ordering is correct when both
+    // a component and its dependency are removed from the profile simultaneously.
+    let state = state::load(&ctx.state_path())?;
+
+    // Step 6: resolve dependency order (topological sort) for a combined set of desired
+    // and state-only components. State-only components whose yaml is gone are silently
+    // excluded; their missing dependencies are treated as soft (skipped).
+    //
+    // full_order = desired + resolvable state-only components (used by planner for destroy order)
+    // order      = desired-only subset (used by compiler, validate_and_materialize_params, executor)
+    let desired_id_set: std::collections::HashSet<&str> =
+        desired_ids.iter().map(|id| id.as_str()).collect();
+    let state_extras: Vec<model::CanonicalComponentId> = state
+        .components
+        .keys()
+        .filter(|k| !desired_id_set.contains(k.as_str()))
+        .filter_map(|k| model::CanonicalComponentId::new(k).ok())
+        .collect();
+    let full_order = resolver::resolve_extended(&index, &desired_ids, &state_extras)?;
+    // Derive the desired-only order by filtering full_order, preserving install sequence.
+    let order: model::ResolvedComponentOrder = full_order
+        .iter()
+        .filter(|id| desired_id_set.contains(id.as_str()))
+        .cloned()
+        .collect();
 
     // Step 7: materialize fs sources (impure: resolves defaults, validates paths,
     // computes fingerprints according to fingerprint_policy).
@@ -73,20 +105,20 @@ pub(crate) fn run_pipeline(
     // For each desired component with a params_schema, validate profile params
     // against the schema, resolve defaults, then replace ${params.*} references
     // in the component's resource templates.
+    // Uses desired-only order so that state-only components are not processed.
     let materialized_specs = validate_and_materialize_params(&profile, &index, &order)?;
 
     // Step 8: compile desired resource graph (pure: uses materialized sources).
+    // Uses desired-only order to avoid adding state-only components to the desired graph.
     let compiler_ms = to_compiler_materialized(&materialized);
     let graph = compiler::compile(&index, &materialized_specs, &strategy, &order, &compiler_ms)?;
-
-    // Step 9: load state (state::load returns empty state if file absent).
-    let state = state::load(&ctx.state_path())?;
 
     Ok(PipelineOutput {
         profile,
         strategy,
         index,
         order,
+        full_order,
         graph,
         state,
     })

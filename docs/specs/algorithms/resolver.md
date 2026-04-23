@@ -20,7 +20,7 @@ Not covered: execution, state mutations, planner decision logic, component metad
 
 **What Rust code defines (source of truth):**
 - `ResolvedComponentOrder` type (`crates/model/src/lib.rs`)
-- Resolver function signature and algorithm (`crates/resolver/src/lib.rs`)
+- `resolve` and `resolve_extended` function signatures and algorithms (`crates/resolver/src/lib.rs`)
 - Error types (`ResolverError` in `crates/resolver/src/lib.rs`)
 
 **Cross-reference:**
@@ -116,3 +116,27 @@ The resolver outputs a `ResolvedComponentOrder`: a topologically sorted list of 
 * Uninstall order: reverse of install order (managed by planner/executor).
 * If a dependency declared in `dep.depends` is not present in the desired set, execution aborts.
 * Resolver output is deterministic for the same canonical input set and Component Index.
+
+## Extended Resolution (`resolve_extended`)
+
+The pipeline also calls `resolve_extended` to produce a full order that includes both desired
+components and state-only components (components recorded in state but not in the desired set,
+i.e. about to be destroyed).
+
+`resolve_extended` accepts:
+- `desired_ids` — desired component IDs (same hard rules as `resolve`)
+- `state_extras` — state-only component IDs not present in the desired set
+
+Soft-handling rules for `state_extras`:
+- Components not found in the Component Index (their `component.yaml` was deleted) are silently skipped.
+- Dependencies of state-extra components that are absent from the combined set are silently omitted (not a `MissingDependency` error).
+
+The returned full order is used by the planner to compute correct reverse destroy ordering when
+both a component and its dependency are removed from the profile simultaneously.
+
+The pipeline derives two orders from `resolve_extended`:
+- `full_order` (desired + state-only) → passed to the planner
+- `order` (desired-only, filtered from `full_order`) → passed to the compiler and executor
+
+`resolve_extended` never errors on state-extra components; all hard errors apply only to desired components,
+with the same rules as `resolve`.
