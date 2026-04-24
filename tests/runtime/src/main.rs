@@ -23,6 +23,10 @@
 //!   import-single          Bundle from imported file is applied correctly
 //!   import-merge-order     Later import overrides earlier at bundle-name level
 //!   import-cycle           Circular import reference is rejected cleanly
+//!   pkg-version-install    Package version recorded in state after install
+//!   pkg-version-upgrade    Package version change triggers Replace; state updated
+//!   for-each-expand        for_each array expands to multiple resources in state
+//!   for-each-shrink        Shrinking for_each array removes dropped resource from state
 //!   all                    Run all scenarios (default)
 //! ```
 //!
@@ -82,12 +86,18 @@ fn dispatch(scenario: &str, ctx: &Context) -> Result<(), String> {
         "import-single" => scenarios::import_single::run(ctx),
         "import-merge-order" => scenarios::import_merge_order::run(ctx),
         "import-cycle" => scenarios::import_cycle::run(ctx),
+        "pkg-version-install" => scenarios::pkg_version_install::run(ctx),
+        "pkg-version-upgrade" => scenarios::pkg_version_upgrade::run(ctx),
+        "for-each-expand" => scenarios::for_each_expand::run(ctx),
+        "for-each-shrink" => scenarios::for_each_shrink::run(ctx),
         other => Err(format!(
             "unknown scenario '{other}'. Valid: \
              minimal, idempotent, uninstall, lifecycle, \
              version-install, version-upgrade, version-mixed, \
              managed-script, params-default, params-validation-err, \
-             import-single, import-merge-order, import-cycle, all"
+             import-single, import-merge-order, import-cycle, \
+             pkg-version-install, pkg-version-upgrade, \
+             for-each-expand, for-each-shrink, all"
         )),
     }
 }
@@ -112,6 +122,10 @@ fn run_all(ctx: &Context) -> Result<(), String> {
         ("import-single", scenarios::import_single::run),
         ("import-merge-order", scenarios::import_merge_order::run),
         ("import-cycle", scenarios::import_cycle::run),
+        ("pkg-version-install", scenarios::pkg_version_install::run),
+        ("pkg-version-upgrade", scenarios::pkg_version_upgrade::run),
+        ("for-each-expand", scenarios::for_each_expand::run),
+        ("for-each-shrink", scenarios::for_each_shrink::run),
     ];
 
     let mut failed: Vec<(&str, String)> = Vec::new();

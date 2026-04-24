@@ -385,3 +385,55 @@ pub fn collect_fs_paths(state: &State) -> Vec<String> {
         })
         .collect()
 }
+
+/// Return the recorded package version for `component_id`, if any.
+///
+/// Returns `Ok(None)` if the package has no version recorded.
+/// Fails if the component is missing or if no package resource is recorded.
+pub fn get_package_version<'a>(
+    state: &'a State,
+    component_id: &str,
+) -> Result<Option<&'a str>, String> {
+    let component = state
+        .components
+        .get(component_id)
+        .ok_or_else(|| format!("component '{}' not found in state", component_id))?;
+
+    component
+        .resources
+        .iter()
+        .find_map(|r| {
+            if let ResourceKind::Package { package, .. } = &r.kind {
+                Some(package.version.as_deref())
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| {
+            format!(
+                "no package resource recorded for component '{}'",
+                component_id
+            )
+        })
+}
+
+/// Assert that `component_id` has exactly `expected` resources recorded.
+pub fn assert_resource_count(
+    state: &State,
+    component_id: &str,
+    expected: usize,
+) -> Result<(), String> {
+    let component = state
+        .components
+        .get(component_id)
+        .ok_or_else(|| format!("component '{}' not found in state", component_id))?;
+
+    let actual = component.resources.len();
+    if actual != expected {
+        return Err(format!(
+            "component '{}': expected {} resource(s) in state, got {}",
+            component_id, expected, actual
+        ));
+    }
+    Ok(())
+}
