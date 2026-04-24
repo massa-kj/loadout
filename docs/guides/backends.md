@@ -319,6 +319,7 @@ Scripts receive resource data via environment variables:
 When `LOADOUT_RESOURCE_KIND=Package`:
 
 - **`LOADOUT_PACKAGE_NAME`** — Package name (e.g., `git`, `neovim`)
+- **`LOADOUT_PACKAGE_VERSION`** — Version string (e.g., `3.12`). **Only set when a version is declared in the profile.** Absent when the resource is unversioned. Backend scripts must check whether this variable is set before using it.
 
 ### Runtime Resources
 

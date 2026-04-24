@@ -168,7 +168,15 @@ Installs a package via the resolved backend.
 - kind: package
   id: package:ripgrep     # stable identifier; must not change
   name: ripgrep           # name as known to the backend (brew, apt, scoop, etc.)
+  version: "1.2.3"        # optional: pin to a specific version
 ```
+
+The `version` field is optional. When omitted, the latest available version is installed and no
+version is recorded in state. When set, the version is recorded in state and a change triggers
+a `replace` (uninstall + reinstall).
+
+Like `runtime` resources, `version` may reference a param: `version: "${params.version}"`.
+This is useful when the profile controls which version is pinned.
 
 #### `runtime`
 
@@ -457,7 +465,7 @@ resources:
 
 * `properties` (map) — Parameter definitions keyed by name.
   Each property has:
-  * `type` — `string`, `enum`, or `object`
+  * `type` — `string`, `enum`, `object`, or `array`
   * `default` (optional) — Default value when the profile omits this param.
 * `required` (list) — Param names that must be provided by the profile.
   A required param must not have a `default`.
@@ -470,6 +478,10 @@ resources:
 | `string` | Plain string value | `version: "22.17.1"` |
 | `enum` | One of a fixed set of values | `channel: stable` with `enum: [stable, beta, nightly]` |
 | `object` | Structured source reference | `{ kind: component_relative, path: files/config }` |
+| `array` | List of string values | `versions: ["18", "22"]` — used with `for_each` |
+
+`array` params may not be referenced directly in `${params.*}` placeholders — they are consumed
+exclusively via `for_each` on a resource (see [for_each](#for_each) below).
 
 ### Profile usage
 
@@ -501,6 +513,44 @@ resources:
 Partial substitution is supported: `"prefix-${params.version}-suffix"`.
 Multiple references in one field are supported: `"${params.a}-${params.b}"`.
 
+### for_each
+
+`for_each` lets a single resource declaration expand into multiple resources — one per element
+of an `array` param. This is the only way to consume an `array`-typed param.
+
+**Format:** `for_each: "params.<key>"` where `<key>` refers to an `array` param.
+
+**Required:** the resource `id` must contain `${item}`. The `${item}` placeholder is also
+substituted in all other string fields of the resource.
+
+```yaml
+params_schema:
+  properties:
+    versions:
+      type: array
+      items:
+        type: string
+  required:
+    - versions
+
+resources:
+  - kind: runtime
+    id: "rt:node@${item}"
+    name: node
+    version: "${item}"
+    for_each: "params.versions"
+```
+
+With profile params `versions: ["18", "22"]`, this expands to two resources:
+`rt:node@18` (`version: "18"`) and `rt:node@22` (`version: "22"`).
+
+**State:** each expanded resource is recorded independently. Removing an element from the
+array on the next apply causes a `destroy` for the dropped resource while leaving others
+unchanged.
+
+**Restriction:** each expanded resource `id` must be unique within the component after
+substitution, or the expansion is rejected with a `DuplicateId` error.
+
 ### Pipeline integration
 
 The params pipeline runs between fs source materialization and compilation:
@@ -517,8 +567,9 @@ Components without `params_schema` skip this pipeline entirely.
 
 * `params_schema` is only supported for `declarative` mode components.
 * Platform override files (`component.linux.yaml`, etc.) must not declare `params_schema`.
-* Params must not change resource count, kind, or id (structural invariance).
+* Params must not change resource count, kind, or id (structural invariance) — except via `for_each`.
 * `${params.*}` references in resource `id` fields are forbidden.
+* `array` params may only be consumed via `for_each`; direct `${params.<key>}` interpolation is rejected.
 
 ## Component Naming Guidelines
 

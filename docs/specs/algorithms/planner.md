@@ -88,7 +88,7 @@ Each component is classified into exactly one of:
 | `blocked` | Unknown resource kind (`kind` not in supported set) or invariant violation recorded in state |
 
 Compatibility rules for shared resources:
-* `package`: name and backend must match; version difference → `replace`
+* `package`: `name` and `desired_backend` must match; `version` is compared as `Option<String>` — `None` ↔ `None` is compatible, any other combination (`None` ↔ `Some`, `Some(x)` ↔ `Some(y)`) → `replace`
 * `runtime`: name, version, and backend must match; any difference → `replace`
 * `fs`: uses correspondence table for `entry_type`+`op` compatibility (see below); `path` and `source.resolved` must match; `source_fingerprint` compared when both present; any incompatibility → `replace`
 * `tool`: `verify.identity` contract must match; if `verify.version.constraint` is declared, it must also match; any difference → `replace`

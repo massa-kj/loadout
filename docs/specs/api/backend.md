@@ -79,6 +79,7 @@ brew install "$LOADOUT_PACKAGE_NAME"
 When `LOADOUT_RESOURCE_KIND=Package`:
 
 - **`LOADOUT_PACKAGE_NAME`** — Package name (e.g., `git`, `neovim`)
+- **`LOADOUT_PACKAGE_VERSION`** — Version string (e.g., `3.12`). **Only set when a version is declared in the component.** Absent (not set) when the package is unversioned. Backend scripts must check before using (e.g., `if [ -n "${LOADOUT_PACKAGE_VERSION:-}" ]`).
 
 #### Runtime Resources
 

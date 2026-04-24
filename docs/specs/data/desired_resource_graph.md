@@ -87,9 +87,22 @@ For detailed field definitions and types, see `crates/model/src/desired_resource
 }
 ```
 
+Optional `version` field:
+
+```json
+{
+  "id": "package:python",
+  "kind": "package",
+  "name": "python",
+  "version": "3.12",
+  "desired_backend": "brew"
+}
+```
+
 **Meaning:**
 - `desired_backend` is resolved by ComponentCompiler using strategy (source of truth)
 - Planner uses this value for backend-mismatch detection
+- `version` is optional. When present, the Executor injects `LOADOUT_PACKAGE_VERSION` into the backend script environment. When absent, the variable is not set (backend installs latest).
 
 ### runtime
 
@@ -104,7 +117,7 @@ For detailed field definitions and types, see `crates/model/src/desired_resource
 ```
 
 **Meaning:**
-- `version` is always required (unlike packages)
+- `version` is always required (unlike packages, where `version` is optional)
 - `desired_backend` is resolved by ComponentCompiler
 
 ### fs
@@ -154,7 +167,7 @@ the Planner must classify the owning component as `blocked`.
 
 | Kind | Compatible if |
 |---|---|
-| `package` | `name` and `desired_backend` match |
+| `package` | `name`, `version`, and `desired_backend` all match (`None` ↔ `None` is compatible; any `version` difference → replace) |
 | `runtime` | `name`, `version`, and `desired_backend` all match |
 | `fs` | `path`, `entry_type`, and `op` match per correspondence table; `source.resolved` matches; fingerprint matches (if both present) |
 
