@@ -74,8 +74,17 @@ fn materialize_resource(
             }
         }
         SpecResourceKind::Package { name, version } => SpecResourceKind::Package {
-            name: name.clone(),
-            version: version.clone(),
+            name: resolve_string(component_id, &resource.id, "name", name, params)?,
+            version: match version {
+                Some(v) => Some(resolve_string(
+                    component_id,
+                    &resource.id,
+                    "version",
+                    v,
+                    params,
+                )?),
+                None => None,
+            },
         },
         SpecResourceKind::Fs {
             source,
