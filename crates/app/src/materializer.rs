@@ -330,6 +330,7 @@ mod tests {
                     entry_type: SpecFsEntryType::File,
                     op: FsOp::Link,
                 },
+                for_each: None,
             }],
         );
 
@@ -356,6 +357,7 @@ mod tests {
                     entry_type: SpecFsEntryType::File,
                     op: FsOp::Link,
                 },
+                for_each: None,
             }],
         );
 
@@ -382,6 +384,7 @@ mod tests {
                     entry_type: SpecFsEntryType::File,
                     op: FsOp::Link,
                 },
+                for_each: None,
             }],
         );
 
@@ -404,6 +407,7 @@ mod tests {
                     entry_type: SpecFsEntryType::File,
                     op: FsOp::Link,
                 },
+                for_each: None,
             }],
         );
 
@@ -427,6 +431,7 @@ mod tests {
                     entry_type: SpecFsEntryType::File,
                     op: FsOp::Link,
                 },
+                for_each: None,
             }],
         );
 
@@ -447,6 +452,7 @@ mod tests {
                     name: "git".to_string(),
                     version: None,
                 },
+                for_each: None,
             }],
         );
 

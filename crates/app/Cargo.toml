@@ -11,6 +11,7 @@ component-index = { path = "../component-index" }
 compiler     = { path = "../compiler" }
 params-validator    = { path = "../params-validator" }
 params-materializer = { path = "../params-materializer" }
+for-each-expander   = { path = "../for-each-expander" }
 resolver     = { path = "../resolver" }
 planner      = { path = "../planner" }
 executor     = { path = "../executor" }

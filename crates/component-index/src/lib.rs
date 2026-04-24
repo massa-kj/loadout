@@ -486,6 +486,7 @@ fn convert_resource(raw: RawSpecResource) -> SpecResource {
     SpecResource {
         id: raw.id,
         kind: raw.kind,
+        for_each: raw.for_each,
     }
 }
 
@@ -528,6 +529,8 @@ struct RawSpecResource {
     id: String,
     #[serde(flatten)]
     kind: SpecResourceKind,
+    #[serde(default)]
+    for_each: Option<String>,
 }
 
 #[cfg(test)]

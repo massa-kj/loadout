@@ -110,6 +110,8 @@ fn materialize_resource(
     Ok(SpecResource {
         id: resource.id.clone(),
         kind,
+        // for_each is passed through unchanged; the for-each-expander consumes it.
+        for_each: resource.for_each.clone(),
     })
 }
 
@@ -169,6 +171,16 @@ fn resolve_string(
                     ),
                 });
             }
+            ParamValue::Array(_) => {
+                return Err(MaterializeError::InvalidParamValue {
+                    component_id: component_id.to_string(),
+                    resource_id: resource_id.to_string(),
+                    field: field.to_string(),
+                    reason: format!(
+                        "param '{key}' is an array; use for_each to expand over an array"
+                    ),
+                });
+            }
         };
 
         let pattern = format!("{PARAM_PREFIX}{key}{PARAM_SUFFIX}");
@@ -204,6 +216,7 @@ mod tests {
                 name: "node".into(),
                 version: "${params.version}".into(),
             },
+            for_each: None,
         }];
         let params = resolved(&[("version", ParamValue::String("22.17.1".into()))]);
         let mat = materialize("core/node", &resources, &params).unwrap();
@@ -226,6 +239,7 @@ mod tests {
                 entry_type: SpecFsEntryType::File,
                 op: FsOp::Link,
             },
+            for_each: None,
         }];
         let params = resolved(&[("path", ParamValue::String("~/.gitconfig".into()))]);
         let mat = materialize("core/git", &resources, &params).unwrap();
@@ -245,6 +259,7 @@ mod tests {
                 name: "jq".into(),
                 version: None,
             },
+            for_each: None,
         }];
         let params = ResolvedParams::default();
         let mat = materialize("core/jq", &resources, &params).unwrap();
@@ -262,6 +277,7 @@ mod tests {
                 name: "python".into(),
                 version: "3.12".into(),
             },
+            for_each: None,
         }];
         let params = ResolvedParams::default();
         let mat = materialize("core/python", &resources, &params).unwrap();
@@ -279,6 +295,7 @@ mod tests {
                 name: "node".into(),
                 version: "v${params.version}-lts".into(),
             },
+            for_each: None,
         }];
         let params = resolved(&[("version", ParamValue::String("20".into()))]);
         let mat = materialize("core/node", &resources, &params).unwrap();
@@ -296,6 +313,7 @@ mod tests {
                 name: "node".into(),
                 version: "${params.major}.${params.minor}".into(),
             },
+            for_each: None,
         }];
         let params = resolved(&[
             ("major", ParamValue::String("22".into())),
@@ -318,6 +336,7 @@ mod tests {
                 entry_type: SpecFsEntryType::File,
                 op: FsOp::Link,
             },
+            for_each: None,
         }];
         let params = resolved(&[(
             "source_path",
@@ -342,6 +361,7 @@ mod tests {
                 name: "node".into(),
                 version: "${params.version}".into(),
             },
+            for_each: None,
         }];
         let params = ResolvedParams::default();
         let err = materialize("core/node", &resources, &params).unwrap_err();
@@ -358,6 +378,7 @@ mod tests {
                 name: "node".into(),
                 version: "${params.src}".into(),
             },
+            for_each: None,
         }];
         let params = resolved(&[(
             "src",
@@ -378,6 +399,7 @@ mod tests {
                 name: "node".into(),
                 version: "${params.version".into(),
             },
+            for_each: None,
         }];
         let params = resolved(&[("version", ParamValue::String("20".into()))]);
         let err = materialize("core/node", &resources, &params).unwrap_err();
@@ -393,6 +415,7 @@ mod tests {
                     name: "git".into(),
                     version: None,
                 },
+                for_each: None,
             },
             SpecResource {
                 id: "rt:python".into(),
@@ -400,6 +423,7 @@ mod tests {
                     name: "python".into(),
                     version: "3.12".into(),
                 },
+                for_each: None,
             },
         ];
         let params = ResolvedParams::default();

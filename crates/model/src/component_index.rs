@@ -154,11 +154,24 @@ pub struct ComponentSpec {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpecResource {
     /// Stable resource identifier unique within this component.
+    ///
+    /// When `for_each` is set, the id must contain `${item}` so the expander can
+    /// produce a unique id per array element.
     pub id: String,
 
     /// Resource kind and kind-specific data (no backend yet).
     #[serde(flatten)]
     pub kind: SpecResourceKind,
+
+    /// Optional: expand this resource over a params array, one resource per element.
+    ///
+    /// Value is a dot-separated params key path (e.g. `"params.versions"`).
+    /// The expander replaces `${item}` in `id` and string fields with each element.
+    /// Must be `None` for all resources entering the compiler (expander consumes it).
+    ///
+    /// See `docs/specs/data/component_index.md` for full for_each contract.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub for_each: Option<String>,
 }
 
 /// Kind-specific data for a spec resource (pre-compiler).

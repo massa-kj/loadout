@@ -41,6 +41,10 @@ pub enum AppError {
     #[error("params materialize error: {0}")]
     ParamsMaterialize(#[from] params_materializer::MaterializeError),
 
+    /// for_each expansion failed.
+    #[error("for_each expansion error: {0}")]
+    ForEachExpand(#[from] for_each_expander::ExpanderError),
+
     /// Planner could not produce a plan.
     #[error("planner error: {0}")]
     Planner(#[from] planner::PlannerError),

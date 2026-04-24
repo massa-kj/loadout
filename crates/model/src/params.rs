@@ -72,6 +72,12 @@ pub enum ParamType {
         #[serde(rename = "enum")]
         values: Vec<String>,
     },
+
+    /// An ordered list of values all sharing the same item type.
+    Array {
+        /// Schema for each element in the array.
+        items: Box<ParamType>,
+    },
 }
 
 /// Nested object schema for source params.
@@ -119,6 +125,9 @@ pub enum ParamValue {
 
     /// A structured source reference (covers `object` param type for fs sources).
     Source(SourceParamValue),
+
+    /// An ordered list of values (covers `array` param type).
+    Array(Vec<ParamValue>),
 }
 
 /// A structured source reference provided as a param value.
@@ -239,6 +248,7 @@ mod tests {
                     name: "node".to_string(),
                     version: "22.17.1".to_string(),
                 },
+                for_each: None,
             }],
         };
         assert_eq!(spec.resources.len(), 1);

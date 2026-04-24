@@ -18,6 +18,7 @@ members = [
     "crates/app",
     "crates/params-validator",
     "crates/params-materializer",
+    "crates/for-each-expander",
     # Test infrastructure (not part of the loadout product binary)
     "tests/runtime",
 ]

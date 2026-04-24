@@ -409,6 +409,7 @@ mod tests {
                 name: name.to_string(),
                 version: None,
             },
+            for_each: None,
         }
     }
 
@@ -419,6 +420,7 @@ mod tests {
                 name: name.to_string(),
                 version: version.to_string(),
             },
+            for_each: None,
         }
     }
 
@@ -436,6 +438,7 @@ mod tests {
                 entry_type,
                 op,
             },
+            for_each: None,
         }
     }
 

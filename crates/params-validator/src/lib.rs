@@ -166,6 +166,24 @@ fn validate_type(
             expected: "object (source)".to_string(),
             found: describe_value(value),
         }),
+        (ParamType::Array { items }, ParamValue::Array(elements)) => {
+            // Validate each element against the item schema.
+            for (i, elem) in elements.iter().enumerate() {
+                let item_prop = ParamProperty {
+                    param_type: *items.clone(),
+                    default: None,
+                };
+                let item_key = format!("{key}[{i}]");
+                validate_type(component_id, &item_key, &item_prop, elem)?;
+            }
+            Ok(())
+        }
+        (ParamType::Array { .. }, _) => Err(ParamsValidationError::TypeMismatch {
+            component_id: component_id.to_string(),
+            key: key.to_string(),
+            expected: "array".to_string(),
+            found: describe_value(value),
+        }),
     }
 }
 
@@ -174,6 +192,7 @@ fn describe_value(value: &ParamValue) -> String {
     match value {
         ParamValue::String(_) => "string".to_string(),
         ParamValue::Source(_) => "object (source)".to_string(),
+        ParamValue::Array(_) => "array".to_string(),
     }
 }
 

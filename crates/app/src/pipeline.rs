@@ -190,6 +190,11 @@ fn validate_and_materialize_params(
         };
 
         let materialized = params_materializer::materialize(id_str, &spec.resources, &resolved)?;
+        let expanded = for_each_expander::expand(id_str, &materialized, &resolved)?;
+        // Convert ExpandedComponentSpec → MaterializedComponentSpec (identical structure).
+        let materialized = model::params::MaterializedComponentSpec {
+            resources: expanded.resources,
+        };
         result.insert(id_str.to_string(), materialized);
     }
 
@@ -315,6 +320,7 @@ mod tests {
                         name: "test".to_string(),
                         version: version_template.to_string(),
                     },
+                    for_each: None,
                 }],
             }),
             scripts: None,
