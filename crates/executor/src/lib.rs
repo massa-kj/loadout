@@ -781,6 +781,7 @@ fn apply_one_resource(
     match &dr.kind {
         DesiredResourceKind::Package {
             name,
+            version,
             desired_backend,
         } => {
             let backend_key = desired_backend.as_str();
@@ -851,7 +852,7 @@ fn apply_one_resource(
                     backend: desired_backend.clone(),
                     package: PackageDetails {
                         name: name.clone(),
-                        version: None,
+                        version: version.clone(),
                     },
                 },
             })
@@ -1147,6 +1148,7 @@ fn remove_one_state_resource(ctx: &ExecutionContext<'_>, res: &Resource) -> Resu
                 id: res.id.clone(),
                 kind: DesiredResourceKind::Package {
                     name: package.name.clone(),
+                    version: package.version.clone(),
                     desired_backend: backend.clone(),
                 },
             };
@@ -1478,6 +1480,7 @@ mod tests {
             id: id.to_string(),
             kind: DesiredResourceKind::Package {
                 name: name.to_string(),
+                version: None,
                 desired_backend: backend_id(backend),
             },
         }

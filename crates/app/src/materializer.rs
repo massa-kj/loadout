@@ -445,6 +445,7 @@ mod tests {
                 id: "package:git".to_string(),
                 kind: SpecResourceKind::Package {
                     name: "git".to_string(),
+                    version: None,
                 },
             }],
         );

@@ -488,11 +488,15 @@ fn build_command_with_env(
     match &resource.kind {
         DesiredResourceKind::Package {
             name,
+            version,
             desired_backend,
         } => {
             cmd.env("LOADOUT_RESOURCE_KIND", "Package");
             cmd.env("LOADOUT_PACKAGE_NAME", name);
             cmd.env("LOADOUT_BACKEND_ID", desired_backend.as_str());
+            if let Some(v) = version {
+                cmd.env("LOADOUT_PACKAGE_VERSION", v);
+            }
         }
         DesiredResourceKind::Runtime {
             name,
@@ -781,6 +785,7 @@ mod tests {
             id: format!("package:{name}"),
             kind: DesiredResourceKind::Package {
                 name: name.to_string(),
+                version: None,
                 desired_backend: CanonicalBackendId::new(backend).unwrap(),
             },
         }

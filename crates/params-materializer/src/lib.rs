@@ -73,7 +73,10 @@ fn materialize_resource(
                 version: resolved_version,
             }
         }
-        SpecResourceKind::Package { name } => SpecResourceKind::Package { name: name.clone() },
+        SpecResourceKind::Package { name, version } => SpecResourceKind::Package {
+            name: name.clone(),
+            version: version.clone(),
+        },
         SpecResourceKind::Fs {
             source,
             path,
@@ -238,12 +241,15 @@ mod tests {
     fn literal_values_pass_through() {
         let resources = vec![SpecResource {
             id: "pkg:jq".into(),
-            kind: SpecResourceKind::Package { name: "jq".into() },
+            kind: SpecResourceKind::Package {
+                name: "jq".into(),
+                version: None,
+            },
         }];
         let params = ResolvedParams::default();
         let mat = materialize("core/jq", &resources, &params).unwrap();
         match &mat.resources[0].kind {
-            SpecResourceKind::Package { name } => assert_eq!(name, "jq"),
+            SpecResourceKind::Package { name, .. } => assert_eq!(name, "jq"),
             _ => panic!("expected Package"),
         }
     }
@@ -383,7 +389,10 @@ mod tests {
         let resources = vec![
             SpecResource {
                 id: "pkg:git".into(),
-                kind: SpecResourceKind::Package { name: "git".into() },
+                kind: SpecResourceKind::Package {
+                    name: "git".into(),
+                    version: None,
+                },
             },
             SpecResource {
                 id: "rt:python".into(),

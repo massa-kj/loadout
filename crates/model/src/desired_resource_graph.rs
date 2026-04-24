@@ -67,6 +67,9 @@ pub enum DesiredResourceKind {
     Package {
         /// Package name as known to the backend (e.g., `"git"`, `"neovim"`).
         name: String,
+        /// Version to install (e.g. `"3.12"`). `None` means unversioned (latest).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        version: Option<String>,
         /// Canonical backend ID resolved by ComponentCompiler (e.g., `"core/brew"`).
         ///
         /// The Planner uses this for backend-mismatch detection. The Executor dispatches to this backend.
@@ -201,6 +204,7 @@ mod tests {
             DesiredResourceKind::Package {
                 name,
                 desired_backend,
+                ..
             } => {
                 assert_eq!(name, "git");
                 assert_eq!(desired_backend.as_str(), "core/brew");

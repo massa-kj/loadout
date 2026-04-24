@@ -110,8 +110,12 @@ fn print_component_text(detail: &app::ComponentDetail) {
         for res in &spec.resources {
             println!("  - id: {}", res.id);
             match &res.kind {
-                model::component_index::SpecResourceKind::Package { name } => {
-                    println!("    kind: package  name: {name}");
+                model::component_index::SpecResourceKind::Package { name, version } => {
+                    if let Some(v) = version {
+                        println!("    kind: package  name: {name}  version: {v}");
+                    } else {
+                        println!("    kind: package  name: {name}");
+                    }
                 }
                 model::component_index::SpecResourceKind::Runtime { name, version } => {
                     println!("    kind: runtime  name: {name}  version: {version}");

@@ -183,7 +183,7 @@ fn compile_resource(
     materialized_sources: &MaterializedSources,
 ) -> Result<DesiredResourceKind, CompilerError> {
     match &resource.kind {
-        SpecResourceKind::Package { name } => {
+        SpecResourceKind::Package { name, version } => {
             let backend = resolve_backend_from_rules(
                 strategy,
                 &MatchKind::Package,
@@ -193,6 +193,7 @@ fn compile_resource(
             )?;
             Ok(DesiredResourceKind::Package {
                 name: name.clone(),
+                version: version.clone(),
                 desired_backend: backend,
             })
         }
@@ -406,6 +407,7 @@ mod tests {
             id: id.to_string(),
             kind: SpecResourceKind::Package {
                 name: name.to_string(),
+                version: None,
             },
         }
     }
@@ -522,6 +524,7 @@ mod tests {
             DesiredResourceKind::Package {
                 name,
                 desired_backend,
+                ..
             } => {
                 assert_eq!(name, "git");
                 assert_eq!(desired_backend.as_str(), "core/brew");

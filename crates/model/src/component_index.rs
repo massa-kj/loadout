@@ -169,6 +169,9 @@ pub enum SpecResourceKind {
     Package {
         /// Package name as known to the backend.
         name: String,
+        /// Version to install (e.g. `"3.12"`). `None` means unversioned (latest).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        version: Option<String>,
     },
     /// Runtime to be installed.
     Runtime {
@@ -286,7 +289,7 @@ mod tests {
         let spec = meta.spec.as_ref().unwrap();
         assert_eq!(spec.resources.len(), 2);
         match &spec.resources[0].kind {
-            SpecResourceKind::Package { name } => assert_eq!(name, "neovim"),
+            SpecResourceKind::Package { name, .. } => assert_eq!(name, "neovim"),
             _ => panic!("expected package"),
         }
     }

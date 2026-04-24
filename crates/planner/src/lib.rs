@@ -367,6 +367,7 @@ fn check_compatibility(
         (
             D::Package {
                 name: dn,
+                version: dv,
                 desired_backend: db,
             },
             S::Package {
@@ -381,6 +382,12 @@ fn check_compatibility(
                 return Compatibility::Incompatible {
                     from_version: None,
                     to_version: None,
+                };
+            }
+            if dv != &sp.version {
+                return Compatibility::Incompatible {
+                    from_version: sp.version.clone(),
+                    to_version: dv.clone(),
                 };
             }
             Compatibility::Compatible
@@ -590,6 +597,7 @@ mod tests {
                 id: format!("package:{pkg}"),
                 kind: DesiredResourceKind::Package {
                     name: pkg.to_string(),
+                    version: None,
                     desired_backend: backend(be),
                 },
             });
