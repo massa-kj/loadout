@@ -433,6 +433,15 @@ fn convert_one_param_value(
             // Numeric values are coerced to string (e.g., version: 20 → "20").
             Ok(ParamValue::String(n.to_string()))
         }
+        serde_yaml::Value::Sequence(seq) => {
+            // Array values: each element must itself be a valid ParamValue.
+            let mut elements = Vec::with_capacity(seq.len());
+            for (i, elem) in seq.into_iter().enumerate() {
+                let elem_key = format!("{key}[{i}]");
+                elements.push(convert_one_param_value(&elem_key, elem)?);
+            }
+            Ok(ParamValue::Array(elements))
+        }
         serde_yaml::Value::Mapping(map) => {
             // Expect structured source: { kind: ..., path: ... }
             let kind_val = map

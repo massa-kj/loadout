@@ -73,6 +73,10 @@ Scenario commands (use the test image)
   import_single            Run import single scenario
   import_merge_order       Run import merge order scenario
   import_cycle             Run import cycle detection scenario
+  pkg_version_install      Run package version install scenario
+  pkg_version_upgrade      Run package version upgrade scenario
+  for_each_expand          Run for_each expansion scenario
+  for_each_shrink          Run for_each shrinking scenario
   all                      Run all scenarios
 
 Maintenance
@@ -212,6 +216,10 @@ case "$COMMAND" in
     import_single)   build_test_image && run_scenario "import-single" ;;
     import_merge_order) build_test_image && run_scenario "import-merge-order" ;;
     import_cycle)     build_test_image && run_scenario "import-cycle" ;;
+    pkg_version_install) build_test_image && run_scenario "pkg-version-install" ;;
+    pkg_version_upgrade) build_test_image && run_scenario "pkg-version-upgrade" ;;
+    for_each_expand)   build_test_image && run_scenario "for-each-expand" ;;
+    for_each_shrink)   build_test_image && run_scenario "for-each-shrink" ;;
 
     all)
         build_test_image

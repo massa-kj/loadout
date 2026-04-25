@@ -47,14 +47,17 @@ pub fn run(ctx: &Context) -> Result<(), String> {
     loadout_apply_yes(ctx, &config_partial)?;
 
     let state = load_state(&ctx.state_file)?;
-    assert_component_present(&state, "core/bash")?;
-    assert_component_present(&state, "core/git")?;
+    assert_component_present(&state, "local/dummy-pkg")?;
+    assert_component_present(&state, "local/dummy-fs-copy")?;
+    assert_component_present(&state, "local/dummy-fs-link")?;
 
     let unexpected: Vec<&str> = state
         .components
         .keys()
         .map(String::as_str)
-        .filter(|k| *k != "core/bash" && *k != "core/git")
+        .filter(|k| {
+            *k != "local/dummy-pkg" && *k != "local/dummy-fs-copy" && *k != "local/dummy-fs-link"
+        })
         .collect();
     if !unexpected.is_empty() {
         return Err(format!(
@@ -76,8 +79,8 @@ pub fn run(ctx: &Context) -> Result<(), String> {
     assert_path_exists(sentinel)?;
     assert_no_packages_in_state(&state)?;
 
-    // Confirm ripgrep was removed (it is a full-config-only component)
-    assert_component_absent(&state, "core/ripgrep")?;
+    // Confirm dummy-rt was removed (it is a full-config-only component)
+    assert_component_absent(&state, "local/dummy-rt")?;
 
     println!("==> Full uninstall PASSED");
 

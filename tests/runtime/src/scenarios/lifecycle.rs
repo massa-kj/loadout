@@ -26,7 +26,8 @@ pub fn run(ctx: &Context) -> Result<(), String> {
     let state = load_state(&ctx.state_file)?;
     assert_state_valid(&state)?;
     assert_component_present(&state, "local/dummy-pkg")?;
-    assert_component_present(&state, "local/dummy-fs")?;
+    assert_component_present(&state, "local/dummy-fs-copy")?;
+    assert_component_present(&state, "local/dummy-fs-link")?;
 
     // ── Phase 2: expand to full profile ──────────────────────────────────────
     println!("==> Phase 2: expand to full profile");
@@ -64,14 +65,17 @@ pub fn run(ctx: &Context) -> Result<(), String> {
     assert_state_valid(&state)?;
     // base components must be present
     assert_component_present(&state, "local/dummy-pkg")?;
-    assert_component_present(&state, "local/dummy-fs")?;
+    assert_component_present(&state, "local/dummy-fs-copy")?;
+    assert_component_present(&state, "local/dummy-fs-link")?;
 
     // full-only component must have been removed
     let unexpected: Vec<&str> = state
         .components
         .keys()
         .map(String::as_str)
-        .filter(|k| *k != "local/dummy-pkg" && *k != "local/dummy-fs")
+        .filter(|k| {
+            *k != "local/dummy-pkg" && *k != "local/dummy-fs-copy" && *k != "local/dummy-fs-link"
+        })
         .collect();
     if !unexpected.is_empty() {
         return Err(format!(
