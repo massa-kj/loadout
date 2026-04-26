@@ -63,20 +63,30 @@ pub enum MaterializeError {
 /// 2. Classify source kind and resolve to absolute path
 /// 3. Validate component-relative paths
 /// 4. Compute content fingerprint according to `fingerprint_policy`
+///
+/// If `materialized_specs` contains a param-resolved spec for a component,
+/// that spec is used instead of `index.spec` (ensures `${params.*}` are expanded).
 pub(crate) fn materialize_fs_sources(
     index: &ComponentIndex,
+    materialized_specs: &HashMap<String, model::params::MaterializedComponentSpec>,
     fingerprint_policy: FingerprintPolicy,
 ) -> Result<MaterializedSources, MaterializeError> {
     let mut result = MaterializedSources::new();
 
     for (component_id, meta) in &index.components {
-        let Some(spec) = &meta.spec else {
-            continue;
+        // Prefer param-materialized spec if available; fall back to index spec.
+        let resources = if let Some(materialized) = materialized_specs.get(component_id.as_str()) {
+            &materialized.resources
+        } else {
+            let Some(spec) = &meta.spec else {
+                continue;
+            };
+            &spec.resources
         };
 
         let comp_dir = Path::new(&meta.source_dir);
 
-        for resource in &spec.resources {
+        for resource in resources {
             let (source_str, path, entry_type, op) = match &resource.kind {
                 SpecResourceKind::Fs {
                     source,
@@ -334,7 +344,8 @@ mod tests {
             }],
         );
 
-        let result = materialize_fs_sources(&index, FingerprintPolicy::default()).unwrap();
+        let result =
+            materialize_fs_sources(&index, &HashMap::new(), FingerprintPolicy::default()).unwrap();
         let key = ("core/git".to_string(), "fs:gitconfig".to_string());
         let mat = result.get(&key).unwrap();
         assert_eq!(mat.source.kind, FsSourceKind::ComponentRelative);
@@ -361,7 +372,8 @@ mod tests {
             }],
         );
 
-        let result = materialize_fs_sources(&index, FingerprintPolicy::default()).unwrap();
+        let result =
+            materialize_fs_sources(&index, &HashMap::new(), FingerprintPolicy::default()).unwrap();
         let key = ("core/git".to_string(), "fs:gitconfig".to_string());
         let mat = result.get(&key).unwrap();
         assert_eq!(mat.source.kind, FsSourceKind::ComponentRelative);
@@ -388,7 +400,8 @@ mod tests {
             }],
         );
 
-        let result = materialize_fs_sources(&index, FingerprintPolicy::default()).unwrap();
+        let result =
+            materialize_fs_sources(&index, &HashMap::new(), FingerprintPolicy::default()).unwrap();
         let key = ("core/git".to_string(), "fs:gitconfig".to_string());
         let mat = result.get(&key).unwrap();
         assert_eq!(mat.source.kind, FsSourceKind::HomeRelative);
@@ -411,7 +424,8 @@ mod tests {
             }],
         );
 
-        let result = materialize_fs_sources(&index, FingerprintPolicy::default()).unwrap();
+        let result =
+            materialize_fs_sources(&index, &HashMap::new(), FingerprintPolicy::default()).unwrap();
         let key = ("core/git".to_string(), "fs:gitconfig".to_string());
         let mat = result.get(&key).unwrap();
         assert_eq!(mat.source.kind, FsSourceKind::Absolute);
@@ -435,7 +449,7 @@ mod tests {
             }],
         );
 
-        let result = materialize_fs_sources(&index, FingerprintPolicy::default());
+        let result = materialize_fs_sources(&index, &HashMap::new(), FingerprintPolicy::default());
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("escapes component directory"), "{}", err);
@@ -456,7 +470,8 @@ mod tests {
             }],
         );
 
-        let result = materialize_fs_sources(&index, FingerprintPolicy::default()).unwrap();
+        let result =
+            materialize_fs_sources(&index, &HashMap::new(), FingerprintPolicy::default()).unwrap();
         assert!(result.is_empty());
     }
 
@@ -488,7 +503,8 @@ mod tests {
             components,
         };
 
-        let result = materialize_fs_sources(&index, FingerprintPolicy::default()).unwrap();
+        let result =
+            materialize_fs_sources(&index, &HashMap::new(), FingerprintPolicy::default()).unwrap();
         assert!(result.is_empty());
     }
 

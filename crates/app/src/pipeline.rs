@@ -92,21 +92,23 @@ pub(crate) fn run_pipeline(
         .cloned()
         .collect();
 
-    // Step 7: materialize fs sources (impure: resolves defaults, validates paths,
-    // computes fingerprints according to fingerprint_policy).
-    let fingerprint_policy = strategy
-        .fs
-        .as_ref()
-        .and_then(|fs| fs.fingerprint_policy)
-        .unwrap_or_default();
-    let materialized = materializer::materialize_fs_sources(&index, fingerprint_policy)?;
-
-    // Step 7.5: validate params and materialize component specs.
+    // Step 7: validate params and materialize component specs.
     // For each desired component with a params_schema, validate profile params
     // against the schema, resolve defaults, then replace ${params.*} references
     // in the component's resource templates.
     // Uses desired-only order so that state-only components are not processed.
     let materialized_specs = validate_and_materialize_params(&profile, &index, &order)?;
+
+    // Step 7.5: materialize fs sources (impure: resolves defaults, validates paths,
+    // computes fingerprints according to fingerprint_policy).
+    // Uses materialized_specs (params-resolved) when available; falls back to index spec.
+    let fingerprint_policy = strategy
+        .fs
+        .as_ref()
+        .and_then(|fs| fs.fingerprint_policy)
+        .unwrap_or_default();
+    let materialized =
+        materializer::materialize_fs_sources(&index, &materialized_specs, fingerprint_policy)?;
 
     // Step 8: compile desired resource graph (pure: uses materialized sources).
     // Uses desired-only order to avoid adding state-only components to the desired graph.
