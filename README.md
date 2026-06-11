@@ -3,9 +3,8 @@
 A declarative and deterministic environment manager system for Linux, WSL, and Windows.
 Designed to safely reproduce development environments.
 
-> ⚠️ This project is under active development.
-> 
-> The architecture is still evolving and breaking changes may occur until the first stable release.
+> Personal / Experimental environment manager.
+> API and catalog may break until v1.0.0
 
 ## Overview
 
