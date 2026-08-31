@@ -19,6 +19,34 @@ Key goals:
 * **Plan / Apply execution model** — changes are always previewed as a plan before execution
 * **Cross-platform** — Linux, WSL, and Windows share the same model
 
+## Installation
+
+### Linux / macOS
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/massa-kj/loadout/main/install.sh | bash
+```
+
+Options:
+
+```bash
+bash install.sh [--version v0.1.0] [--prefix ~/.local]
+```
+
+### Windows (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/massa-kj/loadout/main/install.ps1 | iex
+```
+
+Options:
+
+```powershell
+.\install.ps1 [-Version v0.1.0] [-Prefix $env:USERPROFILE\.local]
+```
+
+The binary is installed to `<prefix>/bin/loadout` (Linux/macOS) or `<Prefix>\bin\loadout.exe` (Windows).
+
 ## Quick Start
 
 Declare your environment in a single config file:
